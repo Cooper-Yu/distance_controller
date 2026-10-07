@@ -20,6 +20,12 @@ public:
         received_odom_{false},
         last_log_time_{std::chrono::steady_clock::now()}
     {
+        // Default to simulation time unless launch, YAML, or CLI explicitly overrides it.
+        const auto &overrides = get_node_parameters_interface()->get_parameter_overrides();
+        if (overrides.find("use_sim_time") == overrides.end()) {
+            set_parameter(rclcpp::Parameter("use_sim_time", true));
+        }
+
         // Bind incoming odometry messages to on_odom.
         odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
             "/odometry/filtered",
