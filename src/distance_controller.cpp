@@ -124,6 +124,9 @@ private:
             // Drop accumulated settling time after a large jump; retry on a later tick.
             if (ros_dt > 0.2)
             {
+                if (segment_completed_) {
+                    dwell_start_time_ = current_time;
+                }
                 settling_ = false;
                 reset_pid();
 
@@ -158,6 +161,25 @@ private:
         if (segment_completed_)
         {
             publish_stop();
+            const double dwell_elapsed =
+                (current_time - dwell_start_time_).seconds();
+
+            // Keep sending zero velocity during the dwell period.
+            if (dwell_elapsed < dwell_duration_) {
+                return;
+            }
+            ++current_segment_index_;
+            if (current_segment_index_ >= segments_.size()) {
+                RCLCPP_INFO(get_logger(), "Route completed.");
+                rclcpp::shutdown();
+                return;
+            }
+
+            // Prepare the next segment without changing the route reference.
+            reset_pid();
+            settling_ = false;
+            segment_completed_ = false;
+            target_initialized_ = false;
             return;
         }
 
@@ -333,21 +355,29 @@ private:
             return;
         }
 
-        start_x_ = last_odom_.pose.pose.position.x;
-        start_y_ = last_odom_.pose.pose.position.y;
-        start_yaw_ = quaternion_to_yaw(last_odom_.pose.pose.orientation);
-        double dx = segments_[current_segment_index_].dx;
-        double dy = segments_[current_segment_index_].dy;
+        if (!route_initialized_) {
+            route_x_ = last_odom_.pose.pose.position.x;
+            route_y_ = last_odom_.pose.pose.position.y;
+            route_yaw_ = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+            route_initialized_ = true;
+        }
 
+        double total_dx = 0.0;
+        double total_dy = 0.0;
+        for (std::size_t i = 0; i <= current_segment_index_; ++i) {
+            total_dx += segments_[i].dx;
+            total_dy += segments_[i].dy;
+
+        }
         target_x_ =
-            start_x_
-            + std::cos(start_yaw_) * dx
-            - std::sin(start_yaw_) * dy;
+            route_x_
+            + std::cos(route_yaw_) * total_dx
+            - std::sin(route_yaw_) * total_dy;
 
         target_y_ =
-            start_y_
-            + std::sin(start_yaw_) * dx
-            + std::cos(start_yaw_) * dy;
+            route_y_
+            + std::sin(route_yaw_) * total_dx
+            + std::cos(route_yaw_) * total_dy;
 
         target_initialized_ = true;
     }
@@ -477,6 +507,7 @@ private:
             {
                 // The caller keeps publishing zero after completion.
                 segment_completed_ = true;
+                dwell_start_time_ = current_time;
                 RCLCPP_INFO(
                     get_logger(),
                     "Entering DONE state"
@@ -551,6 +582,16 @@ private:
     // ===== ROS-time observation, independent of whether PID runs this tick =====
     bool ros_time_initialized_{false};
     rclcpp::Time last_ros_time_;
+
+    // Fixed reference for the entire route.
+    bool route_initialized_{false};
+    double route_x_{0.0};
+    double route_y_{0.0};
+    double route_yaw_{0.0};
+
+    // Dwell timing after a segment has settled.
+    rclcpp::Time dwell_start_time_;
+    double dwell_duration_{3.0};
 };
 
 // ===== Process entry point =====
