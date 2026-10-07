@@ -11,7 +11,7 @@
 #include <cmath>
 #include <algorithm>
 
-// Control the first planar segment; stop while waiting, settling, completed, or faulted.
+// Control the ten-segment planar route; stop while waiting, settling, completed, or faulted.
 class DistanceController : public rclcpp::Node {
 public:
     DistanceController() :
@@ -53,7 +53,7 @@ private:
         received_odom_ = true;
     }
 
-    // ===== Periodic single-segment control pipeline =====
+    // ===== Periodic route control pipeline =====
     void on_timer() {
 
         // --- 1. Keep a latched fault stopped until the node is restarted ---
@@ -254,6 +254,7 @@ private:
         double vy_odom_raw = vy_odom;
 
         limit_velocity(vx_odom, vy_odom);
+        limit_acceleration(vx_odom, vy_odom, pid_dt);
 
         // --- Convert the limited odom velocity into the current body frame ---
         double vx_robot = 0.0;
@@ -313,6 +314,9 @@ private:
     // Publish all six components as zero; logging zero velocity alone does not send a stop command.
     // ===== Stop-command output =====
     void publish_stop() {
+        // Stops bypass the normal ramp and clear its command history.
+        previous_vx_odom_ = 0.0;
+        previous_vy_odom_ = 0.0;
         geometry_msgs::msg::Twist cmd;
         cmd.linear.x = 0.0;
         cmd.linear.y = 0.0;
@@ -379,6 +383,8 @@ private:
             + std::sin(route_yaw_) * total_dx
             + std::cos(route_yaw_) * total_dy;
 
+        RCLCPP_INFO(get_logger(), "Segment %zu/%zu target=(%.6f, %.6f)",
+                    current_segment_index_ + 1, segments_.size(), target_x_, target_y_);
         target_initialized_ = true;
     }
     // ===== PID reset: invalidate history before reinitialization =====
@@ -431,6 +437,21 @@ private:
         }
 
     }
+    // ===== Vector acceleration limit in the fixed odom frame =====
+    void limit_acceleration(double &vx, double &vy, double dt) {
+        const double dx = vx - previous_vx_odom_;
+        const double dy = vy - previous_vy_odom_;
+        const double change = std::hypot(dx, dy);
+        const double allowed = max_acceleration_ * dt;
+        if (change > allowed) {
+            const double scale = allowed / change;
+            vx = previous_vx_odom_ + dx * scale;
+            vy = previous_vy_odom_ + dy * scale;
+        }
+        previous_vx_odom_ = vx;
+        previous_vy_odom_ = vy;
+    }
+
     // ===== Velocity conversion: odom to current body frame =====
     void odom_to_robot_velocity(
         double vx_odom,
@@ -510,7 +531,8 @@ private:
                 dwell_start_time_ = current_time;
                 RCLCPP_INFO(
                     get_logger(),
-                    "Entering DONE state"
+                    "Entering DONE state | segment=%zu error=%.6f speed=%.6f wz=%.6f sim=%.3f",
+                    current_segment_index_, position_error, linear_speed, angular_speed, current_time.seconds()
                 );
             }
         }
@@ -553,7 +575,7 @@ private:
     bool target_initialized_{false};
 
     // ===== PID gains and history: current tuning uses only the P contribution =====
-    double kp_{0.5};
+    double kp_{1.5};
     double ki_{0.0};
     double kd_{0.0};
 
@@ -567,7 +589,10 @@ private:
 
     double integral_limit_ = 0.5;
 
-    double max_speed_ = 0.15;
+    double max_speed_ = 0.40;
+    double max_acceleration_{0.60};
+    double previous_vx_odom_{0.0};
+    double previous_vy_odom_{0.0};
 
     // initialize_pid assigns node-clock time before this value is subtracted.
     rclcpp::Time last_pid_time_;
@@ -591,7 +616,7 @@ private:
 
     // Dwell timing after a segment has settled.
     rclcpp::Time dwell_start_time_;
-    double dwell_duration_{3.0};
+    double dwell_duration_{1.0};
 };
 
 // ===== Process entry point =====
