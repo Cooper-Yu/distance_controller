@@ -6,8 +6,12 @@
 
 #include <functional>
 #include <chrono>
+#include <cstddef>
+#include <array>
+#include <cmath>
+#include <algorithm>
 
-// Monitor odometry and publish zero velocity; distance PID will be added later.
+// Compute and log PID candidates; actual velocity commands remain zero.
 class DistanceController : public rclcpp::Node {
 public:
     DistanceController() :
@@ -40,6 +44,7 @@ public:
     }
 private:
 
+    // ===== Feedback reception =====
     void on_odom(nav_msgs::msg::Odometry::SharedPtr msg) {
         // Copy the latest feedback; the current single-threaded spin executes callbacks serially.
         last_odom_ = *msg;
@@ -48,6 +53,7 @@ private:
         received_odom_ = true;
     }
 
+    // ===== Periodic candidate-control pipeline =====
     void on_timer() {
         // All current states command zero velocity; PID control will require state-specific output.
         publish_stop();
@@ -78,30 +84,134 @@ private:
                 RCLCPP_WARN(get_logger(), "Odom timeout: %.2f seconds since last update", dt);
             }
 
+            reset_pid();
+
             return;
         }
 
-        // Convert the quaternion to angles in radians; orientation.z alone is not yaw.
-        auto q = last_odom_.pose.pose.orientation;
-        tf2::Quaternion quat(q.x, q.y, q.z, q.w);
-        double roll, pitch, yaw;
-        tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+        if (!target_initialized_)
+        {
+            initialize_segment_target();
+        }
+
+        if (!target_initialized_)
+        {
+            return;
+        }
+
+        double x = last_odom_.pose.pose.position.x;
+        double y = last_odom_.pose.pose.position.y;
+
+        double yaw = quaternion_to_yaw(
+            last_odom_.pose.pose.orientation
+        );
+
+        double ex = target_x_ - x;
+        double ey = target_y_ - y;
+
+        // --- Initialize or validate the ROS-time control interval ---
+        auto current_time = this->now();
+
+        if (!pid_initialized_)
+        {
+            initialize_pid(ex, ey, current_time);
+            return;
+        }
+
+        double pid_dt =
+            (current_time - last_pid_time_).seconds();
+
+        // An unchanged timestamp must not advance PID history.
+        if (pid_dt == 0.0)
+        {
+            return;
+        }
+
+        // Discard history after a backward clock jump.
+        if (pid_dt < 0.0)
+        {
+            reset_pid();
+            return;
+        }
+
+        // Discard history after an excessive control interval.
+        if (pid_dt > 0.2)
+        {
+            reset_pid();
+            return;
+        }
+
+        last_pid_time_ = current_time;
+
+        // --- Compute PID candidates in the odom frame ---
+        double vx_odom = 0.0;
+        double vy_odom = 0.0;
+
+        compute_pid(
+            ex,
+            ey,
+            pid_dt,
+            vx_odom,
+            vy_odom
+        );
+
+        // --- Preserve raw candidates before limiting their magnitude ---
+        double vx_odom_raw = vx_odom;
+        double vy_odom_raw = vy_odom;
+
+        limit_velocity(vx_odom, vy_odom);
+
+        // --- Convert candidates using current yaw; these are not published ---
+        double vx_robot = 0.0;
+        double vy_robot = 0.0;
+
+        odom_to_robot_velocity(
+            vx_odom,
+            vy_odom,
+            yaw,
+            vx_robot,
+            vy_robot
+        );
+
+
+
+
         if (should_log) {
             RCLCPP_INFO(
                 get_logger(),
-                "Pose: x=%.3f, y=%.3f, yaw=%.3f | Velocity: vx=%.3f, vy=%.3f, wz=%.3f",
-                last_odom_.pose.pose.position.x,
-                last_odom_.pose.pose.position.y,
+                "Pose: x=%.3f, y=%.3f, yaw=%.3f | "
+                "Velocity: vx=%.3f, vy=%.3f, wz=%.3f | "
+                "Target: x=%.3f, y=%.3f | "
+                "Current segment index:%zu | "
+                "Error: ex=%.3f, ey=%.3f | "
+                "pid_dt=%.3f | "
+                "integral=(%.3f, %.3f) | "
+                "odom_raw=(%.3f, %.3f) | "
+                "odom_limited=(%.3f, %.3f) | "
+                "robot_cmd=(%.3f, %.3f)",
+                x,
+                y,
                 yaw,
                 last_odom_.twist.twist.linear.x,
                 last_odom_.twist.twist.linear.y,
-                last_odom_.twist.twist.angular.z
+                last_odom_.twist.twist.angular.z,
+                target_x_,
+                target_y_,
+                current_segment_index_,
+                ex,
+                ey,
+                pid_dt,
+                integral_x_, integral_y_,
+                vx_odom_raw, vy_odom_raw,
+                vx_odom, vy_odom,
+                vx_robot, vy_robot
             );
         }
 
     }
 
     // Publish all six components as zero; logging zero velocity alone does not send a stop command.
+    // ===== Command output: zero velocity during validation =====
     void publish_stop() {
         geometry_msgs::msg::Twist cmd;
         cmd.linear.x = 0.0;
@@ -115,6 +225,137 @@ private:
         cmd_pub_->publish(cmd);
     }
 
+    // ===== Route data type: relative forward/left displacement in meters =====
+    struct Segment
+    {
+        double dx;
+        double dy;
+    };
+
+    // ===== Coordinate helper: extract yaw in radians =====
+    double quaternion_to_yaw(const geometry_msgs::msg::Quaternion &q)
+    {
+        tf2::Quaternion quat(
+            q.x,
+            q.y,
+            q.z,
+            q.w
+        );
+
+        double roll, pitch, yaw;
+        tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+
+        return yaw;
+    }
+
+    // ===== Target initialization: rotate displacement and freeze the odom target =====
+    void initialize_segment_target() {
+        if (current_segment_index_ >= segments_.size()) {
+            RCLCPP_WARN(get_logger(), "Segment index out of range");
+            return;
+        }
+
+        start_x_ = last_odom_.pose.pose.position.x;
+        start_y_ = last_odom_.pose.pose.position.y;
+        start_yaw_ = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+        double dx = segments_[current_segment_index_].dx;
+        double dy = segments_[current_segment_index_].dy;
+
+        target_x_ =
+            start_x_
+            + std::cos(start_yaw_) * dx
+            - std::sin(start_yaw_) * dy;
+
+        target_y_ =
+            start_y_
+            + std::sin(start_yaw_) * dx
+            + std::cos(start_yaw_) * dy;
+
+        target_initialized_ = true;
+    }
+    // ===== PID reset: invalidate history before reinitialization =====
+    void reset_pid() {
+        integral_x_ = 0.0;
+        integral_y_ = 0.0;
+        prev_error_x_ = 0.0;
+        prev_error_y_ = 0.0;
+
+        pid_initialized_ = false;
+    }
+    // ===== PID calculation: independent axes; caller guarantees valid positive dt =====
+    void compute_pid(
+        double ex,
+        double ey,
+        double dt,
+        double & vx_odom,
+        double & vy_odom) {
+        integral_x_ += ex * dt;
+        integral_y_ += ey * dt;
+
+        integral_x_ = std::clamp(integral_x_, -integral_limit_, integral_limit_);
+        integral_y_ = std::clamp(integral_y_, -integral_limit_, integral_limit_);
+
+        double derivative_x = (ex - prev_error_x_) / dt;
+        double derivative_y = (ey - prev_error_y_) / dt;
+
+        vx_odom = kp_ * ex
+        + ki_ * integral_x_
+        + kd_ * derivative_x;
+
+        vy_odom = kp_ * ey
+                + ki_ * integral_y_
+                + kd_ * derivative_y;
+
+        prev_error_x_ = ex;
+        prev_error_y_ = ey;
+    }
+    // ===== Speed limiting: scale both axes equally to preserve direction =====
+    void limit_velocity(
+        double & vx,
+        double & vy) {
+        double speed = std::sqrt(vx * vx + vy * vy);
+        if (speed > max_speed_)
+        {
+            double scale = max_speed_ / speed;
+
+            vx *= scale;
+            vy *= scale;
+        }
+
+    }
+    // ===== Velocity conversion: odom to current body frame =====
+    void odom_to_robot_velocity(
+        double vx_odom,
+        double vy_odom,
+        double yaw,
+        double & vx_robot,
+        double & vy_robot) {
+        vx_robot =
+            std::cos(yaw) * vx_odom
+            + std::sin(yaw) * vy_odom;
+
+        vy_robot =
+            -std::sin(yaw) * vx_odom
+            + std::cos(yaw) * vy_odom;
+
+    }
+
+    // ===== PID initialization: seed current errors and node ROS time =====
+    void initialize_pid(
+        double ex,
+        double ey,
+        const rclcpp::Time &current_time)
+    {
+        prev_error_x_ = ex;
+        prev_error_y_ = ey;
+
+        last_pid_time_ = current_time;
+
+        integral_x_ = 0.0;
+        integral_y_ = 0.0;
+
+        pid_initialized_ = true;
+    }
 
     // Keep the ROS interfaces alive for the lifetime of the node.
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
@@ -125,8 +366,51 @@ private:
     nav_msgs::msg::Odometry last_odom_;
     bool received_odom_;
     std::chrono::steady_clock::time_point last_log_time_;
+    // ===== Route and segment state =====
+    std::array<Segment, 10> segments_{{
+        { 0.0,  1.0},
+        { 0.0, -1.0},
+        { 0.0, -1.0},
+        { 0.0,  1.0},
+        { 1.0,  1.0},
+        {-1.0, -1.0},
+        { 1.0, -1.0},
+        {-1.0,  1.0},
+        { 1.0,  0.0},
+        {-1.0,  0.0}
+    }};
+    std::size_t current_segment_index_{0};
+    double start_x_;
+    double start_y_;
+    double start_yaw_;
+
+    double target_x_;
+    double target_y_;
+
+    bool target_initialized_{false};
+
+    // ===== PID gains and history: current tuning uses only the P contribution =====
+    double kp_{0.5};
+    double ki_{0.0};
+    double kd_{0.0};
+
+    double integral_x_ = 0.0;
+    double integral_y_ = 0.0;
+
+    double prev_error_x_ = 0.0;
+    double prev_error_y_ = 0.0;
+
+    bool pid_initialized_ = false;
+
+    double integral_limit_ = 0.5;
+
+    double max_speed_ = 0.15;
+
+    // initialize_pid assigns node-clock time before this value is subtracted.
+    rclcpp::Time last_pid_time_;
 };
 
+// ===== Process entry point =====
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<DistanceController>();
