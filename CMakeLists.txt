@@ -12,6 +12,21 @@ find_package(tf2 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 
+add_executable(distance_controller src/distance_controller.cpp)
+
+ament_target_dependencies(
+  distance_controller
+  rclcpp
+  geometry_msgs
+  nav_msgs
+  tf2
+)
+
+install(
+  TARGETS distance_controller
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
