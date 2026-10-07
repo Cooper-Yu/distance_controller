@@ -11,7 +11,7 @@
 #include <cmath>
 #include <algorithm>
 
-// Compute and log PID candidates; actual velocity commands remain zero.
+// Control the first planar segment; stop while waiting, settling, completed, or faulted.
 class DistanceController : public rclcpp::Node {
 public:
     DistanceController() :
@@ -53,16 +53,22 @@ private:
         received_odom_ = true;
     }
 
-    // ===== Periodic candidate-control pipeline =====
+    // ===== Periodic single-segment control pipeline =====
     void on_timer() {
-        // All current states command zero velocity; PID control will require state-specific output.
-        publish_stop();
+
+        // --- 1. Keep a latched fault stopped until the node is restarted ---
+        if (fault_latched_)
+        {
+            publish_stop();
+            return;
+        }
+        // --- 2. Check feedback age and routine log timing using steady time ---
         auto now = std::chrono::steady_clock::now();
         // Throttle logs only; feedback checks and command publication still run every tick.
         bool should_log =
             std::chrono::duration<double>(now - last_log_time_).count() >= 1.0;
 
-        // Share one log timestamp across all three branches; should_log retains its computed value.
+        // Throttle routine logs; state transitions and fault reports are logged separately.
         if (should_log) {
             last_log_time_ = now;
         }
@@ -73,22 +79,60 @@ private:
             if (should_log) {
                 RCLCPP_INFO(get_logger(), "Waiting for odom...");
             }
-
+            publish_stop();
             return;
         }
 
         // Convert elapsed time to seconds; dt here is feedback age, not the PID timestep.
         double dt = std::chrono::duration<double>(now - last_odom_time_).count();
         if (dt > 0.5) {
-            if (should_log) {
-                RCLCPP_WARN(get_logger(), "Odom timeout: %.2f seconds since last update", dt);
-            }
-
+            RCLCPP_WARN(get_logger(), "Odom timeout: %.2f seconds since last update", dt);
+            fault_latched_ = true;
             reset_pid();
-
+            publish_stop();
             return;
         }
 
+        // --- 3. Observe ROS time before both tracking and settling ---
+        auto current_time = this->now();
+
+        if (!ros_time_initialized_) {
+            last_ros_time_ = current_time;
+            ros_time_initialized_ = true;
+        } else {
+            const double ros_dt =
+                (current_time - last_ros_time_).seconds();
+
+            // Update before any early return so the next tick uses this observation.
+            last_ros_time_ = current_time;
+
+            if (ros_dt < 0) {
+                fault_latched_ = true;
+                settling_ = false;
+                reset_pid();
+
+                RCLCPP_ERROR(
+                    get_logger(),
+                    "ROS time moved backwards: ros_dt=%.6f",
+                    ros_dt
+                );
+
+                publish_stop();
+                return;
+            }
+
+            // Drop accumulated settling time after a large jump; retry on a later tick.
+            if (ros_dt > 0.2)
+            {
+                settling_ = false;
+                reset_pid();
+
+                publish_stop();
+                return;
+            }
+        }
+
+        // --- 4. Freeze the segment target once; never move it with the feedback ---
         if (!target_initialized_)
         {
             initialize_segment_target();
@@ -96,6 +140,7 @@ private:
 
         if (!target_initialized_)
         {
+            publish_stop();
             return;
         }
 
@@ -109,12 +154,36 @@ private:
         double ex = target_x_ - x;
         double ey = target_y_ - y;
 
-        // --- Initialize or validate the ROS-time control interval ---
-        auto current_time = this->now();
+        // --- 5. Keep a completed segment stopped; do not restart tracking ---
+        if (segment_completed_)
+        {
+            publish_stop();
+            return;
+        }
 
+        double position_error = std::sqrt(ex * ex + ey * ey);
+
+        // --- 6. Stop inside position tolerance and verify continuous settling ---
+        if (position_error < 0.01)
+        {
+            publish_stop();
+            reset_pid();
+            check_completion(
+                ex,
+                ey,
+                current_time
+            );
+
+            return;
+        }
+
+        settling_ = false;
+
+        // --- 7. Initialize PID history or validate its own integration interval ---
         if (!pid_initialized_)
         {
             initialize_pid(ex, ey, current_time);
+            publish_stop();
             return;
         }
 
@@ -124,6 +193,7 @@ private:
         // An unchanged timestamp must not advance PID history.
         if (pid_dt == 0.0)
         {
+            publish_stop();
             return;
         }
 
@@ -131,6 +201,7 @@ private:
         if (pid_dt < 0.0)
         {
             reset_pid();
+            publish_stop();
             return;
         }
 
@@ -138,6 +209,7 @@ private:
         if (pid_dt > 0.2)
         {
             reset_pid();
+            publish_stop();
             return;
         }
 
@@ -161,7 +233,7 @@ private:
 
         limit_velocity(vx_odom, vy_odom);
 
-        // --- Convert candidates using current yaw; these are not published ---
+        // --- Convert the limited odom velocity into the current body frame ---
         double vx_robot = 0.0;
         double vy_robot = 0.0;
 
@@ -173,6 +245,12 @@ private:
             vy_robot
         );
 
+        geometry_msgs::msg::Twist cmd;
+        cmd.linear.x = vx_robot;
+        cmd.linear.y = vy_robot;
+
+        // Publish the limited body-frame velocity; unused Twist components default to zero.
+        cmd_pub_->publish(cmd);
 
 
 
@@ -211,7 +289,7 @@ private:
     }
 
     // Publish all six components as zero; logging zero velocity alone does not send a stop command.
-    // ===== Command output: zero velocity during validation =====
+    // ===== Stop-command output =====
     void publish_stop() {
         geometry_msgs::msg::Twist cmd;
         cmd.linear.x = 0.0;
@@ -357,6 +435,60 @@ private:
         pid_initialized_ = true;
     }
 
+    // ===== Completion check: position and feedback speed must remain within tolerance =====
+    void check_completion(
+        double ex,
+        double ey,
+        const rclcpp::Time &current_time)
+    {
+        double position_error =
+            std::sqrt(ex * ex + ey * ey);
+
+        if (position_error >= 0.01)
+        {
+            settling_ = false;
+            return;
+        }
+
+        double vx = last_odom_.twist.twist.linear.x;
+        double vy = last_odom_.twist.twist.linear.y;
+
+        double linear_speed =
+            std::sqrt(vx * vx + vy * vy);
+
+        double angular_speed =
+            std::abs(last_odom_.twist.twist.angular.z);
+
+        if (linear_speed < 0.01 &&
+            angular_speed < 0.02)
+        {
+            if (!settling_)
+            {
+                settle_start_time_ = current_time;
+                // Log only when entering the stable interval, not on every timer tick.
+                settling_ = true;
+                RCLCPP_INFO(
+                    get_logger(),
+                    "Entering SETTLING state"
+                );
+            }
+            else if (
+                (current_time - settle_start_time_).seconds() >= 0.5)
+            {
+                // The caller keeps publishing zero after completion.
+                segment_completed_ = true;
+                RCLCPP_INFO(
+                    get_logger(),
+                    "Entering DONE state"
+                );
+            }
+        }
+        else
+        {
+            settling_ = false;
+        }
+    }
+
     // Keep the ROS interfaces alive for the lifetime of the node.
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
@@ -408,6 +540,17 @@ private:
 
     // initialize_pid assigns node-clock time before this value is subtracted.
     rclcpp::Time last_pid_time_;
+    // ===== Fault and completion state =====
+    bool fault_latched_ = false;
+
+    // A separate ROS-time interval tracks continuous position and speed acceptance.
+    bool settling_ = false;
+    rclcpp::Time settle_start_time_;
+    bool segment_completed_ = false;
+
+    // ===== ROS-time observation, independent of whether PID runs this tick =====
+    bool ros_time_initialized_{false};
+    rclcpp::Time last_ros_time_;
 };
 
 // ===== Process entry point =====
