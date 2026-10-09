@@ -20,7 +20,7 @@
  * options and main() reads the remaining scene argument for DistanceController().
  * This program does not modify the strings or return results through them.
  * @return Zero after normal spin completion, or one after a caught standard exception.
- * @note Initializes and shuts down the default ROS context. Scene 2 rejects unfilled waypoints.
+ * @note Initializes and shuts down the default ROS context. Scene 2 validates distance and heading parameters before creating motion interfaces.
  */
 int main(int argc, char ** argv)
 {

@@ -3,7 +3,7 @@
  * @brief Navigate responsibilities, control flow, interfaces, and verification.
  *
  * The current code has documented header/source separation and a passing local
- * Task1 ten-segment simulation run. Scene 2 displacements remain unconfigured.
+ * Task1 ten-segment simulation run. Scene 2 has configurable distances and odom yaw-zero alignment/holding; hardware acceptance remains pending.
  *
  * @section controller Controller interface
  * - @ref DistanceController "Class, private methods, and state members"

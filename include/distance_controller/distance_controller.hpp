@@ -18,7 +18,7 @@
  * @details Targets use the fixed initial route frame. Feedback receipt uses a steady
  * clock; PID, settling, and dwell use the node clock (simulation time when enabled).
  * The single-threaded executor in main() serializes callbacks. No obstacle avoidance
- * or target-heading controller is implemented. Scene 2 requires route configuration.
+ * is implemented. Scene 2 aligns and holds odom yaw zero using configurable route lengths.
  */
 class DistanceController : public rclcpp::Node
 {
@@ -38,9 +38,88 @@ public:
   explicit DistanceController(int scene_number = 1);
 
 private:
+  /**
+   * @brief Declare and validate scene-2 heading parameters before ROS interfaces exist.
+   * @par Configuration
+   * Called by DistanceController(); store startup overrides in the heading members.
+   * @throws std::invalid_argument For nonfinite, nonpositive, or inconsistent limits.
+   * @note Scene 1 bypasses heading configuration and preserves its original behavior.
+   */
+  void configure_heading_control();
+
+  /**
+   * @brief Hold translation until odom yaw zero and standstill remain accepted.
+   * @par Initial alignment
+   * Read last_odom_ from on_odom(); rotate only outside heading_tolerance_, otherwise
+   * stop and require low measured speeds for alignment_settle_duration_. Mark
+   * initial_alignment_complete_ once; on_timer() captures A on the following tick.
+   * @param[in] current_time Node time supplied by on_timer(); read elapsed settling time
+   * and copy into alignment_settle_start_ when the interval begins. Input is unchanged.
+   * @return True to end this tick; false when disabled or already completed.
+   * @note Publishes commands and resets PID through publish_heading_correction(). No centering.
+   */
+  bool handle_initial_alignment(const rclcpp::Time & current_time);
+
+  /**
+   * @brief Calculate a bounded proportional yaw rate toward odom yaw zero.
+   * @par Heading error
+   * Wrap target-minus-current error into [-pi, pi] before symmetric rate limiting.
+   * @param[in] yaw Odom heading (rad), passed by publish_heading_correction() from
+   * last_odom_ or by compute_and_publish_command() from data.yaw; read only.
+   * @param[in] gain Positive gain (1/s), supplied from heading_gain_; scales error, unchanged.
+   * @param[in] max_yaw_rate Positive cap (rad/s), supplied from max_yaw_rate_; bounds output, unchanged.
+   * @return Angular command for the caller's cmd.angular.z; does not publish itself.
+   * @note Callers ensure finite inputs and positive limits. Odom zero is not a wall reference.
+   */
+  static double compute_heading_command(double yaw, double gain, double max_yaw_rate);
+
+  /**
+   * @brief Publish rotation only and clear planar PID and command-ramp history.
+   * @par Rotation without translation
+   * Used by handle_initial_alignment() and handle_heading_recovery().
+   * @param[in] yaw Current odom heading (rad) from the caller's feedback; read to
+   * compute cmd.angular.z using heading_gain_ and max_yaw_rate_. No input is modified.
+   * @note Publishes zero linear velocity; all unused Twist components remain zero.
+   */
+  void publish_heading_correction(double yaw);
+
+  /**
+   * @brief Pause translation for large heading errors or rotate at an arrived position.
+   * @par Route recovery
+   * Cancel completed-segment dwell if position or heading leaves acceptance. Rotate
+   * only at a position target or beyond translation_pause_angle_; otherwise permit tracking.
+   * @param[in] yaw Current odom heading (rad) passed by on_timer(); read to check
+   * heading acceptance and compute rotation commands; caller value is unchanged.
+   * @param[in] position_error Position-error norm (m) computed by on_timer(); read to
+   * choose rotation-only recovery or cancel dwell; caller value is unchanged.
+   * @return True after publishing rotation only; false to continue this tick.
+   * @note May clear segment_completed_, settling_, PID and ramp history. Scene 1 bypasses.
+   */
+  bool handle_heading_recovery(double yaw, double position_error);
+
+  /// Constructor sets true for scene 2 only; gates all new heading behavior.
+  bool heading_control_enabled_{false};
+  /// True after initial yaw acceptance and standstill; latched until node restart.
+  bool initial_alignment_complete_{false};
+  /// True while initial yaw and measured speed acceptance remain uninterrupted.
+  bool alignment_settling_{false};
+  /// Node-clock beginning of the current initial standstill interval; valid while settling.
+  rclcpp::Time alignment_settle_start_{};
+  /// Positive proportional yaw gain (1/s), read by both heading-control paths.
+  double heading_gain_{1.0};
+  /// Positive symmetric angular command cap (rad/s); stops bypass limiting.
+  double max_yaw_rate_{0.25};
+  /// Absolute odom yaw tolerance (rad), used at startup, during motion and at completion.
+  double heading_tolerance_{0.02};
+  /// Above this absolute yaw error (rad), translation pauses for rotation-only recovery.
+  double translation_pause_angle_{0.15};
+  /// Continuous initial standstill duration in node-clock seconds.
+  double alignment_settle_duration_{0.5};
+
   /// Per-tick inputs from on_timer() and command outputs retained for log_control_state().
   struct ControlDiagnostics
   {
+    double wz_robot{};     ///< Published body yaw rate (rad/s), written by command calculation.
     double x{};            ///< Current odom x position in meters.
     double y{};            ///< Current odom y position in meters.
     double yaw{};          ///< Current robot yaw relative to odom, in radians.
@@ -65,7 +144,7 @@ private:
    *
    * @param[in] data Read the object passed by on_timer() to print this tick's values.
    * on_timer() fills the pose, errors, and PID interval; compute_and_publish_command()
-   * fills the six velocity fields before this call. log_control_state() only reads
+   * fills the seven velocity fields before this call. log_control_state() only reads
    * the object and does not write results back into it.
    * @note None at present.
    */
@@ -78,7 +157,7 @@ private:
    * Copy the message to last_odom_, record steady-clock receipt time, and set received_odom_.
    *
    * @param[in] msg Message supplied by the subscription created in DistanceController(). Read its pose and twist into last_odom_ for on_timer(), log_control_state(), and check_completion(); do not modify the received message.
-   * @note Freshness measures callback receipt, not header.stamp. Frame names and quaternion validity are assumed, not checked.
+   * @note Freshness measures callback receipt, not header.stamp. Frame names are assumed. Scene 2 rejects nonfinite consumed values or quaternion squared norm more than 0.01 from unity, latches a fault, and publishes stop.
    */
   void on_odom(nav_msgs::msg::Odometry::SharedPtr msg);
 
@@ -115,7 +194,7 @@ private:
    * against last_ros_time_ and update the stored observation for the next check.
    * Updating last_ros_time_ does not change on_timer()'s current_time variable.
    * @return True to end this timer callback; false to continue.
-   * @note This check also runs during settling and dwell, when PID is not updated. A large forward interval also restarts completed-segment dwell.
+   * @note This check also runs during settling and dwell, when PID is not updated. A large forward interval also resets initial settling and restarts completed-segment dwell. Scene 2 publishes stop when node time does not advance.
    */
   bool handle_ros_time_jump(const rclcpp::Time & current_time);
 
@@ -160,11 +239,11 @@ private:
    * Write PID output into data.vx_odom/data.vy_odom, copy it into
    * data.vx_odom_raw/data.vy_odom_raw before limiting, and update
    * data.vx_odom/data.vy_odom with the limited values. Write the converted
-   * command into data.vx_robot/data.vy_robot. All writes update the same object
+   * command into data.vx_robot/data.vy_robot and the yaw command into data.wz_robot. All writes update the same object
    * in on_timer(), which then passes it to log_control_state(). The velocity
    * results are available after this function returns; data.x/data.y stay unchanged.
    * @note Run only after feedback and PID timing checks pass. Command publication
-   * is independent of the logging rate. Updates PID and acceleration history; angular command is zero.
+   * is independent of the logging rate. Updates PID and acceleration history; scene 2 adds a bounded yaw correction outside heading_tolerance_, while scene 1 keeps angular velocity zero.
    */
   void compute_and_publish_command(ControlDiagnostics & data);
 
@@ -173,7 +252,7 @@ private:
    *
    * @par Control tick
    * Check latched faults, feedback age, and node time before target initialization.
-   * Handle completed-segment dwell, settling, and PID timing before computing a command.
+   * Gate initial alignment before capturing the route origin. In scene 2, recover heading and revoke drifted dwell before handling completion, settling, and PID timing.
    * Only routine logging is throttled; command calculation runs on each eligible tick.
    *
    * @note Mutates route and PID state through helpers, publishes velocity, and may shut down the ROS context at route completion. A wall timer continues firing when simulation time pauses.
@@ -207,11 +286,11 @@ private:
    */
   void publish_stop();
 
-  /// One relative displacement in the fixed initial body frame, accumulated into route targets.
+  /// One relative displacement in the fixed route frame, accumulated into route targets.
   struct Segment
   {
-    double dx{};  ///< Forward displacement in meters in the initial body frame.
-    double dy{};  ///< Left displacement in meters in the initial body frame.
+    double dx{};  ///< Forward displacement (m) in the fixed route frame; odom +x in scene 2.
+    double dy{};  ///< Left displacement (m) in the fixed route frame; odom +y in scene 2.
   };
 
   /**
@@ -219,11 +298,11 @@ private:
    *
    * @par Route selection
    * Replace segments_ with the selected route before control interfaces are created.
-   * Displacements accumulate in the fixed initial body frame, not the changing robot frame.
+   * Displacements accumulate in the fixed route frame, not the changing body frame. Scene 2 reads positive finite forward_distance and lateral_distance startup parameters.
    *
    * @param[in] scene_number Scene number forwarded by DistanceController() from main(). Read it to choose the route stored in segments_ for initialize_segment_target(); the caller value is unchanged.
-   * @throws std::invalid_argument If the scene is unsupported or any displacement is nonfinite.
-   * @note Scene 2 uses nominal corrected displacements; initial alignment and wall clearance are not verified.
+   * @throws std::invalid_argument If the scene is unsupported, a displacement is nonfinite, or a scene-2 distance is not positive.
+   * @note Scene 2 uses adjustable nominal distances; no wall clearance or obstacle detection is provided.
    */
   void select_waypoints(int scene_number);
 
@@ -233,8 +312,8 @@ private:
    * @par Orientation conversion
    * Convert the quaternion to roll, pitch, and yaw and return only yaw.
    *
-   * @param[in] q Orientation from last_odom_.pose.pose.orientation passed by on_timer() or initialize_segment_target(). Read it for conversion without changing the stored feedback.
-   * @return Yaw in radians relative to odom, used by on_timer() for velocity conversion or by initialize_segment_target() for route_yaw_.
+   * @param[in] q Orientation from last_odom_.pose.pose.orientation passed by on_timer(), handle_initial_alignment(), check_completion(), or initialize_segment_target(). Read it for conversion without changing the stored feedback.
+   * @return Yaw in radians relative to odom, used by on_timer() for velocity conversion for heading acceptance, or by initialize_segment_target() for scene-1 route_yaw_.
    * @note The caller must supply a valid orientation; this helper does not validate or normalize the quaternion.
    */
   double quaternion_to_yaw(const geometry_msgs::msg::Quaternion & q);
@@ -244,7 +323,7 @@ private:
    *
    * @par Target setup
    * Called by on_timer() when target_initialized_ is false. Capture route_x_, route_y_,
-   * and route_yaw_ once from last_odom_, sum segments through the current index, then
+   * once from last_odom_; set route_yaw_ to zero for scene 2 or measured yaw for scene 1. Sum segments through the current index, then
    * rotate the sum into odom and store target_x_, target_y_, and target_initialized_.
    *
    * @note An out-of-range index only logs and returns. Actual segment stopping error is not accumulated into later targets.
@@ -344,7 +423,7 @@ private:
    * @param[in] ex Odom x position error (m) calculated and passed by on_timer(); read to test distance from the target without modifying the caller error.
    * @param[in] ey Odom y position error (m) calculated and passed by on_timer(); read to test distance from the target without modifying the caller error.
    * @param[in] current_time Node time captured by on_timer(); read for settling duration and copy to settle_start_time_ or dwell_start_time_ on state transitions. handle_completed_segment() later reads dwell_start_time_; the input is unchanged.
-   * @note on_timer() publishes zero before calling. Feedback speed comes from last_odom_.twist in the child frame; target yaw is not checked or controlled.
+   * @note on_timer() publishes zero before calling. Feedback speed comes from last_odom_.twist in the child frame; scene 2 also requires odom yaw within heading_tolerance_.
    */
   void check_completion(double ex, double ey, const rclcpp::Time & current_time);
 
@@ -352,7 +431,7 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_{};
   /// Owns the 50 ms wall timer; on_timer() still runs while simulation time is paused.
   rclcpp::TimerBase::SharedPtr timer_{};
-  /// Publishes body-frame Twist commands; unused axes and angular velocity stay zero.
+  /// Publishes body-frame Twist commands; unused axes stay zero; scene 2 also publishes yaw correction.
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_{};
 
   /// Steady-clock time seeded at construction, updated by on_odom(); timeout checked only after reception.
@@ -364,7 +443,7 @@ private:
   /// Steady-clock time seeded at construction and updated for routine log opportunities; throttles at 1 s.
   std::chrono::steady_clock::time_point last_log_time_{std::chrono::steady_clock::now()};
 
-  /// Ordered relative displacements (m) in the fixed initial body frame, selected at construction.
+  /// Ordered relative displacements (m) in the fixed route frame, selected at construction.
   std::vector<Segment> segments_{};
   /// Zero-based active segment index; reaches segments_.size() only at route shutdown.
   std::size_t current_segment_index_{0};
@@ -412,7 +491,7 @@ private:
   /// Node-clock timestamp of PID initialization or last accepted interval; guarded by pid_initialized_.
   rclcpp::Time last_pid_time_{};
 
-  /// True after feedback timeout or backwards node time; on_timer() stops until node restart.
+  /// True after feedback timeout, backwards time, or invalid scene-2 odometry; stops until node restart.
   bool fault_latched_{false};
 
   /// True while the current uninterrupted standstill interval is being measured.
@@ -429,11 +508,11 @@ private:
 
   /// True after the fixed route origin and heading are captured once from feedback.
   bool route_initialized_{false};
-  /// Fixed route origin x in odom (m); valid after route_initialized_.
+  /// Fixed route origin x in odom (m); captured after initial alignment in scene 2, valid after route_initialized_.
   double route_x_{0.0};
-  /// Fixed route origin y in odom (m); valid after route_initialized_.
+  /// Fixed route origin y in odom (m); captured after initial alignment in scene 2, valid after route_initialized_.
   double route_y_{0.0};
-  /// Initial body heading relative to odom (rad); rotates all nominal segment displacements.
+  /// Fixed route heading in odom (rad): zero for scene 2, initial measured yaw for scene 1.
   double route_yaw_{0.0};
 
   /// Node-clock start of extra dwell after completion; restarted after a large forward interval.

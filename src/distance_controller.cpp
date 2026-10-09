@@ -15,6 +15,8 @@
 DistanceController::DistanceController(int scene_number) : Node{"distance_controller"}
 {
   select_waypoints(scene_number);
+  heading_control_enabled_ = (scene_number == 2);
+  configure_heading_control();
 
   const auto & overrides = get_node_parameters_interface()->get_parameter_overrides();
   if (overrides.find("use_sim_time") == overrides.end()) {
@@ -48,6 +50,90 @@ DistanceController::DistanceController(int scene_number) : Node{"distance_contro
   cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>(cmd_topic, 10);
 }
 
+void DistanceController::configure_heading_control()
+{
+  if (!heading_control_enabled_) return;
+  heading_gain_ = declare_parameter<double>("heading_gain", 1.0);
+  max_yaw_rate_ = declare_parameter<double>("max_yaw_rate", 0.25);
+  heading_tolerance_ = declare_parameter<double>("heading_tolerance", 0.02);
+  translation_pause_angle_ = declare_parameter<double>("translation_pause_angle", 0.15);
+  alignment_settle_duration_ = declare_parameter<double>("alignment_settle_duration", 0.5);
+  if (
+    !std::isfinite(heading_gain_) || heading_gain_ <= 0.0 || !std::isfinite(max_yaw_rate_) ||
+    max_yaw_rate_ <= 0.0 || !std::isfinite(heading_tolerance_) || heading_tolerance_ <= 0.0 ||
+    !std::isfinite(translation_pause_angle_) || translation_pause_angle_ <= heading_tolerance_ ||
+    translation_pause_angle_ >= 3.141592653589793 || !std::isfinite(alignment_settle_duration_) ||
+    alignment_settle_duration_ <= 0.0) {
+    throw std::invalid_argument(
+      "Invalid heading parameters: positive finite values and tolerance < pause angle < pi "
+      "required");
+  }
+}
+
+bool DistanceController::handle_initial_alignment(const rclcpp::Time & current_time)
+{
+  if (!heading_control_enabled_ || initial_alignment_complete_) return false;
+  const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+  if (std::abs(yaw) > heading_tolerance_) {
+    alignment_settling_ = false;
+    publish_heading_correction(yaw);
+    return true;
+  }
+  publish_stop();
+  const auto & velocity = last_odom_.twist.twist;
+  if (
+    std::hypot(velocity.linear.x, velocity.linear.y) >= 0.01 ||
+    std::abs(velocity.angular.z) >= 0.02) {
+    alignment_settling_ = false;
+    return true;
+  }
+  if (!alignment_settling_) {
+    alignment_settle_start_ = current_time;
+    alignment_settling_ = true;
+  } else if ((current_time - alignment_settle_start_).seconds() >= alignment_settle_duration_) {
+    initial_alignment_complete_ = true;
+    alignment_settling_ = false;
+    reset_pid();
+    RCLCPP_INFO(
+      get_logger(), "Initial alignment complete: yaw=%.6f; capturing route origin next tick", yaw);
+  }
+  return true;
+}
+
+double DistanceController::compute_heading_command(double yaw, double gain, double max_yaw_rate)
+{
+  const double error = std::atan2(std::sin(-yaw), std::cos(-yaw));
+  return std::clamp(gain * error, -max_yaw_rate, max_yaw_rate);
+}
+
+void DistanceController::publish_heading_correction(double yaw)
+{
+  reset_pid();
+  previous_vx_odom_ = 0.0;
+  previous_vy_odom_ = 0.0;
+  geometry_msgs::msg::Twist cmd;
+  cmd.angular.z = compute_heading_command(yaw, heading_gain_, max_yaw_rate_);
+  cmd_pub_->publish(cmd);
+}
+
+bool DistanceController::handle_heading_recovery(double yaw, double position_error)
+{
+  if (!heading_control_enabled_) return false;
+  const bool heading_outside = std::abs(yaw) > heading_tolerance_;
+  if (segment_completed_ && (heading_outside || position_error >= 0.01)) {
+    segment_completed_ = false;
+    settling_ = false;
+    reset_pid();
+    RCLCPP_INFO(get_logger(), "Dwell interrupted: reacquiring position and heading");
+  }
+  if (heading_outside && (position_error < 0.01 || std::abs(yaw) > translation_pause_angle_)) {
+    settling_ = false;
+    publish_heading_correction(yaw);
+    return true;
+  }
+  return false;
+}
+
 void DistanceController::log_control_state(const ControlDiagnostics & data)
 {
   RCLCPP_INFO(
@@ -61,15 +147,31 @@ void DistanceController::log_control_state(const ControlDiagnostics & data)
     "integral=(%.3f, %.3f) | "
     "odom_raw=(%.3f, %.3f) | "
     "odom_limited=(%.3f, %.3f) | "
-    "robot_cmd=(%.3f, %.3f)",
+    "robot_cmd=(%.3f, %.3f), wz=%.3f",
     data.x, data.y, data.yaw, last_odom_.twist.twist.linear.x, last_odom_.twist.twist.linear.y,
     last_odom_.twist.twist.angular.z, target_x_, target_y_, current_segment_index_, data.ex,
     data.ey, data.pid_dt, integral_x_, integral_y_, data.vx_odom_raw, data.vy_odom_raw,
-    data.vx_odom, data.vy_odom, data.vx_robot, data.vy_robot);
+    data.vx_odom, data.vy_odom, data.vx_robot, data.vy_robot, data.wz_robot);
 }
 
 void DistanceController::on_odom(nav_msgs::msg::Odometry::SharedPtr msg)
 {
+  if (heading_control_enabled_) {
+    const auto & pose = msg->pose.pose;
+    const auto & q = pose.orientation;
+    const auto & v = msg->twist.twist;
+    const double norm = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+    if (
+      !std::isfinite(pose.position.x) || !std::isfinite(pose.position.y) || !std::isfinite(norm) ||
+      std::abs(norm - 1.0) > 0.01 || !std::isfinite(v.linear.x) || !std::isfinite(v.linear.y) ||
+      !std::isfinite(v.angular.z)) {
+      fault_latched_ = true;
+      reset_pid();
+      publish_stop();
+      RCLCPP_ERROR(get_logger(), "Invalid odometry: heading control fault latched");
+      return;
+    }
+  }
   last_odom_ = *msg;
 
   last_odom_time_ = std::chrono::steady_clock::now();
@@ -109,6 +211,10 @@ bool DistanceController::handle_ros_time_jump(const rclcpp::Time & current_time)
 
     last_ros_time_ = current_time;
 
+    if (heading_control_enabled_ && ros_dt == 0.0) {
+      publish_stop();
+      return true;
+    }
     if (ros_dt < 0) {
       fault_latched_ = true;
       settling_ = false;
@@ -121,6 +227,7 @@ bool DistanceController::handle_ros_time_jump(const rclcpp::Time & current_time)
     }
 
     if (ros_dt > 0.2) {
+      alignment_settling_ = false;
       if (segment_completed_) {
         dwell_start_time_ = current_time;
       }
@@ -187,6 +294,10 @@ void DistanceController::compute_and_publish_command(ControlDiagnostics & data)
   geometry_msgs::msg::Twist cmd;
   cmd.linear.x = vx_robot;
   cmd.linear.y = vy_robot;
+  if (heading_control_enabled_ && std::abs(data.yaw) > heading_tolerance_) {
+    cmd.angular.z = compute_heading_command(data.yaw, heading_gain_, max_yaw_rate_);
+  }
+  data.wz_robot = cmd.angular.z;
 
   cmd_pub_->publish(cmd);
 }
@@ -216,6 +327,10 @@ void DistanceController::on_timer()
     return;
   }
 
+  if (handle_initial_alignment(current_time)) {
+    return;
+  }
+
   if (!target_initialized_) {
     initialize_segment_target();
   }
@@ -233,11 +348,14 @@ void DistanceController::on_timer()
   double ex = target_x_ - x;
   double ey = target_y_ - y;
 
-  if (handle_completed_segment(current_time)) {
+  const double position_error = std::hypot(ex, ey);
+  if (handle_heading_recovery(yaw, position_error)) {
     return;
   }
 
-  double position_error = std::sqrt(ex * ex + ey * ey);
+  if (handle_completed_segment(current_time)) {
+    return;
+  }
 
   if (position_error < 0.01) {
     publish_stop();
@@ -371,7 +489,8 @@ void DistanceController::initialize_segment_target()
   if (!route_initialized_) {
     route_x_ = last_odom_.pose.pose.position.x;
     route_y_ = last_odom_.pose.pose.position.y;
-    route_yaw_ = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+    route_yaw_ =
+      heading_control_enabled_ ? 0.0 : quaternion_to_yaw(last_odom_.pose.pose.orientation);
     route_initialized_ = true;
   }
 
@@ -472,7 +591,10 @@ void DistanceController::check_completion(double ex, double ey, const rclcpp::Ti
 {
   double position_error = std::sqrt(ex * ex + ey * ey);
 
-  if (position_error >= 0.01) {
+  if (
+    position_error >= 0.01 ||
+    (heading_control_enabled_ &&
+     std::abs(quaternion_to_yaw(last_odom_.pose.pose.orientation)) > heading_tolerance_)) {
     settling_ = false;
     return;
   }

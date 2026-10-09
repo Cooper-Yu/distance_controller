@@ -17,24 +17,26 @@ The diagram uses actual function names. A stored Graphviz source produces the SV
 | Stage | Behavior |
 | --- | --- |
 | Fault, feedback, and time | Stop on a latched fault; wait for first feedback; latch a fault after a 0.5 s receipt timeout or backwards node time; reset timing state and stop this tick after a forward interval above 0.2 s |
+| Initial alignment | Scene 2 rotates toward odom yaw zero, then verifies continuous standstill before capturing A; scene 1 bypasses |
 | Target and error | Initialize a target from the fixed route origin, heading, and cumulative displacement; stop if unavailable, otherwise read pose and compute ex/ey |
+| Heading recovery | Scene 2 pauses translation for large yaw errors or corrects yaw at an arrived position; drift during dwell revokes completion |
 | Completed segment | Keep zero velocity during dwell; then advance once and either reset segment state for the next tick or shut down after the final segment |
 | Position acceptance | Inside 0.01 m, stop, reset PID, and check continuous feedback standstill |
 | PID timing | Seed missing history and stop; stop for zero interval; reset and stop for negative or greater-than-0.2 s interval; calculate only with valid dt |
-| Command | PID -> save raw values -> speed limit -> acceleration limit -> odom-to-body rotation -> publish |
+| Command | PID -> save raw values -> speed limit -> acceleration limit -> odom-to-body rotation -> scene-2 yaw command -> publish |
 | Log | Print when due; logging does not throttle command computation or publication |
 
 ## Settling, dwell, and advancement
 
-`settling_` means continuous standstill is being timed. Position error must remain below 0.01 m, planar feedback speed below 0.01 m/s, and absolute yaw rate below 0.02 rad/s for at least 0.5 node-clock seconds.
+`settling_` means continuous standstill is being timed. Position error must remain below 0.01 m, planar feedback speed below 0.01 m/s, and absolute yaw rate below 0.02 rad/s, and scene-2 yaw within heading_tolerance_ for at least 0.5 node-clock seconds.
 
 `segment_completed_` then disables tracking and starts extra dwell, default 1 node-clock second. When dwell ends, advance the index, reset PID/segment flags, and end this tick; initialize the next target on the next tick. After the final dwell, keep zero velocity and call `rclcpp::shutdown()`.
 
-Feedback receipt timeout uses steady time. PID, settling, and dwell use node time. Stops bypass the acceleration ramp and clear its history. Target-heading control and obstacle avoidance are not implemented.
+Feedback receipt timeout uses steady time. PID, settling, and dwell use node time. Stops bypass the acceleration ramp and clear its history. Scene 2 controls heading toward odom yaw zero; obstacle avoidance and centering are not implemented.
 
 ## Diagnostic data flow
 
-`on_timer()` creates `ControlDiagnostics data` and fills six input fields: position, yaw, errors, and pid_dt. `compute_and_publish_command(data)` reads errors/yaw/dt and writes six raw, limited, and body velocity fields into the same object. `log_control_state(data)` reads those results.
+`on_timer()` creates `ControlDiagnostics data` and fills six input fields: position, yaw, errors, and pid_dt. `compute_and_publish_command(data)` reads errors/yaw/dt and writes six planar velocity fields and data.wz_robot into the same object. `log_control_state(data)` reads those results.
 
 ## Maintenance and evidence
 
