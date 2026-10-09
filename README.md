@@ -4,6 +4,22 @@ A ROS2 Humble planar distance controller for ROSBot XL. It uses odometry feedbac
 
 The Task1 acceptance snapshot is Git tag `task1` (`e1a26a6`), which remains unchanged. Scene 2 supports independently configured segments, manual continuation, completed-step history and sequential return. Current history/return features have local test coverage; their cloud/hardware acceptance remains pending.
 
+## Task2 accepted course entry
+
+```bash
+ros2 run distance_controller distance_controller 2
+```
+
+The default four-segment route completed on the real robot on 2026-10-09;
+the learner confirmed no wall contact and final stopping. The `task2` snapshot
+uses 0.90 m forward/backward, 0.516780 m lateral travel, and 0.02 rad heading
+tolerance. It runs automatically and exits after the final dwell. Official
+grading remains pending. See the [Task2 acceptance record](docs/task2_acceptance.md)
+for measured results, limitations and reproduction instructions.
+
+The independent YAML profile below is optional and has different test settings;
+it is not required for the accepted course command.
+
 ## Scene 2 quick start: independent segments
 
 Update and rebuild in the cloud workspace:
