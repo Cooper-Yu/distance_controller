@@ -51,11 +51,35 @@ Output defaults to `/tmp/distance_controller_fixture/runtime_logs`; override
 `FIXTURE_OUTPUT_ROOT` to preserve evidence elsewhere. `CENTER_CASE` selects one
 fixture case. These scripts are not registered with `colcon test`.
 
-Seventeen cases cover rotated corridors on both sides of odom zero, angle wrapping,
+The original seventeen cases cover rotated corridors on both sides of odom zero, angle wrapping,
 initial rotation before translation, four rotated targets, final return, route
 heading disturbance recovery, scan/TF/time/travel/rear faults, insufficient wall
-span, unstable direction and excessive fit residual. Forty invalid parameter cases
+span, unstable direction and excessive fit residual. The original forty invalid parameter cases
 include the three new wall-heading limits. The tests use synthetic measurements;
 real reflective surfaces, wrong-wall selection, wheel slip and moving-scan distortion
 remain cloud/hardware validation concerns. Historical fixtures above describe the
 versions at their recorded dates.
+
+## Route composition and preparation stages
+
+`test_route.cpp` runs through `ament_cmake_gtest` without ROS motion. Four GoogleTests
+check direction/relative factories, parameter validity, composed endpoints and rejection
+of empty/unknown/disconnected routes. They include repeated AB after BA.
+
+```bash
+cd ~/ros2_ws
+colcon build --packages-select distance_controller
+colcon test --packages-select distance_controller --ctest-args -R test_route --output-on-failure
+colcon test-result --test-result-base build/distance_controller/test_results --verbose
+```
+
+The expanded right-wall fixture checks AB, AB/BA, AB/BC and AB/BA/AB endpoints,
+exactly one frozen target per segment and final stop. Separate failures exercise
+measurement, heading and positioning deadlines with exact reason assertions. Use
+`CENTER_CASE=ab_only` or `CENTER_CASE=heading_timeout` for one bounded case.
+The parameter probe also rejects invalid routes and deadlines.
+
+Current local results: 25/25 closed-loop fixture cases and 52/52 invalid parameter
+cases passed. Four route GoogleTests passed. Scene 1 completed 10/10 in local Gazebo
+and stopped/exited normally. The localhost fixture domains remain reserved for tests;
+these results do not replace cloud/hardware wall-quality and clearance verification.

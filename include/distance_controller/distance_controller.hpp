@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "distance_controller/route.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -93,9 +94,9 @@ private:
    * @par Route recovery
    * Cancel completed-segment dwell if position or heading leaves acceptance. Rotate
    * only at a position target or beyond translation_pause_angle_; otherwise permit tracking.
-   * @param[in] yaw Current odom heading (rad) passed by on_timer(); read to check
+   * @param[in] yaw Current odom heading (rad) passed by execute_current_segment(); read to check
    * heading acceptance and compute rotation commands; caller value is unchanged.
-   * @param[in] position_error Position-error norm (m) computed by on_timer(); read to
+   * @param[in] position_error Position-error norm (m) computed by execute_current_segment(); read to
    * choose rotation-only recovery or cancel dwell; caller value is unchanged.
    * @return True after publishing rotation only; false to continue this tick.
    * @note May clear segment_completed_, settling_, PID and ramp history. Scene 1 bypasses.
@@ -141,7 +142,8 @@ private:
    * @param[in] should_log on_timer() supplies the log throttle decision; read only.
    * @return True after publishing stop; false if disabled, complete, or ready to adjust.
    * @note Starts preparation position tracking from last_odom_; latches faults after
-   * accepted scans become unavailable, or time/travel bounds are exceeded.
+   * accepted scans become unavailable, or stage/total time/travel bounds are exceeded.
+   * Reports a distinct reason and stage; missing initial input waits only within its deadline.
    */
   bool handle_centering_guard(const std::chrono::steady_clock::time_point & now, bool should_log);
 
@@ -158,7 +160,7 @@ private:
   /**
    * @brief Log side-wall observations and odometry during A-to-B without affecting commands.
    * @par Observation
-   * Called by on_timer() at its log cadence and by check_completion() at B acceptance.
+   * Called by execute_current_segment() at the on_timer() log cadence and by check_completion() at B acceptance.
    * Read on_scan() side estimates, validity and receipt age independently of rear validity;
    * read on_odom() pose and route_y_ to report lateral odom displacement from A.
    * @note Missing, invalid or stale sides print unavailable. No control flags or commands
@@ -259,6 +261,50 @@ private:
   bool centering_settling_{false};
   /// Node-clock beginning of centered standstill, valid while centering_settling_.
   rclcpp::Time centering_settle_start_{};
+  /// Monotonic preparation stages; intermittent fit loss never restarts a stage deadline.
+  enum class PreparationStage { WaitingForWall, Aligning, Positioning };
+  /// Current preparation stage; evaluated by handle_centering_guard() on every eligible tick.
+  PreparationStage preparation_stage_{PreparationStage::WaitingForWall};
+  /// Steady-clock entry time of the current stage; valid after preparation_started_.
+  std::chrono::steady_clock::time_point preparation_stage_start_{};
+  /// Maximum initial scan/TF/right-wall quality acquisition duration (steady seconds).
+  double wall_measurement_timeout_{20.0};
+  /// Maximum rotation and aligned-standstill duration after measurement acceptance (steady seconds).
+  double alignment_timeout_{30.0};
+  /// Maximum centering/rear-distance and standstill duration after alignment (steady seconds).
+  double positioning_timeout_{30.0};
+  /// Latest on_scan() rejection reason, used in waiting/fault logs; no motion policy encoded here.
+  std::string scan_rejection_reason_{"no scan received"};
+
+  /**
+   * @brief Return the stable log identifier of the current preparation stage.
+   * @return Static stage label read by preparation fault/transition logging.
+   * @note Does not change state or clocks.
+   */
+  const char * preparation_stage_name() const;
+
+  /**
+   * @brief Return the independent deadline of the current preparation stage.
+   * @return Positive steady-clock seconds read by handle_centering_guard().
+   * @note Limits are startup parameters validated by configure_centering().
+   */
+  double preparation_stage_timeout() const;
+
+  /**
+   * @brief Advance preparation stage without restarting deadlines on transient fit loss.
+   * @param[in] now Steady time from handle_centering_guard(); copy to the stage clock only on transition.
+   * @note Reads accepted scan/fit/alignment flags and logs stage entry; never commands motion.
+   */
+  void update_preparation_stage(const std::chrono::steady_clock::time_point & now);
+
+  /**
+   * @brief Latch a preparation fault, clear control histories and publish stop.
+   * @param[in] reason Stable failure identifier from handle_centering_guard(); read for the log, unchanged.
+   * @param[in] now Steady time from handle_centering_guard(); read elapsed stage/total durations, unchanged.
+   * @note Logs current stage, scan reason and right-wall quality; restart is required after failure.
+   */
+  void fail_preparation(const char * reason, const std::chrono::steady_clock::time_point & now);
+
   /// True after first initial-adjustment guard entry records pose and steady start time.
   bool preparation_started_{false};
   /// Initial preparation odom position (m), used only to limit total displacement.
@@ -307,7 +353,7 @@ private:
   /// Continuous initial standstill duration in node-clock seconds.
   double alignment_settle_duration_{0.5};
 
-  /// Per-tick inputs from on_timer() and command outputs retained for log_control_state().
+  /// Per-tick inputs from execute_current_segment() and command outputs retained for log_control_state().
   struct ControlDiagnostics
   {
     double wz_robot{};     ///< Published body yaw rate (rad/s), written by command calculation.
@@ -333,8 +379,8 @@ private:
    * Also print the PID interval, integrals, and velocity before and after limiting.
    * Include the final velocity command in the robot frame.
    *
-   * @param[in] data Read the object passed by on_timer() to print this tick's values.
-   * on_timer() fills the pose, errors, and PID interval; compute_and_publish_command()
+   * @param[in] data Read the object passed by execute_current_segment() to print this tick's values.
+   * execute_current_segment() fills the pose, errors, and PID interval; compute_and_publish_command()
    * fills the seven velocity fields before this call. log_control_state() only reads
    * the object and does not write results back into it.
    * @note None at present.
@@ -399,17 +445,17 @@ private:
    * If the interval is negative or exceeds 0.2 seconds, reset PID and stop.
    * For a valid interval, update the previous PID time and allow control to continue.
    *
-   * @param[in] ex Odom x error in meters, calculated as target_x_ minus x in on_timer().
+   * @param[in] ex Odom x error in meters, calculated as target_x_ minus data.x in execute_current_segment().
    * Pass it to initialize_pid() when history is missing; do not modify the input.
-   * @param[in] ey Odom y error in meters, calculated as target_y_ minus y in on_timer().
+   * @param[in] ey Odom y error in meters, calculated as target_y_ minus data.y in execute_current_segment().
    * Pass it to initialize_pid() when history is missing; do not modify the input.
    * @param[in] current_time ROS time captured by on_timer(). Read it to initialize
    * PID history or calculate the interval since last_pid_time_. Store it in
    * last_pid_time_ when appropriate; do not modify on_timer()'s time variable.
-   * @param[out] pid_dt Write the interval in seconds into on_timer()'s local pid_dt
-   * variable through this reference; its incoming value is not used. Only a false
-   * return makes the result valid for PID calculation. on_timer() then copies it
-   * into data.pid_dt for compute_and_publish_command(), which passes it to
+   * @param[out] pid_dt Write the interval in seconds into execute_current_segment()'s data.pid_dt
+   * field directly through this reference; its incoming value is not used. Only a false
+   * return makes the result valid for PID calculation. execute_current_segment() passes the same data object
+   * to compute_and_publish_command(), which forwards this interval to
    * compute_pid() and limit_acceleration(). Initialization leaves pid_dt unchanged;
    * other early-return paths may write an invalid interval.
    * @return True to end this timer callback; false to continue PID calculation.
@@ -425,13 +471,13 @@ private:
    * Apply velocity and acceleration limits, then convert to the robot frame.
    * Save the resulting velocities and publish the body-frame velocity command.
    *
-   * @param[in,out] data Reference to the local object created by on_timer().
-   * Read data.ex, data.ey, data.yaw, and data.pid_dt, which on_timer() fills.
+   * @param[in,out] data Reference to the local object created by execute_current_segment().
+   * Read data.ex, data.ey, data.yaw, and data.pid_dt, which execute_current_segment() fills.
    * Write PID output into data.vx_odom/data.vy_odom, copy it into
    * data.vx_odom_raw/data.vy_odom_raw before limiting, and update
    * data.vx_odom/data.vy_odom with the limited values. Write the converted
    * command into data.vx_robot/data.vy_robot and the yaw command into data.wz_robot. All writes update the same object
-   * in on_timer(), which then passes it to log_control_state(). The velocity
+   * in execute_current_segment(), which then passes it to log_control_state(). The velocity
    * results are available after this function returns; data.x/data.y stay unchanged.
    * @note Run only after feedback and PID timing checks pass. Command publication
    * is independent of the logging rate. Updates PID and acceleration history; scene 2 adds a bounded yaw correction outside heading_tolerance_, while scene 1 keeps angular velocity zero.
@@ -443,26 +489,39 @@ private:
    *
    * @par Control tick
    * Check latched faults, feedback age, and node time before target initialization.
-   * Gate initial rotation and laser centering before recording the current pose as A; then start the four route segments. In scene 2, recover heading and revoke drifted dwell before handling completion, settling, and PID timing.
+   * Gate initial rotation and laser centering before recording the current pose as A; then execute the selected route segments. In scene 2, recover heading and revoke drifted dwell before handling completion, settling, and PID timing.
    * Only routine logging is throttled; command calculation runs on each eligible tick.
    *
    * @note Mutates route and PID state through helpers, publishes velocity, and may shut down the ROS context at route completion. A wall timer continues firing when simulation time pauses.
    */
   void on_timer();
 
+  /// Result of a single nonblocking segment tick; only Completed permits route advancement.
+  enum class SegmentResult { Running, Completed, Failed };
+
   /**
-   * @brief Handle waiting and switching after a segment completes.
-   *
-   * @par Wait and switch
-   * If the current segment is not completed, return false to continue tracking it.
-   * Otherwise, keep the robot stopped until the waiting time has elapsed.
-   * Then prepare the next segment, or shut down the node if all segments are completed.
-   *
-   * @param[in] current_time ROS time captured by on_timer(). Read it with
-   * dwell_start_time_ to calculate how long the completed segment has waited.
-   * This function does not change on_timer()'s current_time variable.
-   * @return False to continue tracking; true to end the current timer callback.
-   * @note Publishes zero, advances the index, and resets PID/segment flags for the next segment. After the final dwell, shuts down the default ROS context.
+   * @brief Advance only the current segment by one control tick.
+   * @param[in] current_time Node time from on_timer(); read/copy into PID, settling and dwell clocks.
+   * @param[in] should_log Log cadence from on_timer(); read to emit diagnostics, unchanged.
+   * @return Running during tracking/settling/dwell, Completed after dwell, or Failed on invalid state.
+   * @note Initializes the target once, publishes commands and updates PID/segment state;
+   * never selects another segment or shuts down ROS. on_timer() owns those decisions.
+   */
+  SegmentResult execute_current_segment(const rclcpp::Time & current_time, bool should_log);
+
+  /**
+   * @brief Advance the route after the executor reports Completed.
+   * @note Called only by on_timer(); clears segment/PID state for the next tick,
+   * or publishes stop and shuts down ROS when the route list is exhausted.
+   */
+  void advance_route();
+
+  /**
+   * @brief Keep an accepted segment stopped until its configured dwell finishes.
+   * @param[in] current_time Node time from execute_current_segment(); read against
+   * dwell_start_time_ and the current motion.dwell; no input is modified.
+   * @return True only after accepted standstill and complete dwell; false otherwise.
+   * @note Publishes stop without advancing route state. Heading/position recovery is checked first.
    */
   bool handle_completed_segment(const rclcpp::Time & current_time);
 
@@ -477,22 +536,15 @@ private:
    */
   void publish_stop();
 
-  /// One relative displacement in the fixed route frame, accumulated into route targets.
-  struct Segment
-  {
-    double dx{};  ///< Forward displacement (m) in the fixed route frame; odom +x in scene 2.
-    double dy{};  ///< Left displacement (m) in the fixed route frame; odom +y in scene 2.
-  };
-
   /**
    * @brief Load and validate the selected sequence of relative displacements.
    *
    * @par Route selection
    * Replace segments_ with the selected route before control interfaces are created.
-   * Displacements accumulate in the fixed route frame, not the changing body frame. Scene 2 reads positive finite forward_distance and lateral_distance startup parameters.
+   * Displacements accumulate in the fixed route frame, not the changing body frame. Scene 2 reads positive finite forward_distance and lateral_distance and a connected route list starting at A.
    *
    * @param[in] scene_number Scene number forwarded by DistanceController() from main(). Read it to choose the route stored in segments_ for initialize_segment_target(); the caller value is unchanged.
-   * @throws std::invalid_argument If the scene is unsupported, a displacement is nonfinite, or a scene-2 distance is not positive.
+   * @throws std::invalid_argument If the scene is unsupported, a displacement is nonfinite, or a scene-2 distance is not positive, or route IDs are unknown/disconnected.
    * @note Scene 2 uses adjustable nominal distances; no wall clearance or obstacle detection is provided.
    */
   void select_waypoints(int scene_number);
@@ -503,8 +555,8 @@ private:
    * @par Orientation conversion
    * Convert the quaternion to roll, pitch, and yaw and return only yaw.
    *
-   * @param[in] q Orientation from last_odom_.pose.pose.orientation passed by on_timer(), handle_initial_alignment(), check_completion(), or initialize_segment_target(). Read it for conversion without changing the stored feedback.
-   * @return Yaw in radians relative to odom, used by on_timer() for velocity conversion for heading acceptance, or by initialize_segment_target() for scene-1 route_yaw_.
+   * @param[in] q Orientation from last_odom_.pose.pose.orientation passed by execute_current_segment(), handle_initial_alignment(), check_completion(), or initialize_segment_target(). Read it for conversion without changing the stored feedback.
+   * @return Yaw in radians relative to odom, used by execute_current_segment() for heading acceptance and command calculation, or by initialize_segment_target() for scene-1 route_yaw_.
    * @note The caller must supply a valid orientation; this helper does not validate or normalize the quaternion.
    */
   double quaternion_to_yaw(const geometry_msgs::msg::Quaternion & q);
@@ -513,12 +565,12 @@ private:
    * @brief Freeze the current target from the route origin and cumulative displacement.
    *
    * @par Target setup
-   * Called by on_timer() when target_initialized_ is false. Capture route_x_, route_y_,
+   * Called by execute_current_segment() when target_initialized_ is false. Capture route_x_, route_y_,
    * once from last_odom_ (after centering in scene 2). Set route_yaw_
    * to heading_reference_ in scene 2 or measured yaw in scene 1. Sum segments through the current index and
    * rotate the sum into odom and store target_x_, target_y_, and target_initialized_.
    *
-   * @note An out-of-range index only logs and returns. Actual segment stopping error is not accumulated into later targets.
+   * @note An out-of-range index logs and returns; execute_current_segment() then reports Failed. Actual segment stopping error is not accumulated into later targets.
    */
   void initialize_segment_target();
 
@@ -540,11 +592,11 @@ private:
    * Integrate and clamp both position errors, calculate their finite-difference derivatives,
    * then write the weighted outputs and retain errors for the next update.
    *
-   * @param[in] ex Odom x error (m) from on_timer() data.ex, forwarded by compute_and_publish_command(); read for the x-axis PID and retain in prev_error_x_ without changing the input.
-   * @param[in] ey Odom y error (m) from on_timer() data.ey, forwarded by compute_and_publish_command(); read for the y-axis PID and retain in prev_error_y_ without changing the input.
+   * @param[in] ex Odom x error (m) from execute_current_segment() data.ex, forwarded by compute_and_publish_command(); read for the x-axis PID and retain in prev_error_x_ without changing the input.
+   * @param[in] ey Odom y error (m) from execute_current_segment() data.ey, forwarded by compute_and_publish_command(); read for the y-axis PID and retain in prev_error_y_ without changing the input.
    * @param[in] dt Positive node-clock interval (s), validated by handle_pid_timing() and passed as data.pid_dt by compute_and_publish_command(); read for integration and differentiation.
-   * @param[out] vx_odom Write raw x velocity (m/s, odom) into on_timer() data.vx_odom via compute_and_publish_command(). Incoming value is unused; on return the caller copies it to data.vx_odom_raw before limiting.
-   * @param[out] vy_odom Write raw y velocity (m/s, odom) into on_timer() data.vy_odom via compute_and_publish_command(). Incoming value is unused; on return the caller copies it to data.vy_odom_raw before limiting.
+   * @param[out] vx_odom Write raw x velocity (m/s, odom) into execute_current_segment() data.vx_odom via compute_and_publish_command(). Incoming value is unused; on return the caller copies it to data.vx_odom_raw before limiting.
+   * @param[out] vy_odom Write raw y velocity (m/s, odom) into execute_current_segment() data.vy_odom via compute_and_publish_command(). Incoming value is unused; on return the caller copies it to data.vy_odom_raw before limiting.
    * @note Updates integral and previous-error members even when ki_ or kd_ is zero; does not publish or enforce speed limits.
    */
   void compute_pid(double ex, double ey, double dt, double & vx_odom, double & vy_odom);
@@ -553,7 +605,7 @@ private:
    * @brief Limit planar speed while preserving the velocity direction.
    *
    * @par Speed limit
-   * Scale both components equally only when their norm exceeds max_speed_.
+   * Scale both components equally when their norm exceeds the smaller of max_speed_ and the active segment speed cap.
    *
    * @param[in,out] vx Read raw odom x velocity (m/s) from data.vx_odom in compute_and_publish_command(); write the speed-limited value to the same field for limit_acceleration().
    * @param[in,out] vy Read raw odom y velocity (m/s) from data.vy_odom in compute_and_publish_command(); write the speed-limited value to the same field for limit_acceleration().
@@ -570,7 +622,7 @@ private:
    *
    * @param[in,out] vx Read speed-limited odom x velocity (m/s) from compute_and_publish_command() data.vx_odom; write the ramp-limited result to the same field for odom_to_robot_velocity() and log_control_state().
    * @param[in,out] vy Read speed-limited odom y velocity (m/s) from compute_and_publish_command() data.vy_odom; write the ramp-limited result to the same field for odom_to_robot_velocity() and log_control_state().
-   * @param[in] dt Positive interval (s) validated by handle_pid_timing(), stored by on_timer() in data.pid_dt, and forwarded by compute_and_publish_command(); read to bound the change, with no writeback.
+   * @param[in] dt Positive interval (s) validated by handle_pid_timing(), written into execute_current_segment()'s data.pid_dt, and forwarded by compute_and_publish_command(); read to bound the change, with no writeback.
    * @note Limits commanded acceleration and deceleration, not measured acceleration. publish_stop() bypasses this ramp and clears its history.
    */
   void limit_acceleration(double & vx, double & vy, double dt);
@@ -583,7 +635,7 @@ private:
    *
    * @param[in] vx_odom Limited odom x velocity (m/s) from compute_and_publish_command() data.vx_odom; read as a rotation input without modifying the field.
    * @param[in] vy_odom Limited odom y velocity (m/s) from compute_and_publish_command() data.vy_odom; read as a rotation input without modifying the field.
-   * @param[in] yaw Robot yaw relative to odom (rad), extracted in on_timer() and forwarded as data.yaw by compute_and_publish_command(); read for the inverse rotation.
+   * @param[in] yaw Robot yaw relative to odom (rad), extracted in execute_current_segment() and forwarded as data.yaw by compute_and_publish_command(); read for the inverse rotation.
    * @param[out] vx_robot Write body x velocity (m/s) into compute_and_publish_command() local vx_robot. Incoming value is unused; on return that caller copies the result to data.vx_robot and cmd.linear.x.
    * @param[out] vy_robot Write body y velocity (m/s) into compute_and_publish_command() local vy_robot. Incoming value is unused; on return that caller copies the result to data.vy_robot and cmd.linear.y.
    * @note Assumes the command receiver accepts body-frame planar x/y velocities. No angular command is calculated.
@@ -597,8 +649,8 @@ private:
    * @par PID initialization
    * Store previous errors and last_pid_time_, clear both integrals, and mark PID initialized.
    *
-   * @param[in] ex Odom x error (m) calculated by on_timer() and forwarded by handle_pid_timing(); copy to prev_error_x_ for the next compute_pid() derivative.
-   * @param[in] ey Odom y error (m) calculated by on_timer() and forwarded by handle_pid_timing(); copy to prev_error_y_ for the next compute_pid() derivative.
+   * @param[in] ex Odom x error (m) calculated by execute_current_segment() and forwarded by handle_pid_timing(); copy to prev_error_x_ for the next compute_pid() derivative.
+   * @param[in] ey Odom y error (m) calculated by execute_current_segment() and forwarded by handle_pid_timing(); copy to prev_error_y_ for the next compute_pid() derivative.
    * @param[in] current_time Node time captured by on_timer() and forwarded by handle_pid_timing(); copy into last_pid_time_ for its next interval calculation. The caller time remains unchanged.
    * @note Initialization itself does not publish; handle_pid_timing() sends zero and ends this tick.
    */
@@ -612,10 +664,10 @@ private:
    * absolute yaw rate below 0.02 rad/s for at least 0.5 node-clock seconds. Scene 2 also requires yaw error within heading_tolerance_.
    * Start or reset settling_. Route arrivals set segment_completed_ and dwell_start_time_; initial centering uses its own settling state.
    *
-   * @param[in] ex Odom x position error (m) calculated and passed by on_timer(); read to test distance from the target without modifying the caller error.
-   * @param[in] ey Odom y position error (m) calculated and passed by on_timer(); read to test distance from the target without modifying the caller error.
+   * @param[in] ex Odom x position error (m) calculated and passed by execute_current_segment(); read to test distance from the target without modifying the caller error.
+   * @param[in] ey Odom y position error (m) calculated and passed by execute_current_segment(); read to test distance from the target without modifying the caller error.
    * @param[in] current_time Node time captured by on_timer(); read for settling duration and copy to settle_start_time_ or dwell_start_time_ on state transitions. handle_completed_segment() later reads dwell_start_time_; the input is unchanged.
-   * @note on_timer() publishes zero before calling. Feedback speed comes from last_odom_.twist in the child frame; scene 2 also requires heading error relative to heading_reference_ within heading_tolerance_.
+   * @note execute_current_segment() publishes zero before calling. Feedback speed comes from last_odom_.twist in the child frame; scene 2 also requires heading error relative to heading_reference_ within heading_tolerance_.
    */
   void check_completion(double ex, double ey, const rclcpp::Time & current_time);
 
@@ -636,7 +688,7 @@ private:
   std::chrono::steady_clock::time_point last_log_time_{std::chrono::steady_clock::now()};
 
   /// Ordered relative displacements (m) in the fixed route frame, selected at construction.
-  std::vector<Segment> segments_{};
+  std::vector<distance_controller::RouteSegment> segments_{};
   /// Zero-based active segment index; reaches segments_.size() only at route shutdown.
   std::size_t current_segment_index_{0};
 

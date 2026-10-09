@@ -43,6 +43,9 @@ void DistanceController::configure_centering()
   side_max_distance_ = positive("side_max_distance", side_max_distance_);
   side_max_mad_ = positive("side_max_mad", side_max_mad_);
   scan_timeout_ = positive("scan_timeout", scan_timeout_);
+  wall_measurement_timeout_ = positive("wall_measurement_timeout", wall_measurement_timeout_);
+  alignment_timeout_ = positive("alignment_timeout", alignment_timeout_);
+  positioning_timeout_ = positive("positioning_timeout", positioning_timeout_);
   preparation_timeout_ = positive("preparation_timeout", preparation_timeout_);
   preparation_max_travel_ = positive("preparation_max_travel", preparation_max_travel_);
   base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
@@ -82,6 +85,7 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
   right_wall_valid_ = false;
   scan_valid_ = false;
   right_heading_valid_ = false;
+  scan_rejection_reason_ = "invalid scan header, timestamp or range metadata";
   const rclcpp::Time stamp(msg->header.stamp, get_clock()->get_clock_type());
   const double age = (now() - stamp).seconds();
   if (
@@ -90,6 +94,7 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
     msg->angle_increment <= 0.0 || !std::isfinite(msg->range_min) ||
     !std::isfinite(msg->range_max) || msg->range_min < 0.0 || msg->range_max <= msg->range_min)
     return;
+  scan_rejection_reason_ = "laser-to-body TF unavailable";
   geometry_msgs::msg::TransformStamped mounting;
   try {
     mounting =
@@ -97,6 +102,7 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
   } catch (const tf2::TransformException &) {
     return;
   }
+  scan_rejection_reason_ = "nonfinite, nonunit or nonplanar laser mounting";
   const auto & q = mounting.transform.rotation;
   const auto & t = mounting.transform.translation;
   const tf2::Quaternion rotation(q.x, q.y, q.z, q.w);
@@ -150,43 +156,18 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
   right_wall_valid_ = estimate_side(right, right_samples, right_wall_);
   const bool rear_valid =
     estimate_side(rear, rear_samples, rear_wall_) && rear_wall_ >= rear_min_distance_;
-  if (!left_wall_valid_ || !right_wall_valid_ || !rear_valid) return;
+  if (!left_wall_valid_ || !right_wall_valid_ || !rear_valid) {
+    scan_rejection_reason_ = "wall window invalid:";
+    if (!left_wall_valid_) scan_rejection_reason_ += " left";
+    if (!right_wall_valid_) scan_rejection_reason_ += " right";
+    if (!rear_valid) scan_rejection_reason_ += " rear";
+    return;
+  }
+  scan_rejection_reason_ = "none";
   last_scan_stamp_ns_ = stamp.nanoseconds();
   last_scan_time_ = std::chrono::steady_clock::now();
   scan_valid_ = true;
   accepted_scan_ = true;
-}
-
-bool DistanceController::handle_centering_guard(
-  const std::chrono::steady_clock::time_point & now, bool should_log)
-{
-  if (!heading_control_enabled_ || centering_complete_) return false;
-  if (!preparation_started_) {
-    preparation_start_ = now;
-    preparation_x_ = last_odom_.pose.pose.position.x;
-    preparation_y_ = last_odom_.pose.pose.position.y;
-    preparation_started_ = true;
-  }
-  const double elapsed = std::chrono::duration<double>(now - preparation_start_).count();
-  const double travel = std::hypot(
-    last_odom_.pose.pose.position.x - preparation_x_,
-    last_odom_.pose.pose.position.y - preparation_y_);
-  const double age = std::chrono::duration<double>(now - last_scan_time_).count();
-  const bool bounds = elapsed > preparation_timeout_ || travel > preparation_max_travel_;
-  const bool unavailable = !scan_valid_ || !accepted_scan_ || age > scan_timeout_;
-  if (!bounds && !unavailable) return false;
-  centering_settling_ = false;
-  alignment_settling_ = false;
-  reset_pid();
-  publish_stop();
-  if (bounds || accepted_scan_) {
-    fault_latched_ = true;
-    RCLCPP_ERROR(
-      get_logger(), "Initial preparation fault: scan invalid/stale or time/travel limit");
-  } else if (should_log) {
-    RCLCPP_INFO(get_logger(), "Waiting for fresh side/rear-wall scan and fixed laser-to-body TF");
-  }
-  return true;
 }
 
 bool DistanceController::handle_initial_centering(const rclcpp::Time & current_time)
@@ -255,7 +236,11 @@ bool DistanceController::handle_initial_centering(const rclcpp::Time & current_t
 
 void DistanceController::log_route_wall_observation()
 {
-  if (!heading_control_enabled_ || !centering_complete_ || current_segment_index_ != 0) return;
+  if (
+    !heading_control_enabled_ || !centering_complete_ || current_segment_index_ >= segments_.size())
+    return;
+  const auto & edge = segments_[current_segment_index_];
+  if (edge.from != "A" || edge.to != "B") return;
   const double age =
     std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_observation_time_)
       .count();

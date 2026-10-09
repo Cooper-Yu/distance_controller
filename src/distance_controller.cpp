@@ -14,7 +14,7 @@
 
 DistanceController::DistanceController(int scene_number) : Node{"distance_controller"}
 {
-  select_waypoints(scene_number);
+  if (scene_number != 1 && scene_number != 2) throw std::invalid_argument("Scene must be 1 or 2");
   heading_control_enabled_ = (scene_number == 2);
   configure_heading_control();
 
@@ -36,6 +36,7 @@ DistanceController::DistanceController(int scene_number) : Node{"distance_contro
     max_acceleration_ <= 0.0 || !std::isfinite(dwell_duration_) || dwell_duration_ < 0.0) {
     throw std::invalid_argument("Invalid controller parameters");
   }
+  select_waypoints(scene_number);
   const auto odom_topic = declare_parameter<std::string>("odom_topic", "/odometry/filtered");
   const auto cmd_topic = declare_parameter<std::string>("cmd_vel_topic", "/cmd_vel");
   RCLCPP_INFO(
@@ -365,88 +366,13 @@ void DistanceController::on_timer()
     return;
   }
 
-  if (!target_initialized_) {
-    initialize_segment_target();
-  }
-
-  if (!target_initialized_) {
+  const auto result = execute_current_segment(current_time, should_log);
+  if (result == SegmentResult::Completed) advance_route();
+  if (result == SegmentResult::Failed) {
+    fault_latched_ = true;
     publish_stop();
-    return;
+    RCLCPP_ERROR(get_logger(), "Route execution failed; no segment advancement");
   }
-
-  double x = last_odom_.pose.pose.position.x;
-  double y = last_odom_.pose.pose.position.y;
-
-  double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
-
-  double ex = target_x_ - x;
-  double ey = target_y_ - y;
-
-  if (should_log) log_route_wall_observation();
-
-  const double position_error = std::hypot(ex, ey);
-  if (handle_heading_recovery(yaw, position_error)) {
-    return;
-  }
-
-  if (handle_completed_segment(current_time)) {
-    return;
-  }
-
-  if (position_error < 0.01) {
-    publish_stop();
-    reset_pid();
-    check_completion(ex, ey, current_time);
-
-    return;
-  }
-
-  settling_ = false;
-
-  double pid_dt = 0.0;
-  if (handle_pid_timing(ex, ey, current_time, pid_dt)) {
-    return;
-  }
-
-  ControlDiagnostics data{};
-  data.x = x;
-  data.y = y;
-  data.yaw = yaw;
-  data.ex = ex;
-  data.ey = ey;
-  data.pid_dt = pid_dt;
-
-  compute_and_publish_command(data);
-
-  if (should_log) {
-    log_control_state(data);
-  }
-}
-
-bool DistanceController::handle_completed_segment(const rclcpp::Time & current_time)
-{
-  if (!segment_completed_) {
-    return false;
-  }
-
-  publish_stop();
-  const double dwell_elapsed = (current_time - dwell_start_time_).seconds();
-
-  if (dwell_elapsed < dwell_duration_) {
-    return true;
-  }
-  ++current_segment_index_;
-  if (current_segment_index_ >= segments_.size()) {
-    RCLCPP_INFO(get_logger(), "Route completed.");
-    rclcpp::shutdown();
-    return true;
-  }
-
-  reset_pid();
-  settling_ = false;
-  segment_completed_ = false;
-  target_initialized_ = false;
-  return true;
 }
 
 void DistanceController::publish_stop()
@@ -465,46 +391,6 @@ void DistanceController::publish_stop()
   cmd_pub_->publish(cmd);
 }
 
-void DistanceController::select_waypoints(int scene_number)
-{
-  if (scene_number == 1) {
-    segments_ = {{0.0, 1.0},   {0.0, -1.0}, {0.0, -1.0}, {0.0, 1.0}, {1.0, 1.0},
-                 {-1.0, -1.0}, {1.0, -1.0}, {-1.0, 1.0}, {1.0, 0.0}, {-1.0, 0.0}};
-  } else if (scene_number == 2) {
-    const double forward_distance = declare_parameter<double>("forward_distance", 0.90);
-    const double lateral_distance = declare_parameter<double>("lateral_distance", 0.516780);
-
-    if (!std::isfinite(forward_distance)) {
-      throw std::invalid_argument("forward_distance must be finite");
-    }
-    if (forward_distance <= 0.0) {
-      throw std::invalid_argument("forward_distance must be positive");
-    }
-
-    if (!std::isfinite(lateral_distance)) {
-      throw std::invalid_argument("lateral_distance must be finite");
-    }
-    if (lateral_distance <= 0.0) {
-      throw std::invalid_argument("lateral_distance must be positive");
-    }
-
-    segments_ = {
-      {forward_distance, 0.0},
-      {0.0, -lateral_distance},
-      {0.0, lateral_distance},
-      {-forward_distance, 0.0}};
-  } else {
-    throw std::invalid_argument("Scene must be 1 (simulation) or 2 (CyberWorld)");
-  }
-  for (const auto & segment : segments_) {
-    if (!std::isfinite(segment.dx) || !std::isfinite(segment.dy)) {
-      throw std::invalid_argument(
-        "CyberWorld waypoints are not configured; fill all four {dx, dy} rows before running "
-        "scene 2");
-    }
-  }
-}
-
 double DistanceController::quaternion_to_yaw(const geometry_msgs::msg::Quaternion & q)
 {
   tf2::Quaternion quat(q.x, q.y, q.z, q.w);
@@ -513,37 +399,6 @@ double DistanceController::quaternion_to_yaw(const geometry_msgs::msg::Quaternio
   tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
 
   return yaw;
-}
-
-void DistanceController::initialize_segment_target()
-{
-  if (current_segment_index_ >= segments_.size()) {
-    RCLCPP_WARN(get_logger(), "Segment index out of range");
-    return;
-  }
-
-  if (!route_initialized_) {
-    route_x_ = last_odom_.pose.pose.position.x;
-    route_y_ = last_odom_.pose.pose.position.y;
-    route_yaw_ = heading_control_enabled_ ? heading_reference_
-                                          : quaternion_to_yaw(last_odom_.pose.pose.orientation);
-    route_initialized_ = true;
-  }
-
-  double total_dx = 0.0;
-  double total_dy = 0.0;
-  for (std::size_t i = 0; i <= current_segment_index_; ++i) {
-    total_dx += segments_[i].dx;
-    total_dy += segments_[i].dy;
-  }
-  target_x_ = route_x_ + std::cos(route_yaw_) * total_dx - std::sin(route_yaw_) * total_dy;
-
-  target_y_ = route_y_ + std::sin(route_yaw_) * total_dx + std::cos(route_yaw_) * total_dy;
-
-  RCLCPP_INFO(
-    get_logger(), "Segment %zu/%zu target=(%.6f, %.6f)", current_segment_index_ + 1,
-    segments_.size(), target_x_, target_y_);
-  target_initialized_ = true;
 }
 
 void DistanceController::reset_pid()
@@ -579,8 +434,9 @@ void DistanceController::compute_pid(
 void DistanceController::limit_velocity(double & vx, double & vy)
 {
   double speed = std::sqrt(vx * vx + vy * vy);
-  if (speed > max_speed_) {
-    double scale = max_speed_ / speed;
+  const double cap = std::min(max_speed_, segments_[current_segment_index_].motion.max_speed);
+  if (speed > cap) {
+    double scale = cap / speed;
 
     vx *= scale;
     vy *= scale;

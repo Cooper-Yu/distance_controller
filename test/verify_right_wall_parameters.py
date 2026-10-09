@@ -29,9 +29,18 @@ names = [
     'side_max_mad',
     'scan_timeout',
     'preparation_timeout',
+    'wall_measurement_timeout',
+    'alignment_timeout',
+    'positioning_timeout',
     'preparation_max_travel',
 ]
 cases = [(n, v) for n in names for v in ['0.0', '.nan']] + [
+    ('route', '[BC]'),
+    ('route', '[AB, CB]'),
+    ('route', '[AB, AB]'),
+    ('route', '[AD]'),
+    ('forward_distance', '0.0'),
+    ('lateral_distance', '-1.0'),
     ('wall_heading_half_angle', '0.9'),
     ('side_window_half_angle', '0.9'),
     ('side_min_distance', '2.0'),

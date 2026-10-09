@@ -8,11 +8,11 @@ digraph control {
   align [label="Initial alignment gate (scene 2)\nStable right-wall fit / rotate parallel\nStop; capture odom heading reference",shape=diamond];
   recover [label="Heading recovery (scene 2)\nRevoke drifted dwell / rotate only",shape=diamond];
   rotate [label="Publish initial adjustment or stop\nEnd this tick"];
-  target [label="Initialize target if needed\nScene 2: centered A + wall-rotated route offsets"];
+  target [label="execute_current_segment()\nInitialize target once\nScene 2: centered A + wall-rotated route offsets"];
   valid [label="Target ready?",shape=diamond];
   errors [label="Read pose; calculate ex / ey"];
   done [label="Segment completed?",shape=diamond];
-  dwell [label="handle_completed_segment()\nStop; wait; advance or shutdown",fillcolor="#e7f3e6"];
+  dwell [label="handle_completed_segment()\nStop; wait for motion.dwell\nReturn Completed when ready",fillcolor="#e7f3e6"];
   near [label="Position error < 0.01 m?",shape=diamond];
   settle [label="Stop; reset PID; check_completion()\nVerify continuous standstill\nRoute: mark completed for dwell\nEnd this tick",fillcolor="#e7f3e6"];
   timing [label="Clear settling; handle_pid_timing()",shape=diamond];
@@ -20,7 +20,7 @@ digraph control {
   log [label="log_control_state(data) when due\nEnd this tick"];
   start -> guard;
   guard -> stop [label="blocked"];
-  scan [label="Initial scan / TF / time / travel guard",shape=diamond];
+  scan [label="Preparation guard: scan / TF / travel\nStage deadline + total deadline",shape=diamond];
   center [label="Initial laser centering (scene 2)\nSide center + rear 0.28 m + yaw; stop; capture A",shape=diamond];
   guard -> scan [label="continue"];
   scan -> stop [label="blocked"];
@@ -36,6 +36,9 @@ digraph control {
   recover -> rotate [label="rotation required"];
   recover -> done [label="continue"];
   done -> dwell [label="yes"];
+  advance [label="on_timer(): Completed -> advance_route()\nReset for next tick or stop and shutdown"];
+  dwell -> advance [label="finished"];
+  dwell -> stop [label="waiting"];
   done -> near [label="no"];
   near -> settle [label="yes"];
   near -> timing [label="no"];

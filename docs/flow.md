@@ -22,7 +22,7 @@ The diagram uses actual function names. A stored Graphviz source produces the SV
 | Initial centering | Compare median side body-y and rearward body-x distances; adjust x/y with yaw hold; verify standstill and capture A |
 | Target and error | Capture current A after centering in scene 2; initialize route targets from that fixed origin, heading, and cumulative displacement; stop if unavailable, otherwise read pose and compute ex/ey |
 | Heading recovery | Scene 2 pauses translation for large yaw errors or corrects yaw at an arrived position; drift during dwell revokes completion |
-| Completed segment | Keep zero velocity during dwell; then advance once and either reset segment state for the next tick or shut down after the final segment |
+| Completed segment | Stop through dwell; executor returns Completed; on_timer() calls advance_route() once |
 | Position acceptance | Inside 0.01 m, stop, reset PID, and check continuous feedback standstill |
 | PID timing | Seed missing history and stop; stop for zero interval; reset and stop for negative or greater-than-0.2 s interval; calculate only with valid dt |
 | Command | PID -> save raw values -> speed limit -> acceleration limit -> odom-to-body rotation -> scene-2 yaw command -> publish |
@@ -40,7 +40,7 @@ Feedback receipt timeout uses steady time. PID, settling, and dwell use node tim
 
 ## Diagnostic data flow
 
-`on_timer()` creates `ControlDiagnostics data` and fills six input fields: position, yaw, errors, and pid_dt. `compute_and_publish_command(data)` reads errors/yaw/dt and writes six planar velocity fields and data.wz_robot into the same object. `log_control_state(data)` reads those results.
+`execute_current_segment()` creates `ControlDiagnostics data` and fills six input fields: position, yaw, errors, and pid_dt. `compute_and_publish_command(data)` reads errors/yaw/dt and writes six planar velocity fields and data.wz_robot into the same object. `log_control_state(data)` reads those results.
 
 ## Maintenance and evidence
 
@@ -50,3 +50,17 @@ doxygen docs/Doxyfile
 ```
 
 The current code completed 10/10 segments and exited normally in the local empty-world run on 2026-10-09. That normal-route evidence does not replace fault injection, cloud, or hardware acceptance.
+
+
+## Route and preparation boundaries
+
+Motion factories in `route.hpp` describe distance, speed and dwell. `compose_route()`
+validates connected names starting at A. `route_execution.cpp` owns target freezing
+and the nonblocking segment tick; `on_timer()` owns advancement. AB, AB/BA, AB/BC and
+the default four edges share one executor. Each target stays fixed through tracking,
+standstill and dwell.
+
+`preparation_guard.cpp` owns steady-time limits: measurement 20 s, alignment 30 s,
+positioning 30 s, plus total 60 s. Stages advance once; poor fits do not reset deadlines.
+Faults distinguish stage/total deadlines, travel, invalid scans and stale scans.
+PID, settling and dwell still use node time.

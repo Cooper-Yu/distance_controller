@@ -48,11 +48,33 @@ try:
         'wrap',
         'noisy_wall',
         'recovery',
+        'ab_only',
+        'ab_ba',
+        'ab_bc',
+        'repeat_ab',
+        'measurement_timeout',
+        'heading_timeout',
+        'position_timeout',
+        'alignment_fit_loss',
     ]:
         if os.environ.get('CENTER_CASE') and case != os.environ['CENTER_CASE']:
             continue
         corridor_angle = 3.13 if case == 'wrap' else -0.35 if case == 'right' else 0.20
-        success = case in ['left', 'right', 'wrap', 'recovery']
+        routes = {
+            'ab_only': ['AB'],
+            'ab_ba': ['AB', 'BA'],
+            'ab_bc': ['AB', 'BC'],
+            'repeat_ab': ['AB', 'BA', 'AB'],
+        }
+        route = routes.get(case, ['AB', 'BC', 'CB', 'BA'])
+        offsets = {'AB': (0.12, 0), 'BA': (-0.12, 0), 'BC': (0, -0.08), 'CB': (0, 0.08)}
+        expected_targets = []
+        ex, ey = 0.0, 0.0
+        for edge in route:
+            dx, dy = offsets[edge]
+            ex, ey = ex + dx, ey + dy
+            expected_targets.append((ex, ey))
+        success = case in ['left', 'right', 'wrap', 'recovery'] or case in routes
         topic = '/centering_fixture/' + case
         base = 'body_' + case
         laser = 'laser_' + case
@@ -105,6 +127,13 @@ try:
             '-p',
             'dwell_duration:=0.1',
         ]
+        args += ['-p', 'route:=[' + ', '.join(route) + ']']
+        if case == 'measurement_timeout':
+            args += ['-p', 'wall_heading_min_span:=2.0', '-p', 'wall_measurement_timeout:=1.0']
+        if case in ['heading_timeout', 'alignment_fit_loss']:
+            args += ['-p', 'alignment_timeout:=1.0']
+        if case == 'position_timeout':
+            args += ['-p', 'positioning_timeout:=1.0']
         if case in [
             'no_tf',
             'no_scan',
@@ -124,7 +153,14 @@ try:
             x, y, yaw = (
                 (0.04 if case == 'left' else -0.04 if case == 'right' else 0.0),
                 (0.05 if case == 'right' else -0.05),
-                (-0.2 if case == 'right' else 0.2 if case in ['left', 'wrap', 'recovery'] else 0.0),
+                (
+                    -0.2
+                    if case == 'right'
+                    else 0.2
+                    if case in ['left', 'wrap', 'recovery', 'heading_timeout', 'alignment_fit_loss']
+                    or case in routes
+                    else 0.0
+                ),
             )
             began = prev = time.monotonic()
             next_scan = began
@@ -161,7 +197,9 @@ try:
                             )
                             < 0.021
                         )
-                        targets = re.findall(r'Segment \d/4 target=\(([-\d.]+), ([-\d.]+)\)', text)
+                        targets = re.findall(
+                            r'Segment \d+/\d+ target=\(([-\d.]+), ([-\d.]+)\)', text
+                        )
                     if case == 'recovery' and centered and not disturbed:
                         yaw += 0.25
                         disturbed = now
@@ -198,8 +236,9 @@ try:
                         assert all(abs(v) < 1e-10 for v in cmd), (case, cmd)
                     x += (math.cos(yaw) * vx - math.sin(yaw) * vy) * dt
                     y += (math.sin(yaw) * vx + math.cos(yaw) * vy) * dt
-                    yaw += wz * dt
-                    if case == 'duration_limit':
+                    if case != 'heading_timeout':
+                        yaw += wz * dt
+                    if case in ['duration_limit', 'position_timeout']:
                         y = -0.05
                     if first_move and now - first_move > 0.2 and trigger is None:
                         trigger = now
@@ -273,7 +312,13 @@ try:
                                     distance = float('inf')
                                 if case == 'rear_close':
                                     distance = 0.23
-                            if case == 'noisy_wall' and 0.20 < abs(body_angle + math.pi / 2) < 0.52:
+                            if (
+                                case == 'noisy_wall'
+                                or (
+                                    case == 'alignment_fit_loss'
+                                    and 'stage=heading_alignment' in text
+                                )
+                            ) and 0.20 < abs(body_angle + math.pi / 2) < 0.52:
                                 distance += 0.035 if i % 2 else -0.035
                             ranges.append(distance if 0.15 <= distance <= 40 else float('inf'))
                         if case == 'invalid_ranges' and trigger:
@@ -300,23 +345,23 @@ try:
                         proc.poll(),
                         text[-1200:],
                     )
-                    assert math.hypot(x - centered[0], y - centered[1]) < 0.011
+                    delta = reference - corridor_angle
+                    expected_x = centered[0] + math.cos(delta) * ex - math.sin(delta) * ey
+                    expected_y = centered[1] + math.sin(delta) * ex + math.cos(delta) * ey
+                    assert math.hypot(x - expected_x, y - expected_y) < 0.011
                     assert 'Initial preparation fault' not in text and 'Route completed' in text
-                    assert re.findall(r'Entering DONE state \| segment=(\d)', text) == [
-                        '0',
-                        '1',
-                        '2',
-                        '3',
+                    assert re.findall(r'Entering DONE state \| segment=(\d+)', text) == [
+                        str(i) for i in range(len(route))
                     ]
                     assert all(abs(v) < 1e-10 for v in cmd)
                     targets = [
                         tuple(map(float, t))
-                        for t in re.findall(r'Segment \d/4 target=\(([-\d.]+), ([-\d.]+)\)', text)
+                        for t in re.findall(
+                            r'Segment \d+/\d+ target=\(([-\d.]+), ([-\d.]+)\)', text
+                        )
                     ]
-                    assert len(targets) == 4
-                    for (tx, ty), (dx, dy) in zip(
-                        targets, [(0.12, 0), (0.12, -0.08), (0.12, 0), (0, 0)]
-                    ):
+                    assert len(targets) == len(route)
+                    for (tx, ty), (dx, dy) in zip(targets, expected_targets):
                         assert (
                             math.hypot(
                                 tx - ox - math.cos(reference) * dx + math.sin(reference) * dy,
@@ -338,6 +383,21 @@ try:
                         case,
                         text[-1000:],
                     )
+                    reasons = {
+                        'measurement_timeout': 'WALL_MEASUREMENT_TIMEOUT',
+                        'heading_timeout': 'HEADING_ALIGNMENT_TIMEOUT',
+                        'alignment_fit_loss': 'HEADING_ALIGNMENT_TIMEOUT',
+                        'position_timeout': 'POSITIONING_TIMEOUT',
+                        'scan_loss': 'SCAN_STALE',
+                        'invalid_ranges': 'SCAN_INVALID',
+                        'duration_limit': 'PREPARATION_TOTAL_TIMEOUT',
+                        'travel_limit': 'PREPARATION_TRAVEL_LIMIT',
+                    }
+                    if case == 'alignment_fit_loss':
+                        assert text.count('Preparation stage=heading_alignment') == 1
+                        assert 'stage=wall_measurement stage_elapsed=' not in text
+                    if case in reasons:
+                        assert 'reason=' + reasons[case] in text, text[-1500:]
                     results.append({'case': case, 'passed': True, 'stopped_and_latched': True})
             finally:
                 if proc.poll() is None:

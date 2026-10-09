@@ -147,7 +147,7 @@ The check includes private members. HTML starts at `docs/generated/html/index.ht
 
 2026-10-09: the documented refactor and initialization changes build locally. Doxygen checks/HTML generation and whitespace checks passed. The historical function-size warning for `on_timer()` was reviewed as a coordination responsibility; its old line count included comments removed later.
 
-The earlier refactor completed all ten segments in the local WSL empty-world adapter: about 61.84 s, completion errors 7.652–8.114 mm, peak commanded speed 0.40 m/s, no controller warnings, and normal exit code 0 after stopping. Cloud and hardware were not revalidated in that run. `test/` still contains planning, not a complete automated behavior suite.
+The earlier refactor completed all ten segments in the local WSL empty-world adapter: about 61.84 s, completion errors 7.652–8.114 mm, peak commanded speed 0.40 m/s, no controller warnings, and normal exit code 0 after stopping. Cloud and hardware were not revalidated in that run. `test/` contains route-model GoogleTests and isolated ROS fixtures; these are not a complete behavior suite.
 
 Official Task1 acceptance uses tag `task1`. Preserve working changes before switching versions, rebuild, and source the overlay: checking out source alone does not replace the installed executable.
 
@@ -231,7 +231,7 @@ First rotate parallel to the right wall and verify standstill; then adjust cente
 Local synthetic tests passed both forward/backward correction combined with opposite lateral offsets, followed by full four-segment routes. Rear-data loss and below-minimum distance both latched stop; the existing eight preparation failure cases also passed. Hardware wall identity and repeatability remain unverified.
 ## A-to-B wall observations
 
-Scene 2 continues processing scans after initialization solely for observation. During segment 0 (A to B), `A->B observation` logs approximately once per second, including rotation/settling/dwell ticks, and once at B standstill acceptance. Fields are odom x/y, `dy_from_A=y-route_y_`, actual yaw in radians/degrees, left/right body-origin distances in meters, and scan receipt age. Each side is checked independently; a missing rear return does not hide valid side observations. Invalid or stale sides print `unavailable`, never a cached numeric distance presented as current. Scan and odom are latest callback values, not a synchronized sensor pair.
+Scene 2 continues processing scans after initialization solely for observation. During every selected A-to-B segment, `A->B observation` logs approximately once per second, including rotation/settling/dwell ticks, and once at B standstill acceptance. Fields are odom x/y, `dy_from_A=y-route_y_`, actual yaw in radians/degrees, left/right body-origin distances in meters, and scan receipt age. Each side is checked independently; a missing rear return does not hide valid side observations. Invalid or stale sides print `unavailable`, never a cached numeric distance presented as current. Scan and odom are latest callback values, not a synchronized sensor pair.
 
 These observations do not change route targets, steering, completion or stop conditions; no ongoing centering or laser obstacle stopping is introduced. Side-window identity can change near openings and corners, so distance trends need physical context. Compare route-frame `cross_track` with left/right trends (`dy_from_A` remains an odom-axis diagnostic) to distinguish odom tracking from corridor alignment.
 ## Right-wall initial heading (current scene 2)
@@ -269,8 +269,8 @@ For the user's recent trial distances and heading tolerance (explicit overrides)
 
 ```bash
 ros2 run distance_controller distance_controller 2 --ros-args \
-  -p forward_distance:=0.95 -p lateral_distance:=0.416780 \
-  -p heading_tolerance:=0.005
+  -p forward_distance:=0.93 -p lateral_distance:=0.516780 \
+  -p heading_tolerance:=0.01
 ```
 
 Package distance defaults remain 0.90 / 0.516780 m. This change does not add route
@@ -282,3 +282,85 @@ with final zero command and exit 0. Build, Doxygen generation/check, Ruff and Gi
 whitespace checks passed. Clang-tidy retains reviewed size warnings for the timer
 coordinator, scan decoder and initial positioning state machine (92/79/61 lines);
 no claim of warning-free analysis is made. Cloud right-wall measurements remain pending.
+
+
+## Composable planar routes
+
+Scene 2 accepts the startup string-array parameter `route`, default `[AB, BC, CB, BA]`.
+Use connected segments starting at initialized A. Unknown names, an empty route, or a
+disconnected sequence reject startup before motion interfaces exist. Every route uses
+initial right-wall alignment and side/rear positioning.
+
+```bash
+# A -> B, then stop and exit after dwell; recent user trial overrides.
+ros2 run distance_controller distance_controller 2 --ros-args \
+  -p forward_distance:=0.93 -p lateral_distance:=0.516780 \
+  -p heading_tolerance:=0.01 -p 'route:=[AB]'
+# Substitute the route argument to choose another composition:
+# -p 'route:=[AB, BA]'
+# -p 'route:=[AB, BC]'
+# -p 'route:=[AB, BC, CB, BA]'
+```
+
+Package defaults remain L=0.90 m, W=0.516780 m and heading_tolerance=0.02 rad.
+The example deliberately uses the latest user trial overrides. Shorter routes finish
+at their last named endpoint; they do not automatically return to A.
+
+`PlanarMotion::move_forward(distance, speed, dwell)`, `move_backward`, `move_left`,
+`move_right`, and `move_relative(dx, dy, speed, dwell)` construct validated motion
+**descriptions** in `route.hpp` / `route.cpp`; they do not start motion or block.
+Forward/backward use fixed route x; left/right use fixed route y. Units are meters,
+meters per second and node-clock seconds. The controller also caps segment speed by
+`max_speed`. Named routes currently share startup speed/dwell; descriptions support
+per-segment values for future definitions.
+
+`compose_route()` joins named A/B/C edges and checks continuity.
+`execute_current_segment()` in `route_execution.cpp` advances one tick of tracking,
+standstill or dwell through shared PID/heading helpers. It returns `Running`,
+`Completed`, or `Failed`. Only Completed lets `on_timer()` call `advance_route()`.
+Faults stop without selecting another segment. Targets are frozen once per segment
+from initialized A plus cumulative planned displacement rotated by the captured heading.
+Actual stopping residuals never become new origins. Scene 1 retains ten displacements.
+Turning is not included in this change.
+
+## Initialization timeout diagnosis
+
+| Startup parameter | Default (steady seconds) | Budget |
+| --- | --- | --- |
+| `wall_measurement_timeout` | 20 | Initial wait for accepted stable wall measurements |
+| `alignment_timeout` | 30 | Heading rotation and standstill after wall acquisition |
+| `positioning_timeout` | 30 | Side/rear positioning and standstill |
+| `preparation_timeout` | 60 | Total preparation, unchanged |
+
+The total timer starts on the first preparation tick after odometry is available.
+Logs progress through `wall_measurement`, `heading_alignment`, and `positioning`.
+Each stage timer starts once. Fit loss during alignment stops movement without
+restarting its deadline; repeated instability cannot extend the total budget.
+Node-time settling remains separate from these steady-clock deadlines.
+
+| Fault reason | Meaning / first check |
+| --- | --- |
+| `WALL_MEASUREMENT_TIMEOUT` | No stable fit; check scan/TF, valid points, RMS, span and wall identity |
+| `HEADING_ALIGNMENT_TIMEOUT` | Heading/standstill did not finish; inspect angle, fit stability and yaw response |
+| `POSITIONING_TIMEOUT` | Side/rear positioning did not finish; inspect distance errors and measured motion |
+| `SCAN_INVALID` / `SCAN_STALE` | Accepted scan became invalid or stopped arriving; inspect scan_reason, stamps, TF and receipt age |
+| `PREPARATION_TOTAL_TIMEOUT` | Total preparation budget exhausted |
+| `PREPARATION_TRAVEL_LIMIT` | Displacement from initial placement exceeded the bound |
+
+Errors include stage/total elapsed time, scan rejection detail and wall-fit metrics.
+Sensor/travel failures take precedence over deadlines. All faults latch zero velocity
+and reset PID; restart after correcting the cause. Increasing a deadline does not
+repair bad measurements or failed movement.
+
+
+### Route-refactor verification (2026-10-09)
+
+Four route GoogleTests, 25 isolated closed-loop/fault cases (24-case suite plus the
+alignment-fit-loss case), and 52 startup rejection cases passed. Losing fit quality
+never restarted the alignment deadline. Task1 completed 10/10 in local Gazebo in
+61.75 s, errors 7.102-7.998 mm in odom, peak command 0.40 m/s, final zero and exit 0.
+Doxygen generation/check, Ruff and whitespace checks passed. Clang-tidy reports only
+the reviewed on_scan (89 lines) and handle_initial_centering (61 lines) size warnings
+in the checked controller files. Scan decoding retains one coherent validity update;
+positioning retains one joint acceptance transition. No suppression was added.
+These tests do not certify cloud/hardware clearance or independent course acceptance.

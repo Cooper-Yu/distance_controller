@@ -20,7 +20,10 @@ add_executable(distance_controller
   src/main.cpp
   src/distance_controller.cpp
   src/initial_centering.cpp
-  src/right_wall_heading.cpp)
+  src/right_wall_heading.cpp
+  src/route.cpp
+  src/route_execution.cpp
+  src/preparation_guard.cpp)
 target_include_directories(distance_controller PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 ament_target_dependencies(
@@ -39,6 +42,9 @@ install(
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_route test/test_route.cpp src/route.cpp)
+  target_include_directories(test_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
