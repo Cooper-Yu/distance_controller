@@ -173,7 +173,7 @@ void DistanceController::log_control_state(const ControlDiagnostics & data)
     get_logger(),
     "Pose: x=%.3f, y=%.3f, yaw=%.3f | "
     "Velocity: vx=%.3f, vy=%.3f, wz=%.3f | "
-    "Target: x=%.3f, y=%.3f | "
+    "Target: x=%.3f, y=%.3f, yaw=%.3f rad | "
     "Current segment index:%zu | "
     "Error: ex=%.3f, ey=%.3f | "
     "pid_dt=%.3f | "
@@ -182,9 +182,10 @@ void DistanceController::log_control_state(const ControlDiagnostics & data)
     "odom_limited=(%.3f, %.3f) | "
     "robot_cmd=(%.3f, %.3f), wz=%.3f",
     data.x, data.y, data.yaw, last_odom_.twist.twist.linear.x, last_odom_.twist.twist.linear.y,
-    last_odom_.twist.twist.angular.z, target_x_, target_y_, current_segment_index_, data.ex,
-    data.ey, data.pid_dt, integral_x_, integral_y_, data.vx_odom_raw, data.vy_odom_raw,
-    data.vx_odom, data.vy_odom, data.vx_robot, data.vy_robot, data.wz_robot);
+    last_odom_.twist.twist.angular.z, target_x_, target_y_, heading_reference_,
+    current_segment_index_, data.ex, data.ey, data.pid_dt, integral_x_, integral_y_,
+    data.vx_odom_raw, data.vy_odom_raw, data.vx_odom, data.vy_odom, data.vx_robot, data.vy_robot,
+    data.wz_robot);
 }
 
 void DistanceController::on_odom(nav_msgs::msg::Odometry::SharedPtr msg)

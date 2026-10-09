@@ -468,3 +468,14 @@ All planar directions hold the persistent heading; turn remains outside this ver
 The latest interface is described there. Task3 explicitly requires turn_controller.cpp and
 TurnController; Task4 reuses that program with real waypoints. Neither is implemented
 by this planar refactor.
+
+## Waypoint logs
+
+After Scene 2 initializes A, `Waypoint` lines list the fixed route goals in the
+odometry message frame (meters and radians), including repeated B/A visits. Yaw
+is the held heading captured during alignment, not necessarily odom zero. Each
+segment logs its target x/y/yaw; `Pose` is live feedback, while `Reached` reports
+actual pose only after stopping and completing dwell. Feedback-dependent goals
+(front-wall arrival, side centering, or runtime-relative steps) stop the startup
+preview; their execution targets and actual endpoints are reported at runtime.
+The preview is informational and does not change route execution.

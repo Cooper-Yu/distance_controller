@@ -25,6 +25,43 @@ void DistanceController::select_waypoints(int scene_number)
   configure_route_steps(forward_distance, lateral_distance);
 }
 
+void DistanceController::log_route_waypoints() const
+{
+  double x = route_x_;
+  double y = route_y_;
+  RCLCPP_INFO(
+    get_logger(), "Waypoints: frame=%s, position=m, yaw=rad; fixed position goals",
+    last_odom_.header.frame_id.c_str());
+  RCLCPP_INFO(
+    get_logger(), "Waypoint 0 %s: x=%.6f y=%.6f yaw=%.6f (held heading)",
+    segments_.front().from.c_str(), x, y, heading_reference_);
+  for (std::size_t i = 0; i < segments_.size(); ++i) {
+    const auto & step = segments_[i];
+    if (
+      step.relative_to_start || step.side_centering ||
+      step.completion != distance_controller::CompletionKind::Position) {
+      RCLCPP_INFO(
+        get_logger(),
+        "Waypoint preview stops before %s->%s: feedback-dependent endpoint; "
+        "see execution target and reached pose",
+        step.from.c_str(), step.to.c_str());
+      break;
+    }
+    const double axes =
+      step.frame == distance_controller::MotionFrame::Heading ? heading_reference_ : route_yaw_;
+    if (step.frame == distance_controller::MotionFrame::Odom) {
+      x = step.motion.dx;
+      y = step.motion.dy;
+    } else {
+      x += std::cos(axes) * step.motion.dx - std::sin(axes) * step.motion.dy;
+      y += std::sin(axes) * step.motion.dx + std::cos(axes) * step.motion.dy;
+    }
+    RCLCPP_INFO(
+      get_logger(), "Waypoint %zu %s: x=%.6f y=%.6f yaw=%.6f (held heading)", i + 1,
+      step.to.c_str(), x, y, heading_reference_);
+  }
+}
+
 void DistanceController::initialize_segment_target()
 {
   if (current_segment_index_ >= segments_.size()) {
@@ -62,8 +99,9 @@ void DistanceController::initialize_segment_target()
   step_last_y_ = last_odom_.pose.pose.position.y;
 
   RCLCPP_INFO(
-    get_logger(), "Segment %zu/%zu target=(%.6f, %.6f)", current_segment_index_ + 1,
-    segments_.size(), target_x_, target_y_);
+    get_logger(), "Segment %zu/%zu target=(%.6f, %.6f), yaw=%.6f rad, heading_control=%s",
+    current_segment_index_ + 1, segments_.size(), target_x_, target_y_, heading_reference_,
+    heading_control_enabled_ ? "enabled" : "disabled");
   RCLCPP_INFO(
     get_logger(), "Route segment %s->%s: speed=%.3f m/s dwell=%.3f s",
     segments_[current_segment_index_].from.c_str(), segments_[current_segment_index_].to.c_str(),
@@ -121,6 +159,14 @@ void DistanceController::advance_route()
   publish_stop();
   if (!record_completed_history()) return;
   record_step_endpoint();
+  const auto actual = current_recorded_pose();
+  RCLCPP_INFO(
+    get_logger(),
+    "Reached %s via %s->%s | actual: x=%.6f y=%.6f yaw=%.6f rad | "
+    "target: x=%.6f y=%.6f yaw=%.6f rad | stopped and dwell complete",
+    segments_[current_segment_index_].to.c_str(), segments_[current_segment_index_].from.c_str(),
+    segments_[current_segment_index_].to.c_str(), actual.x, actual.y, actual.yaw, target_x_,
+    target_y_, heading_reference_);
   ++current_segment_index_;
   reset_pid();
   settling_ = false;

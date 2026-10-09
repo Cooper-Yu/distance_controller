@@ -598,6 +598,18 @@ private:
   double quaternion_to_yaw(const geometry_msgs::msg::Quaternion & q);
 
   /**
+   * @brief Print fixed route waypoints after initial centering records A.
+   * @par Planned pose list
+   * Read route_x_, route_y_, route_yaw_ and heading_reference_ captured by initial
+   * alignment/centering, and segments_ supplied by configure_route_steps(). Print
+   * cumulative goals in the odometry header frame, meters and radians. Stop the
+   * preview before a feedback-dependent endpoint; execution logs its actual target.
+   * @return Nothing; informational output only.
+   * @note Called after initial centering records A; does not modify targets or control state.
+   */
+  void log_route_waypoints() const;
+
+  /**
    * @brief Freeze the current target from the route origin and cumulative displacement.
    *
    * @par Target setup

@@ -230,6 +230,7 @@ void DistanceController::record_route_origin()
   waiting_pose_ = current_recorded_pose();
   waiting_pose_valid_ = true;
   history_.initialize(waiting_pose_);
+  log_route_waypoints();
 }
 
 void DistanceController::measure_wall_windows(

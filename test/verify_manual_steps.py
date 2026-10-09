@@ -492,6 +492,24 @@ def automatic_independent(p):
     assert p.proc.returncode == 0
 
 
+def waypoint_logs(p):
+    import re
+
+    p.until(lambda: 'Route completed.' in p.text(), 40)
+    text = p.text()
+    points = re.findall(r'Waypoint (\d+) (\w+): x=([-\d.]+) y=([-\d.]+) yaw=([-\d.]+)', text)
+    goals = re.findall(r'Segment \d+/4 target=\(([-\d.]+), ([-\d.]+)\), yaw=([-\d.]+)', text)
+    reached = re.findall(r'Reached (\w+) via', text)
+    assert [point[1] for point in points] == ['A', 'B', 'C', 'B', 'A'], points
+    assert reached == ['B', 'C', 'B', 'A'], reached
+    assert [point[2:] for point in points[1:]] == goals, (points, goals)
+    assert points[0][2:] == points[-1][2:], points
+    assert 'Target: x=' in text and 'heading_control=enabled' in text
+    assert max(abs(v) for v in p.cmd) < 1e-8
+    p.proc.wait(timeout=3)
+    assert p.proc.returncode == 0
+
+
 def missing_extent(p):
     p.idle()
     p.call('front_wall', accepted=False, distance=0.15)
@@ -499,6 +517,23 @@ def missing_extent(p):
 
 
 try:
+    run_case(
+        'waypoint_logs',
+        waypoint_logs,
+        {
+            '_params_file': Path(__file__).resolve().parents[1] / 'config/segments.yaml',
+            'manual_mode': 'false',
+            'route': '[AB, BC, CB, BA]',
+            'segments.AB.dx': '.06',
+            'segments.BC.dy': '-.05',
+            'segments.CB.dy': '.05',
+            'segments.BA.dx': '-.06',
+            'segments.AB.dwell': '.02',
+            'segments.BC.dwell': '.02',
+            'segments.CB.dwell': '.02',
+            'segments.BA.dwell': '.02',
+        },
+    )
     run_case(
         'automatic_independent',
         automatic_independent,
