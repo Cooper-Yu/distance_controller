@@ -75,7 +75,7 @@ private:
   bool handle_odom_recovery(const std::chrono::steady_clock::time_point & receipt);
   /** @brief Latch unsuccessful recovery and optionally terminate with nonzero status.
    * @param[in] reason Diagnostic literal from recovery checks; copied to the ROS error log.
-   * @note Publishes zero; exits only when base_command_watchdog_verified was explicitly enabled.
+   * @note Publishes zero; exits by default; an explicit false watchdog parameter keeps zero commands latched.
    */
   void fail_odom_recovery(const char * reason);
   bool odom_recovering_{
@@ -83,7 +83,7 @@ private:
   bool odom_recovery_stable_{
     false};  ///< Fresh stopped samples have remained continuous since recovery_since_.
   bool base_command_watchdog_verified_{
-    false};                   ///< Operator confirms independent base command timeout before exit.
+    true};  ///< Task2 exit policy assumes base timeout; false keeps latched zero commands.
   int process_exit_code_{0};  ///< Exit status read by main(); 2 denotes unrecovered odom failure.
   std::chrono::steady_clock::time_point
     recovery_start_{};  ///< Fixed steady-clock start of the 2 s recovery budget.

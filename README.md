@@ -530,14 +530,15 @@ and segment time budgets keep running. Manual motion requests are rejected while
 recovering; status/history remain readable and cancel remains available.
 
 `ODOM_RECOVERY_TIMEOUT` or `ODOM_RECOVERY_POSE_OR_FRAME_JUMP` ends automatic
-recovery. By default the node stays fault-latched and sends zero until restart.
-Automatic process exit requires an independently verified base velocity-command
-watchdog: set `base_command_watchdog_verified:=true` only after checking that
-actual base's command-timeout behavior. In that mode the node publishes zero,
-shuts down and returns process status 2. This parameter is an operator assertion,
-not automatic detection. Without that evidence, keeping the publisher alive is
-intentional; a final ROS message alone cannot guarantee delivery to a disconnected
-base. No base watchdog has yet been verified in the user's cloud environment.
+recovery. By default the node publishes a final zero command, shuts down, and
+returns process status 2. The plain course command requires no additional flag.
+`base_command_watchdog_verified` now defaults to true for this Task2 deployment;
+set it explicitly to false to retain latched zero commands instead of exiting.
+The user read `cmd_vel_timeout=0.5` from the cloud base controller and requested
+this default. It is a deployment assumption, not automatic watchdog detection.
+The supplied full-route log confirms normal completion and user-observed stopping;
+it does not exercise command-loss braking or recovery timeout. Those cloud tests
+remain pending. A final ROS message alone does not guarantee delivery.
 
 The right-wall fit RMS default is now 0.012 m, supported by the user's successful
 four-segment run with that override. This measurement tolerance is distinct from

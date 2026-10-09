@@ -245,7 +245,7 @@ void DistanceController::fail_odom_recovery(const char * reason)
   RCLCPP_ERROR(
     get_logger(), "%s: %s", reason,
     base_command_watchdog_verified_
-      ? "base watchdog confirmed; exiting with status 2"
-      : "base watchdog unverified; latched zero commands until restart");
+      ? "base timeout policy enabled; exiting with status 2"
+      : "automatic exit disabled; latched zero commands until restart");
   if (base_command_watchdog_verified_) rclcpp::shutdown();
 }

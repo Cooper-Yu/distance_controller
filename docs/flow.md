@@ -91,7 +91,7 @@ enters `RECOVERING`, publishes zero, clears settling/dwell qualification, resets
 PID, and preserves the target and route index. Within a fixed 2 s steady-clock
 budget, feedback must remain fresh and stopped for 0.3 s with unchanged frames
 and bounded pose change. Success resumes the original target on a later tick;
-failure latches zero commands. With an independently verified base watchdog and
-`base_command_watchdog_verified:=true`, terminal recovery failure exits with code 2.
+failure publishes a final zero and exits with code 2 by default. Explicitly setting
+`base_command_watchdog_verified:=false` retains latched zero commands instead.
 Preparation and segment deadlines are not restarted. History and new motion
 requests cannot advance an interrupted step. See the README for exact thresholds.

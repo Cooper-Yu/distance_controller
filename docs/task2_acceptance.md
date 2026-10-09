@@ -104,8 +104,12 @@ the new RMS default but does not prove network recovery or independent accuracy.
 
 The user authorized moving task2 again after adding bounded feedback recovery.
 See README's odometry-recovery section for qualification thresholds and the
-conditional process-exit policy. The base watchdog remains unverified in the cloud;
-default terminal failure stays latched at zero rather than claiming safe exit.
+process-exit policy. Following the user's readback of `cmd_vel_timeout=0.5` and
+explicit request, the course command now exits with code 2 on terminal recovery
+failure, after a final zero command. Explicit false preserves the old latch mode.
+Attachment 69cef29d-d051-46eb-9ef3-8b7fe0221cea shows normal four-leg completion
+and the user confirmed stopping; it does not show a recovery timeout. Cloud
+fault-path verification remains pending.
 
 ## Local recovery verification (2026-10-09)
 
@@ -125,3 +129,7 @@ Ubuntu-22.04 / ROS 2 Humble verification passed:
 These local tests exercise synthetic feedback and simulation. Cloud verification
 of the new recovery behavior and the actual base command watchdog remains open.
 The watchdog parameter is an operator assertion, not automatic discovery.
+Default-exit follow-up: the no-watchdog-override timeout case, explicit-false latch
+case, and short-outage recovery case passed locally after changing the default.
+Build, Ruff, Doxygen and whitespace checks passed. Other prior regression results
+above remain historical; the controller gains and trajectory were not changed.

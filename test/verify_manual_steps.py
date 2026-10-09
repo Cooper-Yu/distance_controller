@@ -644,13 +644,13 @@ def missing_extent(p):
 
 try:
     run_case('odom_recover', odom_recover)
-    run_case('odom_exit', odom_exit, {'base_command_watchdog_verified': 'true'})
-    run_case('odom_stale', odom_stale)
-    run_case('odom_future', odom_future)
-    run_case('odom_not_stopped', odom_not_stopped)
-    run_case('odom_jump', odom_jump)
-    run_case('odom_frame_jump', odom_frame_jump)
-    run_case('odom_single', odom_single)
+    run_case('odom_exit', odom_exit)
+    run_case('odom_stale', odom_stale, {'base_command_watchdog_verified': 'false'})
+    run_case('odom_future', odom_future, {'base_command_watchdog_verified': 'false'})
+    run_case('odom_not_stopped', odom_not_stopped, {'base_command_watchdog_verified': 'false'})
+    run_case('odom_jump', odom_jump, {'base_command_watchdog_verified': 'false'})
+    run_case('odom_frame_jump', odom_frame_jump, {'base_command_watchdog_verified': 'false'})
+    run_case('odom_single', odom_single, {'base_command_watchdog_verified': 'false'})
     run_case('odom_dwell', odom_dwell, {'dwell_duration': '1.0'})
     run_case('odom_budget', odom_budget)
     run_case(
@@ -716,7 +716,7 @@ try:
     run_case('front_too_close', front_too_close)
     run_case('step_timeout', timeout_case)
     run_case('step_travel', travel_case)
-    run_case('idle_odom_loss', odom_loss)
+    run_case('idle_odom_loss', odom_loss, {'base_command_watchdog_verified': 'false'})
     run_case(
         'paused_custom_route',
         paused_route,
