@@ -55,15 +55,15 @@ public:
     const RouteSegment & step, const RecordedPose & start, const RecordedPose & end,
     double heading);
   /** @brief Find the number of outward edges between the current visit and a destination.
-   * @param[in] label Destination from on_step_request(); read only for named lookup.
+   * @param[in] label Destination forwarded by prepare_history_return(); read only for named lookup.
    * @param[in] use_visit_id Select exact visit lookup instead of label matching.
-   * @param[in] visit_id Stable ID from history_text(); read when use_visit_id is true.
+   * @param[in] visit_id Stable ID shown by describe() and forwarded by prepare_history_return(); read for exact lookup.
    * @return Positive edge count; throws for missing, current or ambiguous destinations.
    * @note Searches only the active ancestry; repeated labels require an exact visit ID.
    */
   std::size_t count_to(const std::string & label, bool use_visit_id, std::uint64_t visit_id) const;
   /** @brief Construct a bounded reverse plan without mutating history.
-   * @param[in] count Positive edge count from the service; read only.
+   * @param[in] count Positive edge count from prepare_history_return(); read to select completed edges, unchanged.
    * @return Absolute-odom steps through recorded starts, newest edge first.
    * @note Front-wall/side policies become position feedback; speed/dwell/time limits are retained.
    */
