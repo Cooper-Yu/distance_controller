@@ -75,9 +75,23 @@ bool DistanceController::handle_initial_alignment(const rclcpp::Time & current_t
 {
   if (!heading_control_enabled_ || initial_alignment_complete_) return false;
   const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
-  if (std::abs(yaw) > heading_tolerance_) {
+  const auto steady_now = std::chrono::steady_clock::now();
+  if (std::chrono::duration<double>(steady_now - heading_log_time_).count() >= 1.0) {
+    heading_log_time_ = steady_now;
+    RCLCPP_INFO(
+      get_logger(),
+      "Right-wall alignment: valid=%s stable=%s angle=%.3f deg rms=%.4f m span=%.3f m",
+      right_heading_valid_ ? "true" : "false", right_heading_stable_ ? "true" : "false",
+      right_wall_angle_ * 180.0 / 3.141592653589793, right_wall_rms_, right_wall_span_);
+  }
+  if (!right_heading_valid_ || !right_heading_stable_) {
     alignment_settling_ = false;
-    publish_heading_correction(yaw);
+    publish_stop();
+    return true;
+  }
+  if (std::abs(right_wall_angle_) > heading_tolerance_) {
+    alignment_settling_ = false;
+    publish_heading_correction(-right_wall_angle_);
     return true;
   }
   publish_stop();
@@ -92,14 +106,22 @@ bool DistanceController::handle_initial_alignment(const rclcpp::Time & current_t
     alignment_settle_start_ = current_time;
     alignment_settling_ = true;
   } else if ((current_time - alignment_settle_start_).seconds() >= alignment_settle_duration_) {
+    heading_reference_ = yaw;
     initial_alignment_complete_ = true;
     alignment_settling_ = false;
     reset_pid();
     RCLCPP_INFO(
-      get_logger(), "Initial alignment complete: yaw=%.6f; starting laser centering next tick",
+      get_logger(),
+      "Initial alignment complete: yaw=%.6f; right-wall reference captured; starting laser "
+      "centering next tick",
       yaw);
   }
   return true;
+}
+
+double DistanceController::heading_error(double yaw) const
+{
+  return std::atan2(std::sin(yaw - heading_reference_), std::cos(yaw - heading_reference_));
 }
 
 double DistanceController::compute_heading_command(double yaw, double gain, double max_yaw_rate)
@@ -121,6 +143,7 @@ void DistanceController::publish_heading_correction(double yaw)
 bool DistanceController::handle_heading_recovery(double yaw, double position_error)
 {
   if (!heading_control_enabled_) return false;
+  yaw = heading_error(yaw);
   const bool heading_outside = std::abs(yaw) > heading_tolerance_;
   if (segment_completed_ && (heading_outside || position_error >= 0.01)) {
     segment_completed_ = false;
@@ -297,8 +320,8 @@ void DistanceController::compute_and_publish_command(ControlDiagnostics & data)
   geometry_msgs::msg::Twist cmd;
   cmd.linear.x = vx_robot;
   cmd.linear.y = vy_robot;
-  if (heading_control_enabled_ && std::abs(data.yaw) > heading_tolerance_) {
-    cmd.angular.z = compute_heading_command(data.yaw, heading_gain_, max_yaw_rate_);
+  if (heading_control_enabled_ && std::abs(heading_error(data.yaw)) > heading_tolerance_) {
+    cmd.angular.z = compute_heading_command(heading_error(data.yaw), heading_gain_, max_yaw_rate_);
   }
   data.wz_robot = cmd.angular.z;
 
@@ -502,8 +525,8 @@ void DistanceController::initialize_segment_target()
   if (!route_initialized_) {
     route_x_ = last_odom_.pose.pose.position.x;
     route_y_ = last_odom_.pose.pose.position.y;
-    route_yaw_ =
-      heading_control_enabled_ ? 0.0 : quaternion_to_yaw(last_odom_.pose.pose.orientation);
+    route_yaw_ = heading_control_enabled_ ? heading_reference_
+                                          : quaternion_to_yaw(last_odom_.pose.pose.orientation);
     route_initialized_ = true;
   }
 
@@ -606,8 +629,8 @@ void DistanceController::check_completion(double ex, double ey, const rclcpp::Ti
 
   if (
     position_error >= 0.01 ||
-    (heading_control_enabled_ &&
-     std::abs(quaternion_to_yaw(last_odom_.pose.pose.orientation)) > heading_tolerance_)) {
+    (heading_control_enabled_ && std::abs(heading_error(quaternion_to_yaw(
+                                   last_odom_.pose.pose.orientation))) > heading_tolerance_)) {
     settling_ = false;
     return;
   }

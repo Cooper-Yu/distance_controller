@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 #include "geometry_msgs/msg/quaternion.hpp"
@@ -21,7 +22,7 @@
  * @details Targets use the fixed initial route frame. Feedback receipt uses a steady
  * clock; PID, settling, and dwell use the node clock (simulation time when enabled).
  * The single-threaded executor in main() serializes callbacks. No obstacle avoidance
- * is implemented. Scene 2 aligns and holds odom yaw zero using configurable route lengths.
+ * is implemented. Scene 2 aligns to the initial right wall and holds its captured odom heading.
  */
 class DistanceController : public rclcpp::Node
 {
@@ -51,11 +52,11 @@ private:
   void configure_heading_control();
 
   /**
-   * @brief Hold translation until odom yaw zero and standstill remain accepted.
+   * @brief Hold translation until right-wall alignment and standstill remain accepted.
    * @par Initial alignment
-   * Read last_odom_ from on_odom(); rotate only outside heading_tolerance_, otherwise
+   * Read the stable right-wall fit from on_scan(); rotate only outside heading_tolerance_, otherwise
    * stop and require low measured speeds for alignment_settle_duration_. Mark
-   * initial_alignment_complete_ once; on_timer() begins laser centering on the following tick.
+   * initial_alignment_complete_ and capture heading_reference_ once; on_timer() begins laser centering on the following tick.
    * @param[in] current_time Node time supplied by on_timer(); read elapsed settling time
    * and copy into alignment_settle_start_ when the interval begins. Input is unchanged.
    * @return True to end this tick; false when disabled or already completed.
@@ -64,15 +65,16 @@ private:
   bool handle_initial_alignment(const rclcpp::Time & current_time);
 
   /**
-   * @brief Calculate a bounded proportional yaw rate toward odom yaw zero.
+   * @brief Calculate a bounded proportional yaw rate to reduce a current-minus-target heading error.
    * @par Heading error
    * Wrap target-minus-current error into [-pi, pi] before symmetric rate limiting.
-   * @param[in] yaw Odom heading (rad), passed by publish_heading_correction() from
-   * last_odom_, by handle_initial_centering() from last_odom_, or by compute_and_publish_command() from data.yaw; read only.
+   * @param[in] yaw Wrapped current-minus-target error (rad) from the calling
+   * heading-control method; read only. Initial alignment supplies negative wall angle;
+   * later callers use heading_error() against the captured reference.
    * @param[in] gain Positive gain (1/s), supplied from heading_gain_; scales error, unchanged.
    * @param[in] max_yaw_rate Positive cap (rad/s), supplied from max_yaw_rate_; bounds output, unchanged.
    * @return Angular command for the caller's cmd.angular.z; does not publish itself.
-   * @note Callers ensure finite inputs and positive limits. Odom zero is not a wall reference.
+   * @note Callers ensure finite inputs and positive limits. The target comes from the initial right wall.
    */
   static double compute_heading_command(double yaw, double gain, double max_yaw_rate);
 
@@ -80,7 +82,7 @@ private:
    * @brief Publish rotation only and clear planar PID and command-ramp history.
    * @par Rotation without translation
    * Used by handle_initial_alignment(), handle_initial_centering(), and handle_heading_recovery().
-   * @param[in] yaw Current odom heading (rad) from the caller's feedback; read to
+   * @param[in] yaw Current-minus-target heading error (rad) from the caller; read to
    * compute cmd.angular.z using heading_gain_ and max_yaw_rate_. No input is modified.
    * @note Publishes zero linear velocity; all unused Twist components remain zero.
    */
@@ -116,7 +118,7 @@ private:
    * select side/rear windows and validate finite coverage and median absolute deviation.
    * @param[in] msg LaserScan supplied by the scan subscription; read ranges, angles,
    * frame and stamp, without modifying the message. Write estimates into left_wall_/right_wall_/rear_wall_.
-   * @note Invalid scans clear scan_valid_; guard logic stops motion. No wall-direction estimate. After initialization, scans update read-only observations and do not gate the route.
+   * @note Invalid scans clear scan_valid_; guard logic stops motion. Initial right-wall direction is estimated separately. After initialization, scans update read-only observations and do not gate the route.
    */
   void on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg);
 
@@ -144,7 +146,7 @@ private:
   bool handle_centering_guard(const std::chrono::steady_clock::time_point & now, bool should_log);
 
   /**
-   * @brief Position from side/rear walls while holding odom yaw zero, then capture A after standstill.
+   * @brief Position from side/rear walls while holding the captured wall heading, then capture A after standstill.
    * @param[in] current_time Node time from on_timer(); read continuous settling duration
    * and copy to centering_settle_start_ when settling begins; caller time unchanged.
    * @return True to end this tick during preparation; false once complete or in scene 1.
@@ -163,6 +165,58 @@ private:
    * are changed; scene 1 and other route segments produce no output.
    */
   void log_route_wall_observation();
+
+  /**
+   * @brief Fit a single right-wall line and require a stable odom-frame direction.
+   * @par Startup measurement
+   * on_scan() supplies a wider right window than the distance windows. Reject poor
+   * coverage, short span, excessive perpendicular residual or ambiguous orientation.
+   * @param[in] points Body-frame (x,y) endpoints in meters from on_scan(); read only
+   * to estimate the forward wall tangent. No point is changed.
+   * @param[in] samples Total window rays from on_scan(), including invalid ranges;
+   * read to check coverage, unchanged.
+   * @note Writes right_wall_angle_/right_wall_rms_/right_wall_span_ and quality flags
+   * for handle_initial_alignment(). Latest on_odom() yaw supplies the temporal
+   * consistency reference; scan and odom must describe the same slowly moving robot.
+   */
+  void estimate_right_heading(
+    const std::vector<std::pair<double, double>> & points, std::size_t samples);
+
+  /**
+   * @brief Express odom heading relative to the captured right-wall reference.
+   * @param[in] yaw Current odom yaw from the control or initialization caller;
+   * read and subtract heading_reference_, without modifying caller feedback.
+   * @return Wrapped current-minus-reference error in radians for acceptance/control.
+   * @note Actual yaw remains necessary for odom-to-body velocity conversion.
+   */
+  double heading_error(double yaw) const;
+
+  /// Captured odom yaw (rad) after initial wall-parallel standstill; fixed for this run.
+  double heading_reference_{0.0};
+  /// Right-wall forward tangent relative to body x (rad); valid only with right_heading_valid_.
+  double right_wall_angle_{0.0};
+  /// Latest perpendicular line-fit RMS (m), diagnostic even when rejected.
+  double right_wall_rms_{0.0};
+  /// Latest fitted tangent span (m), diagnostic even when rejected.
+  double right_wall_span_{0.0};
+  /// Latest scan passes right-line geometric quality checks.
+  bool right_heading_valid_{false};
+  /// Consecutive accepted fits have a consistent odom-frame direction for 0.5 steady seconds.
+  bool right_heading_stable_{false};
+  /// True during an uninterrupted series of accepted right-wall fits.
+  bool right_heading_tracking_{false};
+  /// Odom-frame wall direction (rad) at the start of the current consistency interval.
+  double right_heading_anchor_{0.0};
+  /// Steady-clock start of the current wall-direction consistency interval.
+  std::chrono::steady_clock::time_point right_heading_since_{};
+  /// Steady-clock throttle for initial wall-angle diagnostic logs.
+  std::chrono::steady_clock::time_point heading_log_time_{};
+  /// Right fitting window half-width around body -pi/2 (rad), separate from distance windows.
+  double wall_heading_half_angle_{0.5235987755982988};
+  /// Minimum observed tangent extent (m); prevents a short cluster defining heading.
+  double wall_heading_min_span_{0.18};
+  /// Maximum perpendicular line-fit RMS (m); no automatic fallback to odom zero.
+  double wall_heading_max_rms_{0.01};
 
   /// Latest scan left window passed coverage, dispersion and distance checks; logging only.
   bool left_wall_valid_{false};
@@ -246,7 +300,7 @@ private:
   double heading_gain_{1.0};
   /// Positive symmetric angular command cap (rad/s); stops bypass limiting.
   double max_yaw_rate_{0.25};
-  /// Absolute odom yaw tolerance (rad), used at startup, during motion and at completion.
+  /// Absolute heading-error tolerance (rad), used at startup, during motion and at completion.
   double heading_tolerance_{0.02};
   /// Above this absolute yaw error (rad), translation pauses for rotation-only recovery.
   double translation_pause_angle_{0.15};
@@ -461,7 +515,7 @@ private:
    * @par Target setup
    * Called by on_timer() when target_initialized_ is false. Capture route_x_, route_y_,
    * once from last_odom_ (after centering in scene 2). Set route_yaw_
-   * to zero in scene 2 or measured yaw in scene 1. Sum segments through the current index and
+   * to heading_reference_ in scene 2 or measured yaw in scene 1. Sum segments through the current index and
    * rotate the sum into odom and store target_x_, target_y_, and target_initialized_.
    *
    * @note An out-of-range index only logs and returns. Actual segment stopping error is not accumulated into later targets.
@@ -561,7 +615,7 @@ private:
    * @param[in] ex Odom x position error (m) calculated and passed by on_timer(); read to test distance from the target without modifying the caller error.
    * @param[in] ey Odom y position error (m) calculated and passed by on_timer(); read to test distance from the target without modifying the caller error.
    * @param[in] current_time Node time captured by on_timer(); read for settling duration and copy to settle_start_time_ or dwell_start_time_ on state transitions. handle_completed_segment() later reads dwell_start_time_; the input is unchanged.
-   * @note on_timer() publishes zero before calling. Feedback speed comes from last_odom_.twist in the child frame; scene 2 also requires odom yaw within heading_tolerance_.
+   * @note on_timer() publishes zero before calling. Feedback speed comes from last_odom_.twist in the child frame; scene 2 also requires heading error relative to heading_reference_ within heading_tolerance_.
    */
   void check_completion(double ex, double ey, const rclcpp::Time & current_time);
 
@@ -644,13 +698,13 @@ private:
   /// Previous node-clock observation, independent of PID execution, including settling/dwell.
   rclcpp::Time last_ros_time_{};
 
-  /// True after the fixed route frame is initialized: centered feedback/yaw zero in scene 2, initial feedback in scene 1.
+  /// True after the fixed route frame is initialized: centered feedback/captured wall heading in scene 2, initial feedback in scene 1.
   bool route_initialized_{false};
   /// Fixed route origin x in odom (m); captured after centering in scene 2, valid after route_initialized_.
   double route_x_{0.0};
   /// Fixed route origin y in odom (m); captured after centering in scene 2, valid after route_initialized_.
   double route_y_{0.0};
-  /// Fixed route heading in odom (rad): zero for scene 2, initial measured yaw for scene 1.
+  /// Fixed route heading in odom (rad): captured wall heading for scene 2, initial measured yaw for scene 1.
   double route_yaw_{0.0};
 
   /// Node-clock start of extra dwell after completion; restarted after a large forward interval.

@@ -18,7 +18,7 @@ The diagram uses actual function names. A stored Graphviz source produces the SV
 | --- | --- |
 | Fault, feedback, and time | Stop on a latched fault; wait for first feedback; latch a fault after a 0.5 s receipt timeout or backwards node time; reset timing state and stop this tick after a forward interval above 0.2 s |
 | Initial scan guard | Stop before first valid scan/TF; latch faults on subsequent invalid/stale input or preparation time/travel limits |
-| Initial alignment | Scene 2 rotates toward odom yaw zero, then verifies continuous standstill before laser side/rear positioning; scene 1 bypasses |
+| Initial alignment | Scene 2 rotates toward the measured right-wall direction, then verifies continuous standstill before laser side/rear positioning; scene 1 bypasses |
 | Initial centering | Compare median side body-y and rearward body-x distances; adjust x/y with yaw hold; verify standstill and capture A |
 | Target and error | Capture current A after centering in scene 2; initialize route targets from that fixed origin, heading, and cumulative displacement; stop if unavailable, otherwise read pose and compute ex/ey |
 | Heading recovery | Scene 2 pauses translation for large yaw errors or corrects yaw at an arrived position; drift during dwell revokes completion |
@@ -36,7 +36,7 @@ Initial scene-2 preparation requires fresh side/rear-wall scans and a fixed lase
 
 For route arrivals, `segment_completed_` then disables tracking and starts extra dwell, default 1 node-clock second. When dwell ends, advance the index, reset PID/segment flags, and end this tick; initialize the next target on the next tick. After the final dwell, keep zero velocity and call `rclcpp::shutdown()`.
 
-Feedback receipt timeout uses steady time. PID, settling, and dwell use node time. Stops bypass the acceleration ramp and clear its history. Scene 2 controls heading toward odom yaw zero; initial centering uses laser, but route obstacle avoidance is not implemented; rear positioning is initialization only.
+Feedback receipt timeout uses steady time. PID, settling, and dwell use node time. Stops bypass the acceleration ramp and clear its history. Scene 2 controls heading toward the measured right-wall direction; initial centering uses laser, but route obstacle avoidance is not implemented; rear positioning is initialization only.
 
 ## Diagnostic data flow
 

@@ -5,10 +5,10 @@ digraph control {
   start [label="on_timer() / 50 ms wall timer"];
   guard [label="Fault, feedback and node-time checks",shape=diamond];
   stop [label="publish_stop()\nEnd this tick",fillcolor="#fff1dc"];
-  align [label="Initial alignment gate (scene 2)\nRotate / stop / verify standstill",shape=diamond];
+  align [label="Initial alignment gate (scene 2)\nStable right-wall fit / rotate parallel\nStop; capture odom heading reference",shape=diamond];
   recover [label="Heading recovery (scene 2)\nRevoke drifted dwell / rotate only",shape=diamond];
   rotate [label="Publish initial adjustment or stop\nEnd this tick"];
-  target [label="Initialize target if needed\nScene 2: captured centered A + route offsets"];
+  target [label="Initialize target if needed\nScene 2: centered A + wall-rotated route offsets"];
   valid [label="Target ready?",shape=diamond];
   errors [label="Read pose; calculate ex / ey"];
   done [label="Segment completed?",shape=diamond];

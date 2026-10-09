@@ -35,3 +35,27 @@ The Coach-owned verify_centering_fixture.py uses isolated domain 166, a syntheti
 verify_rear_fixture.py extends the isolated fixture with a rear wall, nonzero forward/backward placement errors, and simultaneous lateral errors. It asserts rotation before translation, the combined 0.03 m/s speed cap, correct correction signs, captured A near the geometric wall-based target, four-segment completion, and independence from scans after initialization. Twelve cases passed (two routes, eight existing faults, rear loss and rear too close). Side-only fixture descriptions above are historical; current initialization requires all three windows. No real hardware movement was performed by these tests.
 
 verify_wall_log_fixture.py exercises a full route while removing rear returns after initialization, invalidating only the left window, pausing scans, and restoring valid sides. Assertions check numeric/independent-unavailable/stale log states and route completion without scan-driven fault or recentering. These are read-only observations; no hardware behavior claim is added.
+
+## Right-wall heading fixtures (current)
+
+Run from the package root after building and sourcing the ROS/workspace environments:
+
+```bash
+python3 test/verify_right_wall_fixture.py
+python3 test/verify_right_wall_parameters.py
+```
+
+The scripts force localhost-only ROS domains 166 and 167 and resolve the installed
+executable through `ros2 pkg prefix`. Keep those domains reserved for fixtures.
+Output defaults to `/tmp/distance_controller_fixture/runtime_logs`; override
+`FIXTURE_OUTPUT_ROOT` to preserve evidence elsewhere. `CENTER_CASE` selects one
+fixture case. These scripts are not registered with `colcon test`.
+
+Seventeen cases cover rotated corridors on both sides of odom zero, angle wrapping,
+initial rotation before translation, four rotated targets, final return, route
+heading disturbance recovery, scan/TF/time/travel/rear faults, insufficient wall
+span, unstable direction and excessive fit residual. Forty invalid parameter cases
+include the three new wall-heading limits. The tests use synthetic measurements;
+real reflective surfaces, wrong-wall selection, wheel slip and moving-scan distortion
+remain cloud/hardware validation concerns. Historical fixtures above describe the
+versions at their recorded dates.

@@ -26,6 +26,12 @@ void DistanceController::configure_centering()
     }
     return value;
   };
+  wall_heading_half_angle_ = positive("wall_heading_half_angle", wall_heading_half_angle_);
+  wall_heading_min_span_ = positive("wall_heading_min_span", wall_heading_min_span_);
+  wall_heading_max_rms_ = positive("wall_heading_max_rms", wall_heading_max_rms_);
+  if (wall_heading_half_angle_ >= 0.7853981633974483) {
+    throw std::invalid_argument("wall_heading_half_angle must be less than pi/4");
+  }
   centering_gain_ = positive("centering_gain", centering_gain_);
   centering_max_speed_ = positive("centering_max_speed", centering_max_speed_);
   centering_tolerance_ = positive("centering_tolerance", centering_tolerance_);
@@ -75,6 +81,7 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
   left_wall_valid_ = false;
   right_wall_valid_ = false;
   scan_valid_ = false;
+  right_heading_valid_ = false;
   const rclcpp::Time stamp(msg->header.stamp, get_clock()->get_clock_type());
   const double age = (now() - stamp).seconds();
   if (
@@ -98,6 +105,8 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
     !std::isfinite(rotation.length2()) || std::abs(rotation.length2() - 1.0) > 0.01 ||
     !std::isfinite(t.x) || !std::isfinite(t.y) || up.z() < 0.99)
     return;
+  std::vector<std::pair<double, double>> wall_points;
+  std::size_t wall_samples = 0;
   std::vector<double> left, right, rear;
   std::size_t left_samples = 0, right_samples = 0, rear_samples = 0;
   for (std::size_t i = 0; i < msg->ranges.size(); ++i) {
@@ -108,6 +117,16 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
     const double range = msg->ranges[i];
     const bool valid_range =
       std::isfinite(range) && range >= msg->range_min && range <= msg->range_max;
+    if (
+      !initial_alignment_complete_ &&
+      std::abs(body_angle + 1.5707963267948966) <= wall_heading_half_angle_) {
+      ++wall_samples;
+      const double x = t.x + range * direction.x();
+      const double y = t.y + range * direction.y();
+      if (valid_range && -y >= side_min_distance_ && -y <= side_max_distance_) {
+        wall_points.emplace_back(x, y);
+      }
+    }
     if (std::abs(std::abs(body_angle) - 3.141592653589793) <= rear_window_half_angle_) {
       ++rear_samples;
       const double rear_distance = -(t.x + range * direction.x());
@@ -125,6 +144,7 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
       (is_left ? left : right).push_back(std::abs(y));
     }
   }
+  if (!initial_alignment_complete_) estimate_right_heading(wall_points, wall_samples);
   wall_observation_time_ = std::chrono::steady_clock::now();
   left_wall_valid_ = estimate_side(left, left_samples, left_wall_);
   right_wall_valid_ = estimate_side(right, right_samples, right_wall_);
@@ -173,17 +193,18 @@ bool DistanceController::handle_initial_centering(const rclcpp::Time & current_t
 {
   if (!heading_control_enabled_ || centering_complete_) return false;
   const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+  const double yaw_error = heading_error(yaw);
   const double error = (left_wall_ - right_wall_) * 0.5;
   const double rear_error = rear_target_distance_ - rear_wall_;
   const auto & velocity = last_odom_.twist.twist;
-  if (std::abs(yaw) > translation_pause_angle_) {
+  if (std::abs(yaw_error) > translation_pause_angle_) {
     centering_settling_ = false;
-    publish_heading_correction(yaw);
+    publish_heading_correction(yaw_error);
     return true;
   }
   if (
     std::abs(error) > centering_tolerance_ || std::abs(rear_error) > centering_tolerance_ ||
-    std::abs(yaw) > heading_tolerance_) {
+    std::abs(yaw_error) > heading_tolerance_) {
     centering_settling_ = false;
     geometry_msgs::msg::Twist cmd;
     const double cap = std::min(centering_max_speed_, max_speed_);
@@ -198,8 +219,8 @@ bool DistanceController::handle_initial_centering(const rclcpp::Time & current_t
       cmd.linear.x *= cap / speed;
       cmd.linear.y *= cap / speed;
     }
-    if (std::abs(yaw) > heading_tolerance_) {
-      cmd.angular.z = compute_heading_command(yaw, heading_gain_, max_yaw_rate_);
+    if (std::abs(yaw_error) > heading_tolerance_) {
+      cmd.angular.z = compute_heading_command(yaw_error, heading_gain_, max_yaw_rate_);
     }
     cmd_pub_->publish(cmd);
     return true;
@@ -217,7 +238,7 @@ bool DistanceController::handle_initial_centering(const rclcpp::Time & current_t
   } else if ((current_time - centering_settle_start_).seconds() >= alignment_settle_duration_) {
     route_x_ = last_odom_.pose.pose.position.x;
     route_y_ = last_odom_.pose.pose.position.y;
-    route_yaw_ = 0.0;
+    route_yaw_ = heading_reference_;
     route_initialized_ = true;
     centering_complete_ = true;
     centering_settling_ = false;
@@ -225,9 +246,9 @@ bool DistanceController::handle_initial_centering(const rclcpp::Time & current_t
     RCLCPP_INFO(
       get_logger(),
       "Centered A recorded=(%.6f, %.6f), yaw=%.6f rad (%.3f deg), "
-      "left=%.3f right=%.3f rear=%.3f; starting route",
-      route_x_, route_y_, yaw, yaw * 180.0 / 3.141592653589793, left_wall_, right_wall_,
-      rear_wall_);
+      "left=%.3f right=%.3f rear=%.3f; starting route; heading_reference=%.6f rad",
+      route_x_, route_y_, yaw, yaw * 180.0 / 3.141592653589793, left_wall_, right_wall_, rear_wall_,
+      heading_reference_);
   }
   return true;
 }
@@ -246,7 +267,10 @@ void DistanceController::log_route_wall_observation()
   RCLCPP_INFO(
     get_logger(),
     "A->B observation: x=%.6f y=%.6f dy_from_A=%.6f m yaw=%.6f rad (%.3f deg) | "
-    "left=%s right=%s m scan_age=%.3f s | read-only",
+    "left=%s right=%s m scan_age=%.3f s | cross_track=%.6f m heading_error=%.6f rad | read-only",
     pose.position.x, pose.position.y, pose.position.y - route_y_, yaw,
-    yaw * 180.0 / 3.141592653589793, left.c_str(), right.c_str(), age);
+    yaw * 180.0 / 3.141592653589793, left.c_str(), right.c_str(), age,
+    -std::sin(route_yaw_) * (pose.position.x - route_x_) +
+      std::cos(route_yaw_) * (pose.position.y - route_y_),
+    heading_error(yaw));
 }

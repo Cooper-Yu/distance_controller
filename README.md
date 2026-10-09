@@ -15,6 +15,7 @@ distance_controller/
 ├── src/main.cpp
 ├── src/distance_controller.cpp
 ├── src/initial_centering.cpp
+├── src/right_wall_heading.cpp
 ├── docs/
 ├── test/
 └── tools/
@@ -25,6 +26,7 @@ distance_controller/
 | `main.cpp` | Initialize ROS, parse the optional scene, construct the node, and spin serially |
 | `distance_controller.hpp` | Class declarations, interface documentation, state descriptions, and member defaults |
 | `distance_controller.cpp` | Feedback, timing, targets, PID, limiting, stopping, and route transitions |
+| `right_wall_heading.cpp` | Startup right-wall line fitting and temporal consistency |
 | `initial_centering.cpp` | Initial scan validation, side distances, adjustment bounds, and centered A capture |
 | <code>\ref build_cmake "CMakeLists.txt"</code> / <code>\ref build_package_xml "package.xml"</code> | Build targets and ROS dependencies |
 
@@ -67,11 +69,11 @@ No scene argument selects scene 1, equivalent to an explicit `1`. Scene 1 defaul
 
 Scene 2 reads `forward_distance` (default 0.90 m) and `lateral_distance` (default 0.516780 m) once at startup. Both must be finite and positive. These parameters define route lengths; changing them during execution does not rebuild the route.
 
-- Units are meters; each row is a segment displacement in the fixed route frame (odom yaw zero for scene 2).
+- Units are meters; each row is a segment displacement in the fixed route frame (captured right-wall heading for scene 2).
 - Positive x is route forward; positive y is route left. Enter `0.0` for an unused axis.
 - The four segments go from start to corner, corner to goal, back to corner, and back to start.
 - Defaults use the distances selected during the user tests. L and W remain adjustable; all four targets use the A captured after initial alignment and laser centering; segment arrival residuals do not redefine it.
-- Scene 2 first aligns to odom yaw zero, then adjusts side centering and rear distance using laser scans while maintaining that heading. Rear distance targets 0.28 m from base_link; route obstacle avoidance is not implemented. Odom zero must be physically meaningful for the intended route; restarting odometry can change that reference.
+- Scene 2 first aligns parallel to the right wall, then adjusts side centering and rear distance using laser scans while maintaining that heading. Rear distance targets 0.28 m from base_link; route obstacle avoidance is not implemented. The initial right wall must be straight and parallel to the intended route; its direction is captured in odom for this run.
 
 Once configuration and hardware operating conditions have been verified, the entry is:
 
@@ -103,14 +105,14 @@ ROS parameter overrides and topic remapping are supported. Pose is assumed to us
 
 1. `on_odom()` stores feedback and its steady-clock receipt time.
 2. A 50 ms wall timer calls `on_timer()` to check faults, feedback, and node time.
-3. Targets use the fixed route origin, measured initial heading in scene 1 or odom yaw zero in scene 2, and cumulative nominal displacements; actual stopping errors are not accumulated into later targets.
+3. Targets use the fixed route origin, measured initial heading in scene 1 or captured right-wall heading in scene 2, and cumulative nominal displacements; actual stopping errors are not accumulated into later targets.
 4. PID velocities in odom are speed-limited, acceleration-limited, rotated to the current body frame, and published.
 5. Inside 0.01 m position tolerance, publish zero. Require feedback planar speed below 0.01 m/s and absolute yaw rate below 0.02 rad/s continuously for at least 0.5 node-clock seconds.
 6. Dwell for `dwell_duration`, then advance. After the final dwell, keep the zero command and shut down the ROS context.
 
 Feedback timeout uses local steady-clock receipt time with a 0.5 s threshold. Before the first message, keep waiting at zero velocity. PID, settling, and dwell use node time. Feedback timeout or backwards node time latches a fault; an observation interval above 0.2 s resets timing-related state and stops the current tick.
 
-Stop commands bypass acceleration limiting and clear ramp history. There is no obstacle avoidance; scene 2 holds odom yaw zero. Publishing zero and verifying standstill are separate steps.
+Stop commands bypass acceleration limiting and clear ramp history. There is no obstacle avoidance; scene 2 holds the captured right-wall heading. Publishing zero and verifying standstill are separate steps.
 
 ## Documentation and initialization conventions
 
@@ -152,10 +154,9 @@ Official Task1 acceptance uses tag `task1`. Preserve working changes before swit
 ## Scene 2 heading behavior
 
 Only scene 2 enables heading control. Initial alignment publishes zero linear velocity and a
-bounded yaw rate toward odom yaw zero. The robot must then remain within heading tolerance,
+bounded yaw rate toward the measured right-wall direction. The robot must then remain within heading tolerance,
 with measured planar speed below 0.01 m/s and yaw rate below 0.02 rad/s, for the configured
-settling duration. Initial side/rear positioning follows. After center offset, rear distance, heading and standstill acceptance for alignment_settle_duration, record current odom position as A and begin the four segments. Route axes remain at odom yaw zero, avoiding a
-small residual alignment error rotating all four targets.
+settling duration. Initial side/rear positioning follows. After center offset, rear distance, heading and standstill acceptance for alignment_settle_duration, record current odom position as A and begin the four segments. Route axes use the captured aligned odom yaw, so heading hold and all four position targets share the same reference.
 
 | Startup parameter | Default | Meaning |
 | --- | --- | --- |
@@ -193,9 +194,9 @@ Scene 2 completed 4/4 segments in the local Gazebo empty world using default dis
 The historical fixed-start version completed initial A approach and 4/4 route segments in the local empty-world adapter: 50.29 s, segment acceptance errors 7.047–7.514 mm, final odom distance to configured A 7.521 mm, final yaw 0.001383 rad, maximum commanded planar speed 0.10 m/s, final zero command, and exit code 0. Log assertions checked all four absolute targets and that A acceptance preceded segment 1. Isolated fixtures verified simultaneous x/y approach, initial rotation gating, heading/dwell recovery and feedback faults; 16 parameter cases passed. This does not validate the real corridor or a reset odom reference.
 ## Initial laser positioning (current scene 2)
 
-Manually place near the intended start, within the preparation travel bound. Startup now checks fresh side scans, rotates to odom yaw zero, then adjusts both planar axes while maintaining that heading. Initial rotation has zero translation; the positioning phase may move forward or backward. Center error is `(left_wall - right_wall) / 2`; positive means move left. Rear error is `rear_target_distance - rear_wall`: positive commands forward, negative backward. Once both distance errors and yaw are accepted and measured velocities remain low for `alignment_settle_duration`, the current odom pose becomes A. The route remains L=0.90 m forward, W=0.516780 m right, W left, L back, along odom-zero axes. The former `start_x`/`start_y` overrides reject startup to prevent accidental reuse of obsolete absolute coordinates.
+Manually place near the intended start, within the preparation travel bound. Startup now checks fresh side scans, rotates parallel to a stable right-wall fit, then adjusts both planar axes while maintaining that heading. Initial rotation has zero translation; the positioning phase may move forward or backward. Center error is `(left_wall - right_wall) / 2`; positive means move left. Rear error is `rear_target_distance - rear_wall`: positive commands forward, negative backward. Once both distance errors and yaw are accepted and measured velocities remain low for `alignment_settle_duration`, the current odom pose becomes A. The route remains L=0.90 m forward, W=0.516780 m right, W left, L back, along the captured wall-aligned route axes. The former `start_x`/`start_y` overrides reject startup to prevent accidental reuse of obsolete absolute coordinates.
 
-Filtered scans use SensorDataQoS. A fixed TF from the scan header frame to `base_frame` transforms directions and points, including the observed 180-degree laser mounting. All three wall windows must contain at least six valid rays and at least 50% valid coverage. Median body-y distance estimates reject excessive median absolute deviation. This assumes nearby walls in both windows; no wall identity or parallelism is inferred. Odom yaw zero must be checked physically against the corridor direction.
+Filtered scans use SensorDataQoS. A fixed TF from the scan header frame to `base_frame` transforms directions and points, including the observed 180-degree laser mounting. All three wall windows must contain at least six valid rays and at least 50% valid coverage. Median body-y distance estimates reject excessive median absolute deviation. This assumes nearby walls in both windows; no wall identity or parallelism is inferred. A separate wider right-side window estimates initial heading; distance windows alone do not establish wall direction.
 
 | Startup parameter | Default | Meaning |
 | --- | --- | --- |
@@ -225,11 +226,59 @@ A synthetic LaserScan/odom closed-loop fixture verified both lateral signs, the 
 
 The rear +/-5-degree window uses the median positive rearward body-x distance after TF transformation, including mounting translation. `rear_target_distance=0.28` m refers to the `base_frame` origin, not bumper clearance. `rear_window_half_angle=0.0872664626` rad and `rear_min_distance=0.22` m are startup parameters. Rear samples use the same minimum six points, 50% coverage, maximum distance and MAD checks as side windows. The target must be above the minimum plus position tolerance and below the maximum minus tolerance. A closer-than-minimum return prevents preparation motion; it is not an automatic escape maneuver.
 
-First rotate to yaw zero and verify standstill; then adjust center offset and rear error together, keeping yaw control active. The combined planar speed remains <=0.03 m/s (also capped by max_speed), with the existing preparation time/travel bounds. Both distance errors must be <=0.01 m, yaw accepted, and measured speed low continuously before A is captured. Route distances remain 0.90/0.516780 m. Loss of rear measurements blocks or faults preparation just like loss of side measurements. These checks do not guarantee obstacle-free movement or identify which surface generated the return.
+First rotate parallel to the right wall and verify standstill; then adjust center offset and rear error together, keeping yaw control active. The combined planar speed remains <=0.03 m/s (also capped by max_speed), with the existing preparation time/travel bounds. Both distance errors must be <=0.01 m, yaw accepted, and measured speed low continuously before A is captured. Route distances remain 0.90/0.516780 m. Loss of rear measurements blocks or faults preparation just like loss of side measurements. These checks do not guarantee obstacle-free movement or identify which surface generated the return.
 
 Local synthetic tests passed both forward/backward correction combined with opposite lateral offsets, followed by full four-segment routes. Rear-data loss and below-minimum distance both latched stop; the existing eight preparation failure cases also passed. Hardware wall identity and repeatability remain unverified.
 ## A-to-B wall observations
 
 Scene 2 continues processing scans after initialization solely for observation. During segment 0 (A to B), `A->B observation` logs approximately once per second, including rotation/settling/dwell ticks, and once at B standstill acceptance. Fields are odom x/y, `dy_from_A=y-route_y_`, actual yaw in radians/degrees, left/right body-origin distances in meters, and scan receipt age. Each side is checked independently; a missing rear return does not hide valid side observations. Invalid or stale sides print `unavailable`, never a cached numeric distance presented as current. Scan and odom are latest callback values, not a synchronized sensor pair.
 
-These observations do not change route targets, steering, completion or stop conditions; no ongoing centering or laser obstacle stopping is introduced. Side-window identity can change near openings and corners, so distance trends need physical context. Compare `dy_from_A` with left/right trends to distinguish odom tracking from corridor alignment.
+These observations do not change route targets, steering, completion or stop conditions; no ongoing centering or laser obstacle stopping is introduced. Side-window identity can change near openings and corners, so distance trends need physical context. Compare route-frame `cross_track` with left/right trends (`dy_from_A` remains an odom-axis diagnostic) to distinguish odom tracking from corridor alignment.
+## Right-wall initial heading (current scene 2)
+
+A nearby straight right wall defines forward heading. The fit uses transformed
+body-frame endpoints within +/-30 degrees of the right direction; this is separate
+from the narrower distance windows. At least 12 points, 50% coverage, 0.18 m tangent
+span and perpendicular RMS <=0.01 m are required. A fitted direction outside +/-30
+degrees of body forward is rejected. Place the robot roughly facing along the wall.
+The estimated odom-frame wall direction must remain within 0.02 rad of an anchor
+for 0.5 steady seconds before rotation is allowed. An inconsistent fit restarts
+that interval. Poor geometry keeps the robot stopped until the preparation timeout;
+there is no fallback to odom yaw zero. A straight unrelated surface can still pass
+these checks: real wall identity and measurement repeatability require cloud testing.
+
+The initial command uses the right-wall angle, then requires heading tolerance and
+measured standstill. Capture the actual aligned odom yaw as `heading_reference_`.
+Side/rear positioning holds this reference; capture A only after that preparation.
+All four relative targets are rotated by this same reference. During the route,
+heading uses odometry against the frozen reference; changing right-wall observations
+near B do not change it. This cannot correct later odometry drift relative to walls.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `wall_heading_half_angle` | 0.523599 rad | Fitting window half-width; positive and less than pi/4 |
+| `wall_heading_min_span` | 0.18 m | Minimum observed wall length |
+| `wall_heading_max_rms` | 0.01 m | Maximum perpendicular fit residual |
+
+`Right-wall alignment` prints validity, stability, relative angle, RMS and span.
+`Centered A` includes actual yaw and the captured reference. `A->B observation`
+adds `cross_track` in the rotated route frame and wrapped `heading_error`.
+A nonzero odom yaw is expected when the wall is not parallel to odom x.
+
+For the user's recent trial distances and heading tolerance (explicit overrides):
+
+```bash
+ros2 run distance_controller distance_controller 2 --ros-args \
+  -p forward_distance:=0.95 -p lateral_distance:=0.416780 \
+  -p heading_tolerance:=0.005
+```
+
+Package distance defaults remain 0.90 / 0.516780 m. This change does not add route
+collision avoidance. Synthetic fixtures are support evidence, not hardware acceptance.
+
+Local verification (2026-10-09): all 17 synthetic right-wall fixture cases and 40
+invalid-parameter cases passed. Scene 1 completed 10/10 in local Gazebo in 62.20 s,
+with final zero command and exit 0. Build, Doxygen generation/check, Ruff and Git
+whitespace checks passed. Clang-tidy retains reviewed size warnings for the timer
+coordinator, scan decoder and initial positioning state machine (92/79/61 lines);
+no claim of warning-free analysis is made. Cloud right-wall measurements remain pending.
