@@ -1,0 +1,20 @@
+# Inherit YAML defaults and override only explicit project choices.
+extends: default
+ignore: |
+  build/
+  install/
+  log/
+  output/
+rules:
+  indentation:
+    spaces: 2
+    indent-sequences: true
+  # Warn on long lines; do not truncate strings or change values.
+  line-length:
+    max: 100
+    level: warning
+  # ROS parameter files may omit the opening document marker.
+  document-start: disable
+  truthy:
+    allowed-values: ['true', 'false']
+  key-duplicates: enable

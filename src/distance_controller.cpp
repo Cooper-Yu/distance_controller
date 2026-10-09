@@ -1,637 +1,504 @@
-#include "rclcpp/rclcpp.hpp"
-#include "nav_msgs/msg/odometry.hpp"
-#include "geometry_msgs/msg/twist.hpp"
-#include "tf2/LinearMath/Quaternion.h"
-#include "tf2/LinearMath/Matrix3x3.h"
+/** @file
+ * @brief DistanceController implementation; interface documentation is in the header.
+ */
+#include "distance_controller/distance_controller.hpp"
 
-#include <functional>
-#include <chrono>
-#include <cstddef>
-#include <array>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <functional>
+#include <stdexcept>
+#include <string>
 
-// Control the ten-segment planar route; stop while waiting, settling, completed, or faulted.
-class DistanceController : public rclcpp::Node {
-public:
-    DistanceController() :
-        Node{"distance_controller"},
-        last_odom_time_{std::chrono::steady_clock::now()},
-        received_odom_{false},
-        last_log_time_{std::chrono::steady_clock::now()}
-    {
-        // Default to simulation time unless launch, YAML, or CLI explicitly overrides it.
-        const auto &overrides = get_node_parameters_interface()->get_parameter_overrides();
-        if (overrides.find("use_sim_time") == overrides.end()) {
-            set_parameter(rclcpp::Parameter("use_sim_time", true));
-        }
+#include "tf2/LinearMath/Matrix3x3.h"
+#include "tf2/LinearMath/Quaternion.h"
 
-        // Bind incoming odometry messages to on_odom.
-        odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-            "/odometry/filtered",
-            10,
-            std::bind(&DistanceController::on_odom, this, std::placeholders::_1)
-        );
+DistanceController::DistanceController(int scene_number) : Node{"distance_controller"}
+{
+  select_waypoints(scene_number);
 
-        // Check feedback every 50 ms; this wall timer keeps running when simulation time pauses.
-        timer_ = create_wall_timer(
-            std::chrono::milliseconds(50),
-            [this]() {
-                on_timer();
-            }
-        );
+  const auto & overrides = get_node_parameters_interface()->get_parameter_overrides();
+  if (overrides.find("use_sim_time") == overrides.end()) {
+    set_parameter(rclcpp::Parameter("use_sim_time", scene_number == 1));
+  }
 
-        // Publish commanded base velocity, independently of the velocity reported by odometry.
-        cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>(
-            "/cmd_vel",
-            10
-        );
+  kp_ = declare_parameter<double>("kp", 1.5);
+  ki_ = declare_parameter<double>("ki", 0.0);
+  kd_ = declare_parameter<double>("kd", 0.0);
+  max_speed_ = declare_parameter<double>("max_speed", scene_number == 1 ? 0.40 : 0.10);
+  max_acceleration_ =
+    declare_parameter<double>("max_acceleration", scene_number == 1 ? 0.60 : 0.20);
+  dwell_duration_ = declare_parameter<double>("dwell_duration", 1.0);
+  if (
+    !std::isfinite(kp_) || !std::isfinite(ki_) || !std::isfinite(kd_) ||
+    !std::isfinite(max_speed_) || max_speed_ <= 0.0 || !std::isfinite(max_acceleration_) ||
+    max_acceleration_ <= 0.0 || !std::isfinite(dwell_duration_) || dwell_duration_ < 0.0) {
+    throw std::invalid_argument("Invalid controller parameters");
+  }
+  const auto odom_topic = declare_parameter<std::string>("odom_topic", "/odometry/filtered");
+  const auto cmd_topic = declare_parameter<std::string>("cmd_vel_topic", "/cmd_vel");
+  RCLCPP_INFO(
+    get_logger(), "Scene %d: %zu segments, use_sim_time=%s, max_speed=%.3f", scene_number,
+    segments_.size(), get_parameter("use_sim_time").as_bool() ? "true" : "false", max_speed_);
 
+  odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+    odom_topic, 10, std::bind(&DistanceController::on_odom, this, std::placeholders::_1));
+
+  timer_ = create_wall_timer(std::chrono::milliseconds(50), [this]() { on_timer(); });
+
+  cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>(cmd_topic, 10);
+}
+
+void DistanceController::log_control_state(const ControlDiagnostics & data)
+{
+  RCLCPP_INFO(
+    get_logger(),
+    "Pose: x=%.3f, y=%.3f, yaw=%.3f | "
+    "Velocity: vx=%.3f, vy=%.3f, wz=%.3f | "
+    "Target: x=%.3f, y=%.3f | "
+    "Current segment index:%zu | "
+    "Error: ex=%.3f, ey=%.3f | "
+    "pid_dt=%.3f | "
+    "integral=(%.3f, %.3f) | "
+    "odom_raw=(%.3f, %.3f) | "
+    "odom_limited=(%.3f, %.3f) | "
+    "robot_cmd=(%.3f, %.3f)",
+    data.x, data.y, data.yaw, last_odom_.twist.twist.linear.x, last_odom_.twist.twist.linear.y,
+    last_odom_.twist.twist.angular.z, target_x_, target_y_, current_segment_index_, data.ex,
+    data.ey, data.pid_dt, integral_x_, integral_y_, data.vx_odom_raw, data.vy_odom_raw,
+    data.vx_odom, data.vy_odom, data.vx_robot, data.vy_robot);
+}
+
+void DistanceController::on_odom(nav_msgs::msg::Odometry::SharedPtr msg)
+{
+  last_odom_ = *msg;
+
+  last_odom_time_ = std::chrono::steady_clock::now();
+  received_odom_ = true;
+}
+
+bool DistanceController::handle_odom_wait_or_timeout(
+  const std::chrono::steady_clock::time_point & now, bool should_log)
+{
+  if (!received_odom_) {
+    if (should_log) {
+      RCLCPP_INFO(get_logger(), "Waiting for odom...");
     }
-private:
+    publish_stop();
+    return true;
+  }
 
-    // ===== Feedback reception =====
-    void on_odom(nav_msgs::msg::Odometry::SharedPtr msg) {
-        // Copy the latest feedback; the current single-threaded spin executes callbacks serially.
-        last_odom_ = *msg;
-        // Record the local receipt time using a clock unaffected by simulation pauses.
-        last_odom_time_  = std::chrono::steady_clock::now();
-        received_odom_ = true;
-    }
+  double dt = std::chrono::duration<double>(now - last_odom_time_).count();
+  if (dt > 0.5) {
+    RCLCPP_WARN(get_logger(), "Odom timeout: %.2f seconds since last update", dt);
+    fault_latched_ = true;
+    reset_pid();
+    publish_stop();
+    return true;
+  }
 
-    // ===== Periodic route control pipeline =====
-    void on_timer() {
+  return false;
+}
 
-        // --- 1. Keep a latched fault stopped until the node is restarted ---
-        if (fault_latched_)
-        {
-            publish_stop();
-            return;
-        }
-        // --- 2. Check feedback age and routine log timing using steady time ---
-        auto now = std::chrono::steady_clock::now();
-        // Throttle logs only; feedback checks and command publication still run every tick.
-        bool should_log =
-            std::chrono::duration<double>(now - last_log_time_).count() >= 1.0;
+bool DistanceController::handle_ros_time_jump(const rclcpp::Time & current_time)
+{
+  if (!ros_time_initialized_) {
+    last_ros_time_ = current_time;
+    ros_time_initialized_ = true;
+  } else {
+    const double ros_dt = (current_time - last_ros_time_).seconds();
 
-        // Throttle routine logs; state transitions and fault reports are logged separately.
-        if (should_log) {
-            last_log_time_ = now;
-        }
+    last_ros_time_ = current_time;
 
-        // Do not treat the default-constructed message as feedback before the first reception.
-        if (!received_odom_)
-        {
-            if (should_log) {
-                RCLCPP_INFO(get_logger(), "Waiting for odom...");
-            }
-            publish_stop();
-            return;
-        }
+    if (ros_dt < 0) {
+      fault_latched_ = true;
+      settling_ = false;
+      reset_pid();
 
-        // Convert elapsed time to seconds; dt here is feedback age, not the PID timestep.
-        double dt = std::chrono::duration<double>(now - last_odom_time_).count();
-        if (dt > 0.5) {
-            RCLCPP_WARN(get_logger(), "Odom timeout: %.2f seconds since last update", dt);
-            fault_latched_ = true;
-            reset_pid();
-            publish_stop();
-            return;
-        }
+      RCLCPP_ERROR(get_logger(), "ROS time moved backwards: ros_dt=%.6f", ros_dt);
 
-        // --- 3. Observe ROS time before both tracking and settling ---
-        auto current_time = this->now();
-
-        if (!ros_time_initialized_) {
-            last_ros_time_ = current_time;
-            ros_time_initialized_ = true;
-        } else {
-            const double ros_dt =
-                (current_time - last_ros_time_).seconds();
-
-            // Update before any early return so the next tick uses this observation.
-            last_ros_time_ = current_time;
-
-            if (ros_dt < 0) {
-                fault_latched_ = true;
-                settling_ = false;
-                reset_pid();
-
-                RCLCPP_ERROR(
-                    get_logger(),
-                    "ROS time moved backwards: ros_dt=%.6f",
-                    ros_dt
-                );
-
-                publish_stop();
-                return;
-            }
-
-            // Drop accumulated settling time after a large jump; retry on a later tick.
-            if (ros_dt > 0.2)
-            {
-                if (segment_completed_) {
-                    dwell_start_time_ = current_time;
-                }
-                settling_ = false;
-                reset_pid();
-
-                publish_stop();
-                return;
-            }
-        }
-
-        // --- 4. Freeze the segment target once; never move it with the feedback ---
-        if (!target_initialized_)
-        {
-            initialize_segment_target();
-        }
-
-        if (!target_initialized_)
-        {
-            publish_stop();
-            return;
-        }
-
-        double x = last_odom_.pose.pose.position.x;
-        double y = last_odom_.pose.pose.position.y;
-
-        double yaw = quaternion_to_yaw(
-            last_odom_.pose.pose.orientation
-        );
-
-        double ex = target_x_ - x;
-        double ey = target_y_ - y;
-
-        // --- 5. Keep a completed segment stopped; do not restart tracking ---
-        if (segment_completed_)
-        {
-            publish_stop();
-            const double dwell_elapsed =
-                (current_time - dwell_start_time_).seconds();
-
-            // Keep sending zero velocity during the dwell period.
-            if (dwell_elapsed < dwell_duration_) {
-                return;
-            }
-            ++current_segment_index_;
-            if (current_segment_index_ >= segments_.size()) {
-                RCLCPP_INFO(get_logger(), "Route completed.");
-                rclcpp::shutdown();
-                return;
-            }
-
-            // Prepare the next segment without changing the route reference.
-            reset_pid();
-            settling_ = false;
-            segment_completed_ = false;
-            target_initialized_ = false;
-            return;
-        }
-
-        double position_error = std::sqrt(ex * ex + ey * ey);
-
-        // --- 6. Stop inside position tolerance and verify continuous settling ---
-        if (position_error < 0.01)
-        {
-            publish_stop();
-            reset_pid();
-            check_completion(
-                ex,
-                ey,
-                current_time
-            );
-
-            return;
-        }
-
-        settling_ = false;
-
-        // --- 7. Initialize PID history or validate its own integration interval ---
-        if (!pid_initialized_)
-        {
-            initialize_pid(ex, ey, current_time);
-            publish_stop();
-            return;
-        }
-
-        double pid_dt =
-            (current_time - last_pid_time_).seconds();
-
-        // An unchanged timestamp must not advance PID history.
-        if (pid_dt == 0.0)
-        {
-            publish_stop();
-            return;
-        }
-
-        // Discard history after a backward clock jump.
-        if (pid_dt < 0.0)
-        {
-            reset_pid();
-            publish_stop();
-            return;
-        }
-
-        // Discard history after an excessive control interval.
-        if (pid_dt > 0.2)
-        {
-            reset_pid();
-            publish_stop();
-            return;
-        }
-
-        last_pid_time_ = current_time;
-
-        // --- Compute PID candidates in the odom frame ---
-        double vx_odom = 0.0;
-        double vy_odom = 0.0;
-
-        compute_pid(
-            ex,
-            ey,
-            pid_dt,
-            vx_odom,
-            vy_odom
-        );
-
-        // --- Preserve raw candidates before limiting their magnitude ---
-        double vx_odom_raw = vx_odom;
-        double vy_odom_raw = vy_odom;
-
-        limit_velocity(vx_odom, vy_odom);
-        limit_acceleration(vx_odom, vy_odom, pid_dt);
-
-        // --- Convert the limited odom velocity into the current body frame ---
-        double vx_robot = 0.0;
-        double vy_robot = 0.0;
-
-        odom_to_robot_velocity(
-            vx_odom,
-            vy_odom,
-            yaw,
-            vx_robot,
-            vy_robot
-        );
-
-        geometry_msgs::msg::Twist cmd;
-        cmd.linear.x = vx_robot;
-        cmd.linear.y = vy_robot;
-
-        // Publish the limited body-frame velocity; unused Twist components default to zero.
-        cmd_pub_->publish(cmd);
-
-
-
-        if (should_log) {
-            RCLCPP_INFO(
-                get_logger(),
-                "Pose: x=%.3f, y=%.3f, yaw=%.3f | "
-                "Velocity: vx=%.3f, vy=%.3f, wz=%.3f | "
-                "Target: x=%.3f, y=%.3f | "
-                "Current segment index:%zu | "
-                "Error: ex=%.3f, ey=%.3f | "
-                "pid_dt=%.3f | "
-                "integral=(%.3f, %.3f) | "
-                "odom_raw=(%.3f, %.3f) | "
-                "odom_limited=(%.3f, %.3f) | "
-                "robot_cmd=(%.3f, %.3f)",
-                x,
-                y,
-                yaw,
-                last_odom_.twist.twist.linear.x,
-                last_odom_.twist.twist.linear.y,
-                last_odom_.twist.twist.angular.z,
-                target_x_,
-                target_y_,
-                current_segment_index_,
-                ex,
-                ey,
-                pid_dt,
-                integral_x_, integral_y_,
-                vx_odom_raw, vy_odom_raw,
-                vx_odom, vy_odom,
-                vx_robot, vy_robot
-            );
-        }
-
+      publish_stop();
+      return true;
     }
 
-    // Publish all six components as zero; logging zero velocity alone does not send a stop command.
-    // ===== Stop-command output =====
-    void publish_stop() {
-        // Stops bypass the normal ramp and clear its command history.
-        previous_vx_odom_ = 0.0;
-        previous_vy_odom_ = 0.0;
-        geometry_msgs::msg::Twist cmd;
-        cmd.linear.x = 0.0;
-        cmd.linear.y = 0.0;
-        cmd.linear.z = 0.0;
+    if (ros_dt > 0.2) {
+      if (segment_completed_) {
+        dwell_start_time_ = current_time;
+      }
+      settling_ = false;
+      reset_pid();
 
-        cmd.angular.x = 0.0;
-        cmd.angular.y = 0.0;
-        cmd.angular.z = 0.0;
-
-        cmd_pub_->publish(cmd);
+      publish_stop();
+      return true;
     }
+  }
 
-    // ===== Route data type: relative forward/left displacement in meters =====
-    struct Segment
-    {
-        double dx;
-        double dy;
-    };
+  return false;
+}
 
-    // ===== Coordinate helper: extract yaw in radians =====
-    double quaternion_to_yaw(const geometry_msgs::msg::Quaternion &q)
-    {
-        tf2::Quaternion quat(
-            q.x,
-            q.y,
-            q.z,
-            q.w
-        );
+bool DistanceController::handle_pid_timing(
+  double ex, double ey, const rclcpp::Time & current_time, double & pid_dt)
+{
+  if (!pid_initialized_) {
+    initialize_pid(ex, ey, current_time);
+    publish_stop();
+    return true;
+  }
 
-        double roll, pitch, yaw;
-        tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+  pid_dt = (current_time - last_pid_time_).seconds();
 
-        return yaw;
-    }
+  if (pid_dt == 0.0) {
+    publish_stop();
+    return true;
+  }
 
-    // ===== Target initialization: rotate displacement and freeze the odom target =====
-    void initialize_segment_target() {
-        if (current_segment_index_ >= segments_.size()) {
-            RCLCPP_WARN(get_logger(), "Segment index out of range");
-            return;
-        }
+  if (pid_dt < 0.0) {
+    reset_pid();
+    publish_stop();
+    return true;
+  }
 
-        if (!route_initialized_) {
-            route_x_ = last_odom_.pose.pose.position.x;
-            route_y_ = last_odom_.pose.pose.position.y;
-            route_yaw_ = quaternion_to_yaw(last_odom_.pose.pose.orientation);
-            route_initialized_ = true;
-        }
+  if (pid_dt > 0.2) {
+    reset_pid();
+    publish_stop();
+    return true;
+  }
 
-        double total_dx = 0.0;
-        double total_dy = 0.0;
-        for (std::size_t i = 0; i <= current_segment_index_; ++i) {
-            total_dx += segments_[i].dx;
-            total_dy += segments_[i].dy;
+  last_pid_time_ = current_time;
+  return false;
+}
 
-        }
-        target_x_ =
-            route_x_
-            + std::cos(route_yaw_) * total_dx
-            - std::sin(route_yaw_) * total_dy;
+void DistanceController::compute_and_publish_command(ControlDiagnostics & data)
+{
+  compute_pid(data.ex, data.ey, data.pid_dt, data.vx_odom, data.vy_odom);
 
-        target_y_ =
-            route_y_
-            + std::sin(route_yaw_) * total_dx
-            + std::cos(route_yaw_) * total_dy;
+  data.vx_odom_raw = data.vx_odom;
+  data.vy_odom_raw = data.vy_odom;
 
-        RCLCPP_INFO(get_logger(), "Segment %zu/%zu target=(%.6f, %.6f)",
-                    current_segment_index_ + 1, segments_.size(), target_x_, target_y_);
-        target_initialized_ = true;
-    }
-    // ===== PID reset: invalidate history before reinitialization =====
-    void reset_pid() {
-        integral_x_ = 0.0;
-        integral_y_ = 0.0;
-        prev_error_x_ = 0.0;
-        prev_error_y_ = 0.0;
+  limit_velocity(data.vx_odom, data.vy_odom);
+  limit_acceleration(data.vx_odom, data.vy_odom, data.pid_dt);
 
-        pid_initialized_ = false;
-    }
-    // ===== PID calculation: independent axes; caller guarantees valid positive dt =====
-    void compute_pid(
-        double ex,
-        double ey,
-        double dt,
-        double & vx_odom,
-        double & vy_odom) {
-        integral_x_ += ex * dt;
-        integral_y_ += ey * dt;
+  double vx_robot = 0.0;
+  double vy_robot = 0.0;
 
-        integral_x_ = std::clamp(integral_x_, -integral_limit_, integral_limit_);
-        integral_y_ = std::clamp(integral_y_, -integral_limit_, integral_limit_);
+  odom_to_robot_velocity(data.vx_odom, data.vy_odom, data.yaw, vx_robot, vy_robot);
+  data.vx_robot = vx_robot;
+  data.vy_robot = vy_robot;
 
-        double derivative_x = (ex - prev_error_x_) / dt;
-        double derivative_y = (ey - prev_error_y_) / dt;
+  geometry_msgs::msg::Twist cmd;
+  cmd.linear.x = vx_robot;
+  cmd.linear.y = vy_robot;
 
-        vx_odom = kp_ * ex
-        + ki_ * integral_x_
-        + kd_ * derivative_x;
+  cmd_pub_->publish(cmd);
+}
 
-        vy_odom = kp_ * ey
-                + ki_ * integral_y_
-                + kd_ * derivative_y;
+void DistanceController::on_timer()
+{
+  if (fault_latched_) {
+    publish_stop();
+    return;
+  }
 
-        prev_error_x_ = ex;
-        prev_error_y_ = ey;
-    }
-    // ===== Speed limiting: scale both axes equally to preserve direction =====
-    void limit_velocity(
-        double & vx,
-        double & vy) {
-        double speed = std::sqrt(vx * vx + vy * vy);
-        if (speed > max_speed_)
-        {
-            double scale = max_speed_ / speed;
+  auto now = std::chrono::steady_clock::now();
 
-            vx *= scale;
-            vy *= scale;
-        }
+  bool should_log = std::chrono::duration<double>(now - last_log_time_).count() >= 1.0;
 
-    }
-    // ===== Vector acceleration limit in the fixed odom frame =====
-    void limit_acceleration(double &vx, double &vy, double dt) {
-        const double dx = vx - previous_vx_odom_;
-        const double dy = vy - previous_vy_odom_;
-        const double change = std::hypot(dx, dy);
-        const double allowed = max_acceleration_ * dt;
-        if (change > allowed) {
-            const double scale = allowed / change;
-            vx = previous_vx_odom_ + dx * scale;
-            vy = previous_vy_odom_ + dy * scale;
-        }
-        previous_vx_odom_ = vx;
-        previous_vy_odom_ = vy;
-    }
+  if (should_log) {
+    last_log_time_ = now;
+  }
 
-    // ===== Velocity conversion: odom to current body frame =====
-    void odom_to_robot_velocity(
-        double vx_odom,
-        double vy_odom,
-        double yaw,
-        double & vx_robot,
-        double & vy_robot) {
-        vx_robot =
-            std::cos(yaw) * vx_odom
-            + std::sin(yaw) * vy_odom;
+  if (handle_odom_wait_or_timeout(now, should_log)) {
+    return;
+  }
 
-        vy_robot =
-            -std::sin(yaw) * vx_odom
-            + std::cos(yaw) * vy_odom;
+  auto current_time = this->now();
 
-    }
+  if (handle_ros_time_jump(current_time)) {
+    return;
+  }
 
-    // ===== PID initialization: seed current errors and node ROS time =====
-    void initialize_pid(
-        double ex,
-        double ey,
-        const rclcpp::Time &current_time)
-    {
-        prev_error_x_ = ex;
-        prev_error_y_ = ey;
+  if (!target_initialized_) {
+    initialize_segment_target();
+  }
 
-        last_pid_time_ = current_time;
+  if (!target_initialized_) {
+    publish_stop();
+    return;
+  }
 
-        integral_x_ = 0.0;
-        integral_y_ = 0.0;
+  double x = last_odom_.pose.pose.position.x;
+  double y = last_odom_.pose.pose.position.y;
 
-        pid_initialized_ = true;
-    }
+  double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
 
-    // ===== Completion check: position and feedback speed must remain within tolerance =====
-    void check_completion(
-        double ex,
-        double ey,
-        const rclcpp::Time &current_time)
-    {
-        double position_error =
-            std::sqrt(ex * ex + ey * ey);
+  double ex = target_x_ - x;
+  double ey = target_y_ - y;
 
-        if (position_error >= 0.01)
-        {
-            settling_ = false;
-            return;
-        }
+  if (handle_completed_segment(current_time)) {
+    return;
+  }
 
-        double vx = last_odom_.twist.twist.linear.x;
-        double vy = last_odom_.twist.twist.linear.y;
+  double position_error = std::sqrt(ex * ex + ey * ey);
 
-        double linear_speed =
-            std::sqrt(vx * vx + vy * vy);
+  if (position_error < 0.01) {
+    publish_stop();
+    reset_pid();
+    check_completion(ex, ey, current_time);
 
-        double angular_speed =
-            std::abs(last_odom_.twist.twist.angular.z);
+    return;
+  }
 
-        if (linear_speed < 0.01 &&
-            angular_speed < 0.02)
-        {
-            if (!settling_)
-            {
-                settle_start_time_ = current_time;
-                // Log only when entering the stable interval, not on every timer tick.
-                settling_ = true;
-                RCLCPP_INFO(
-                    get_logger(),
-                    "Entering SETTLING state"
-                );
-            }
-            else if (
-                (current_time - settle_start_time_).seconds() >= 0.5)
-            {
-                // The caller keeps publishing zero after completion.
-                segment_completed_ = true;
-                dwell_start_time_ = current_time;
-                RCLCPP_INFO(
-                    get_logger(),
-                    "Entering DONE state | segment=%zu error=%.6f speed=%.6f wz=%.6f sim=%.3f",
-                    current_segment_index_, position_error, linear_speed, angular_speed, current_time.seconds()
-                );
-            }
-        }
-        else
-        {
-            settling_ = false;
-        }
-    }
+  settling_ = false;
 
-    // Keep the ROS interfaces alive for the lifetime of the node.
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-    rclcpp::TimerBase::SharedPtr timer_;
-    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
-    // Persist receipt time, latest feedback, reception flag, and log time across callbacks.
-    std::chrono::steady_clock::time_point last_odom_time_;
-    nav_msgs::msg::Odometry last_odom_;
-    bool received_odom_;
-    std::chrono::steady_clock::time_point last_log_time_;
-    // ===== Route and segment state =====
-    std::array<Segment, 10> segments_{{
-        { 0.0,  1.0},
-        { 0.0, -1.0},
-        { 0.0, -1.0},
-        { 0.0,  1.0},
-        { 1.0,  1.0},
-        {-1.0, -1.0},
-        { 1.0, -1.0},
-        {-1.0,  1.0},
-        { 1.0,  0.0},
-        {-1.0,  0.0}
-    }};
-    std::size_t current_segment_index_{0};
-    double start_x_;
-    double start_y_;
-    double start_yaw_;
+  double pid_dt = 0.0;
+  if (handle_pid_timing(ex, ey, current_time, pid_dt)) {
+    return;
+  }
 
-    double target_x_;
-    double target_y_;
+  ControlDiagnostics data{};
+  data.x = x;
+  data.y = y;
+  data.yaw = yaw;
+  data.ex = ex;
+  data.ey = ey;
+  data.pid_dt = pid_dt;
 
-    bool target_initialized_{false};
+  compute_and_publish_command(data);
 
-    // ===== PID gains and history: current tuning uses only the P contribution =====
-    double kp_{1.5};
-    double ki_{0.0};
-    double kd_{0.0};
+  if (should_log) {
+    log_control_state(data);
+  }
+}
 
-    double integral_x_ = 0.0;
-    double integral_y_ = 0.0;
+bool DistanceController::handle_completed_segment(const rclcpp::Time & current_time)
+{
+  if (!segment_completed_) {
+    return false;
+  }
 
-    double prev_error_x_ = 0.0;
-    double prev_error_y_ = 0.0;
+  publish_stop();
+  const double dwell_elapsed = (current_time - dwell_start_time_).seconds();
 
-    bool pid_initialized_ = false;
-
-    double integral_limit_ = 0.5;
-
-    double max_speed_ = 0.40;
-    double max_acceleration_{0.60};
-    double previous_vx_odom_{0.0};
-    double previous_vy_odom_{0.0};
-
-    // initialize_pid assigns node-clock time before this value is subtracted.
-    rclcpp::Time last_pid_time_;
-    // ===== Fault and completion state =====
-    bool fault_latched_ = false;
-
-    // A separate ROS-time interval tracks continuous position and speed acceptance.
-    bool settling_ = false;
-    rclcpp::Time settle_start_time_;
-    bool segment_completed_ = false;
-
-    // ===== ROS-time observation, independent of whether PID runs this tick =====
-    bool ros_time_initialized_{false};
-    rclcpp::Time last_ros_time_;
-
-    // Fixed reference for the entire route.
-    bool route_initialized_{false};
-    double route_x_{0.0};
-    double route_y_{0.0};
-    double route_yaw_{0.0};
-
-    // Dwell timing after a segment has settled.
-    rclcpp::Time dwell_start_time_;
-    double dwell_duration_{1.0};
-};
-
-// ===== Process entry point =====
-int main(int argc, char **argv) {
-    rclcpp::init(argc, argv);
-    auto node = std::make_shared<DistanceController>();
-
-    // Process ready callbacks after construction; source order does not determine callback order.
-    rclcpp::spin(node);
+  if (dwell_elapsed < dwell_duration_) {
+    return true;
+  }
+  ++current_segment_index_;
+  if (current_segment_index_ >= segments_.size()) {
+    RCLCPP_INFO(get_logger(), "Route completed.");
     rclcpp::shutdown();
-    return 0;
+    return true;
+  }
+
+  reset_pid();
+  settling_ = false;
+  segment_completed_ = false;
+  target_initialized_ = false;
+  return true;
+}
+
+void DistanceController::publish_stop()
+{
+  previous_vx_odom_ = 0.0;
+  previous_vy_odom_ = 0.0;
+  geometry_msgs::msg::Twist cmd;
+  cmd.linear.x = 0.0;
+  cmd.linear.y = 0.0;
+  cmd.linear.z = 0.0;
+
+  cmd.angular.x = 0.0;
+  cmd.angular.y = 0.0;
+  cmd.angular.z = 0.0;
+
+  cmd_pub_->publish(cmd);
+}
+
+void DistanceController::select_waypoints(int scene_number)
+{
+  if (scene_number == 1) {
+    segments_ = {{0.0, 1.0},   {0.0, -1.0}, {0.0, -1.0}, {0.0, 1.0}, {1.0, 1.0},
+                 {-1.0, -1.0}, {1.0, -1.0}, {-1.0, 1.0}, {1.0, 0.0}, {-1.0, 0.0}};
+  } else if (scene_number == 2) {
+    const double forward_distance = declare_parameter<double>("forward_distance", 1.360566);
+    const double lateral_distance = declare_parameter<double>("lateral_distance", 0.766780);
+
+    if (!std::isfinite(forward_distance)) {
+      throw std::invalid_argument("forward_distance must be finite");
+    }
+    if (forward_distance <= 0.0) {
+      throw std::invalid_argument("forward_distance must be positive");
+    }
+
+    if (!std::isfinite(lateral_distance)) {
+      throw std::invalid_argument("lateral_distance must be finite");
+    }
+    if (lateral_distance <= 0.0) {
+      throw std::invalid_argument("lateral_distance must be positive");
+    }
+
+    segments_ = {
+      {forward_distance, 0.0},
+      {0.0, -lateral_distance},
+      {0.0, lateral_distance},
+      {-forward_distance, 0.0}};
+  } else {
+    throw std::invalid_argument("Scene must be 1 (simulation) or 2 (CyberWorld)");
+  }
+  for (const auto & segment : segments_) {
+    if (!std::isfinite(segment.dx) || !std::isfinite(segment.dy)) {
+      throw std::invalid_argument(
+        "CyberWorld waypoints are not configured; fill all four {dx, dy} rows before running "
+        "scene 2");
+    }
+  }
+}
+
+double DistanceController::quaternion_to_yaw(const geometry_msgs::msg::Quaternion & q)
+{
+  tf2::Quaternion quat(q.x, q.y, q.z, q.w);
+
+  double roll, pitch, yaw;
+  tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+
+  return yaw;
+}
+
+void DistanceController::initialize_segment_target()
+{
+  if (current_segment_index_ >= segments_.size()) {
+    RCLCPP_WARN(get_logger(), "Segment index out of range");
+    return;
+  }
+
+  if (!route_initialized_) {
+    route_x_ = last_odom_.pose.pose.position.x;
+    route_y_ = last_odom_.pose.pose.position.y;
+    route_yaw_ = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+    route_initialized_ = true;
+  }
+
+  double total_dx = 0.0;
+  double total_dy = 0.0;
+  for (std::size_t i = 0; i <= current_segment_index_; ++i) {
+    total_dx += segments_[i].dx;
+    total_dy += segments_[i].dy;
+  }
+  target_x_ = route_x_ + std::cos(route_yaw_) * total_dx - std::sin(route_yaw_) * total_dy;
+
+  target_y_ = route_y_ + std::sin(route_yaw_) * total_dx + std::cos(route_yaw_) * total_dy;
+
+  RCLCPP_INFO(
+    get_logger(), "Segment %zu/%zu target=(%.6f, %.6f)", current_segment_index_ + 1,
+    segments_.size(), target_x_, target_y_);
+  target_initialized_ = true;
+}
+
+void DistanceController::reset_pid()
+{
+  integral_x_ = 0.0;
+  integral_y_ = 0.0;
+  prev_error_x_ = 0.0;
+  prev_error_y_ = 0.0;
+
+  pid_initialized_ = false;
+}
+
+void DistanceController::compute_pid(
+  double ex, double ey, double dt, double & vx_odom, double & vy_odom)
+{
+  integral_x_ += ex * dt;
+  integral_y_ += ey * dt;
+
+  integral_x_ = std::clamp(integral_x_, -integral_limit_, integral_limit_);
+  integral_y_ = std::clamp(integral_y_, -integral_limit_, integral_limit_);
+
+  double derivative_x = (ex - prev_error_x_) / dt;
+  double derivative_y = (ey - prev_error_y_) / dt;
+
+  vx_odom = kp_ * ex + ki_ * integral_x_ + kd_ * derivative_x;
+
+  vy_odom = kp_ * ey + ki_ * integral_y_ + kd_ * derivative_y;
+
+  prev_error_x_ = ex;
+  prev_error_y_ = ey;
+}
+
+void DistanceController::limit_velocity(double & vx, double & vy)
+{
+  double speed = std::sqrt(vx * vx + vy * vy);
+  if (speed > max_speed_) {
+    double scale = max_speed_ / speed;
+
+    vx *= scale;
+    vy *= scale;
+  }
+}
+
+void DistanceController::limit_acceleration(double & vx, double & vy, double dt)
+{
+  const double dx = vx - previous_vx_odom_;
+  const double dy = vy - previous_vy_odom_;
+  const double change = std::hypot(dx, dy);
+  const double allowed = max_acceleration_ * dt;
+  if (change > allowed) {
+    const double scale = allowed / change;
+    vx = previous_vx_odom_ + dx * scale;
+    vy = previous_vy_odom_ + dy * scale;
+  }
+  previous_vx_odom_ = vx;
+  previous_vy_odom_ = vy;
+}
+
+void DistanceController::odom_to_robot_velocity(
+  double vx_odom, double vy_odom, double yaw, double & vx_robot, double & vy_robot)
+{
+  vx_robot = std::cos(yaw) * vx_odom + std::sin(yaw) * vy_odom;
+
+  vy_robot = -std::sin(yaw) * vx_odom + std::cos(yaw) * vy_odom;
+}
+
+void DistanceController::initialize_pid(double ex, double ey, const rclcpp::Time & current_time)
+{
+  prev_error_x_ = ex;
+  prev_error_y_ = ey;
+
+  last_pid_time_ = current_time;
+
+  integral_x_ = 0.0;
+  integral_y_ = 0.0;
+
+  pid_initialized_ = true;
+}
+
+void DistanceController::check_completion(double ex, double ey, const rclcpp::Time & current_time)
+{
+  double position_error = std::sqrt(ex * ex + ey * ey);
+
+  if (position_error >= 0.01) {
+    settling_ = false;
+    return;
+  }
+
+  double vx = last_odom_.twist.twist.linear.x;
+  double vy = last_odom_.twist.twist.linear.y;
+
+  double linear_speed = std::sqrt(vx * vx + vy * vy);
+
+  double angular_speed = std::abs(last_odom_.twist.twist.angular.z);
+
+  if (linear_speed < 0.01 && angular_speed < 0.02) {
+    if (!settling_) {
+      settle_start_time_ = current_time;
+
+      settling_ = true;
+      RCLCPP_INFO(get_logger(), "Entering SETTLING state");
+    } else if ((current_time - settle_start_time_).seconds() >= 0.5) {
+      segment_completed_ = true;
+      dwell_start_time_ = current_time;
+      RCLCPP_INFO(
+        get_logger(), "Entering DONE state | segment=%zu error=%.6f speed=%.6f wz=%.6f sim=%.3f",
+        current_segment_index_, position_error, linear_speed, angular_speed,
+        current_time.seconds());
+    }
+  } else {
+    settling_ = false;
+  }
 }

@@ -1,0 +1,23 @@
+/**
+ * @mainpage distance_controller Project Guide
+ * @brief Navigate responsibilities, control flow, interfaces, and verification.
+ *
+ * The current code has documented header/source separation and a passing local
+ * Task1 ten-segment simulation run. Scene 2 displacements remain unconfigured.
+ *
+ * @section controller Controller interface
+ * - @ref DistanceController "Class, private methods, and state members"
+ *
+ * @section navigation Quick links
+ * - @ref md_README "Package setup, parameters, and operation"
+ * - @ref md_docs_flow "Control flow"
+ * - @ref engineering_navigation "Interface documentation conventions"
+ * - @ref md_docs_tooling "Tooling and verification entry points"
+ * - @ref md_docs_style_profile "Style profile"
+ * - @ref md_test_README "Test planning"
+ * - @ref md_docs_TEMPLATE_SOURCES "Template sources and licenses"
+ *
+ * @section evidence Evidence boundary
+ * Detailed course attempts and results remain in external WSL training records.
+ * This navigation does not certify independent learner completion or official grading.
+ */

@@ -1,0 +1,15 @@
+/**
+ * @page build_cmake CMakeLists.txt
+ * @brief Build targets, include paths, dependencies, and installation rules.
+ *
+ * Contents are read from the actual package file whenever Doxygen runs.
+ * @verbinclude CMakeLists.txt
+ */
+
+/**
+ * @page build_package_xml package.xml
+ * @brief ROS package metadata and dependency declarations.
+ *
+ * Contents are read from the actual package file whenever Doxygen runs.
+ * @verbinclude package.xml
+ */

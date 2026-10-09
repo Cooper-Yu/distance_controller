@@ -1,0 +1,66 @@
+{
+  "nodes": [
+    {
+      "id": "package-readme",
+      "type": "file",
+      "file": "README.md",
+      "x": 0,
+      "y": 0,
+      "width": 440,
+      "height": 420
+    },
+    {
+      "id": "package-flow",
+      "type": "file",
+      "file": "docs/flow.md",
+      "x": 560,
+      "y": 0,
+      "width": 440,
+      "height": 420
+    },
+    {
+      "id": "package-api",
+      "type": "file",
+      "file": "docs/api.dox",
+      "x": 0,
+      "y": 560,
+      "width": 440,
+      "height": 420
+    },
+    {
+      "id": "package-test",
+      "type": "file",
+      "file": "test/README.md",
+      "x": 560,
+      "y": 560,
+      "width": 440,
+      "height": 420
+    }
+  ],
+  "edges": [
+    {
+      "id": "readme-flow",
+      "fromNode": "package-readme",
+      "fromSide": "right",
+      "toNode": "package-flow",
+      "toSide": "left",
+      "label": "Responsibilities to flow"
+    },
+    {
+      "id": "flow-test",
+      "fromNode": "package-flow",
+      "fromSide": "bottom",
+      "toNode": "package-test",
+      "toSide": "top",
+      "label": "Expectations to verification"
+    },
+    {
+      "id": "readme-api",
+      "fromNode": "package-readme",
+      "fromSide": "bottom",
+      "toNode": "package-api",
+      "toSide": "top",
+      "label": "Package to interface"
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Engineering: Check style",
+      "type": "process",
+      "command": "python3",
+      "args": [
+        "tools/check_style.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Engineering: Generate Doxygen",
+      "type": "process",
+      "command": "doxygen",
+      "args": [
+        "docs/Doxyfile"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Engineering: Build package",
+      "type": "process",
+      "command": "colcon",
+      "args": [
+        "build",
+        "--packages-select",
+        "distance_controller",
+        "--cmake-args",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+      ],
+      "options": {
+        "cwd": "${input:workspaceRoot}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Engineering: Test package",
+      "type": "process",
+      "command": "colcon",
+      "args": [
+        "test",
+        "--packages-select",
+        "distance_controller"
+      ],
+      "options": {
+        "cwd": "${input:workspaceRoot}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Engineering: Show test results",
+      "type": "process",
+      "command": "colcon",
+      "args": [
+        "test-result",
+        "--verbose"
+      ],
+      "options": {
+        "cwd": "${input:workspaceRoot}"
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "workspaceRoot",
+      "type": "promptString",
+      "description": "Absolute colcon workspace path with the correct ROS environment loaded"
+    }
+  ]
+}

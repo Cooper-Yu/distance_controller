@@ -1,0 +1,19 @@
+/**
+ * @page engineering_navigation Interface Documentation
+ * @brief Source responsibilities and interface documentation conventions.
+ *
+ * @section source_entries Source entries
+ * - Class interface: include/distance_controller/distance_controller.hpp
+ * - Control implementation: src/distance_controller.cpp
+ * - Process entry: src/main.cpp
+ * - Package guide: README.md
+ * - Flow: docs/flow.md
+ * - Tools: docs/tooling.md
+ * - Tests: test/README.md
+ *
+ * @section annotation_convention Documentation convention
+ * Classes describe responsibilities, dependencies, and state. Functions describe
+ * purpose, parameter directions and provenance, return values, and side effects.
+ * Member documentation states units, frames, clock bases, and flag meanings.
+ * Source uses Doxygen comments; no duplicate interface description is kept in the implementation.
+ */

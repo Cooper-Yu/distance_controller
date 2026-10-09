@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C++: Debug a selected executable",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${input:cppProgram}",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb"
+    },
+    {
+      "name": "Python: Debug current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ],
+  "inputs": [
+    {
+      "id": "cppProgram",
+      "type": "promptString",
+      "description": "Absolute WSL path to the built ELF executable"
+    }
+  ]
+}

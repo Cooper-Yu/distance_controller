@@ -1,0 +1,18 @@
+{
+  "vendor/ros2-humble.clang-format": {
+    "url": "https://raw.githubusercontent.com/ament/ament_lint/a8b535a6d073233fc95b87c3ac4bcb1913a3b046/ament_clang_format/ament_clang_format/configuration/.clang-format",
+    "sha256": "2aad92898191bde84d162ee8b7bf96f4f0155eaabff381d740ff6795d29d7fc0"
+  },
+  "vendor/ament-LICENSE": {
+    "url": "https://raw.githubusercontent.com/ament/ament_lint/a8b535a6d073233fc95b87c3ac4bcb1913a3b046/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "vendor/doxygen-awesome.css": {
+    "url": "https://raw.githubusercontent.com/jothepro/doxygen-awesome-css/v2.3.4/doxygen-awesome.css",
+    "sha256": "833ec6e68a7f636a0052f74570ea57b9076f3e8cffc75c1c4e6839a9d2d195cb"
+  },
+  "vendor/doxygen-awesome-LICENSE": {
+    "url": "https://raw.githubusercontent.com/jothepro/doxygen-awesome-css/v2.3.4/LICENSE",
+    "sha256": "e3da754c3f657cc78594fa2e8a3283665f78c743df2485fa9e498a8973051191"
+  }
+}

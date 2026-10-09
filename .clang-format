@@ -1,0 +1,25 @@
+# Modified for Masterclass: explicit readable formatting; clang-format 14+.
+# Upstream ament style and Apache-2.0 license: docs/_theme/ament-style-LICENSE.
+---
+Language: Cpp
+BasedOnStyle: Google
+
+AccessModifierOffset: -2
+AlignAfterOpenBracket: AlwaysBreak
+BraceWrapping:
+  AfterClass: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterStruct: true
+BreakBeforeBraces: Custom
+ColumnLimit: 100
+ConstructorInitializerIndentWidth: 0
+ContinuationIndentWidth: 2
+DerivePointerAlignment: false
+PointerAlignment: Middle
+ReflowComments: false
+# Masterclass: predictable indentation and definition spacing.
+IndentWidth: 2
+SeparateDefinitionBlocks: Always
+AllowShortFunctionsOnASingleLine: None
+...

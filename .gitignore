@@ -1,0 +1,13 @@
+build/
+install/
+log/
+docs/generated/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.coverage
+htmlcov/
+coverage/
+docs/doxygen_warnings.log
+node_modules/

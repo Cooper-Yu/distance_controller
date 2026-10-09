@@ -1,0 +1,32 @@
+digraph control {
+  graph [rankdir=TB, bgcolor="white", pad="0.25", nodesep="0.3", ranksep="0.35"];
+  node [shape=box, style="rounded,filled", fillcolor="#eef6fc", color="#5182a5", fontname="DejaVu Sans", fontsize=12];
+  edge [color="#526674", fontname="DejaVu Sans", fontsize=10];
+  start [label="on_timer() / 50 ms wall timer"];
+  guard [label="Fault, feedback and node-time checks",shape=diamond];
+  stop [label="publish_stop()\nEnd this tick",fillcolor="#fff1dc"];
+  target [label="Initialize target if needed"];
+  valid [label="Target ready?",shape=diamond];
+  errors [label="Read pose; calculate ex / ey"];
+  done [label="Segment completed?",shape=diamond];
+  dwell [label="handle_completed_segment()\nStop; wait; advance or shutdown",fillcolor="#e7f3e6"];
+  near [label="Position error < 0.01 m?",shape=diamond];
+  settle [label="Stop; reset PID; check_completion()\nVerify continuous standstill\nEnd this tick",fillcolor="#e7f3e6"];
+  timing [label="Clear settling; handle_pid_timing()",shape=diamond];
+  compute [label="compute_and_publish_command(data)\nPID -> speed limit -> acceleration limit\n-> odom-to-body rotation -> publish"];
+  log [label="log_control_state(data) when due\nEnd this tick"];
+  start -> guard;
+  guard -> stop [label="blocked"];
+  guard -> target [label="continue"];
+  target -> valid;
+  valid -> stop [label="no"];
+  valid -> errors [label="yes"];
+  errors -> done;
+  done -> dwell [label="yes"];
+  done -> near [label="no"];
+  near -> settle [label="yes"];
+  near -> timing [label="no"];
+  timing -> stop [label="initialize / invalid dt"];
+  timing -> compute [label="valid dt"];
+  compute -> log;
+}
