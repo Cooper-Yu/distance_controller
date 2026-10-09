@@ -71,7 +71,9 @@ bool DistanceController::estimate_side(
 
 void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg)
 {
-  if (centering_complete_ || fault_latched_) return;
+  if (fault_latched_) return;
+  left_wall_valid_ = false;
+  right_wall_valid_ = false;
   scan_valid_ = false;
   const rclcpp::Time stamp(msg->header.stamp, get_clock()->get_clock_type());
   const double age = (now() - stamp).seconds();
@@ -123,11 +125,12 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
       (is_left ? left : right).push_back(std::abs(y));
     }
   }
-  if (
-    !estimate_side(left, left_samples, left_wall_) ||
-    !estimate_side(right, right_samples, right_wall_) ||
-    !estimate_side(rear, rear_samples, rear_wall_) || rear_wall_ < rear_min_distance_)
-    return;
+  wall_observation_time_ = std::chrono::steady_clock::now();
+  left_wall_valid_ = estimate_side(left, left_samples, left_wall_);
+  right_wall_valid_ = estimate_side(right, right_samples, right_wall_);
+  const bool rear_valid =
+    estimate_side(rear, rear_samples, rear_wall_) && rear_wall_ >= rear_min_distance_;
+  if (!left_wall_valid_ || !right_wall_valid_ || !rear_valid) return;
   last_scan_stamp_ns_ = stamp.nanoseconds();
   last_scan_time_ = std::chrono::steady_clock::now();
   scan_valid_ = true;
@@ -223,7 +226,27 @@ bool DistanceController::handle_initial_centering(const rclcpp::Time & current_t
       get_logger(),
       "Centered A recorded=(%.6f, %.6f), yaw=%.6f rad (%.3f deg), "
       "left=%.3f right=%.3f rear=%.3f; starting route",
-      route_x_, route_y_, yaw, yaw * 180.0 / 3.141592653589793, left_wall_, right_wall_, rear_wall_);
+      route_x_, route_y_, yaw, yaw * 180.0 / 3.141592653589793, left_wall_, right_wall_,
+      rear_wall_);
   }
   return true;
+}
+
+void DistanceController::log_route_wall_observation()
+{
+  if (!heading_control_enabled_ || !centering_complete_ || current_segment_index_ != 0) return;
+  const double age =
+    std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_observation_time_)
+      .count();
+  const bool fresh = age <= scan_timeout_;
+  const auto left = fresh && left_wall_valid_ ? std::to_string(left_wall_) : "unavailable";
+  const auto right = fresh && right_wall_valid_ ? std::to_string(right_wall_) : "unavailable";
+  const auto & pose = last_odom_.pose.pose;
+  const double yaw = quaternion_to_yaw(pose.orientation);
+  RCLCPP_INFO(
+    get_logger(),
+    "A->B observation: x=%.6f y=%.6f dy_from_A=%.6f m yaw=%.6f rad (%.3f deg) | "
+    "left=%s right=%s m scan_age=%.3f s | read-only",
+    pose.position.x, pose.position.y, pose.position.y - route_y_, yaw,
+    yaw * 180.0 / 3.141592653589793, left.c_str(), right.c_str(), age);
 }

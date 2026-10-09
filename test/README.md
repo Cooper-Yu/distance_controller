@@ -33,3 +33,5 @@ The Coach-owned verify_centering_fixture.py uses isolated domain 166, a syntheti
 ## Side/rear initialization (current)
 
 verify_rear_fixture.py extends the isolated fixture with a rear wall, nonzero forward/backward placement errors, and simultaneous lateral errors. It asserts rotation before translation, the combined 0.03 m/s speed cap, correct correction signs, captured A near the geometric wall-based target, four-segment completion, and independence from scans after initialization. Twelve cases passed (two routes, eight existing faults, rear loss and rear too close). Side-only fixture descriptions above are historical; current initialization requires all three windows. No real hardware movement was performed by these tests.
+
+verify_wall_log_fixture.py exercises a full route while removing rear returns after initialization, invalidating only the left window, pausing scans, and restoring valid sides. Assertions check numeric/independent-unavailable/stale log states and route completion without scan-driven fault or recentering. These are read-only observations; no hardware behavior claim is added.

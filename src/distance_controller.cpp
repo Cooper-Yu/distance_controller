@@ -359,6 +359,8 @@ void DistanceController::on_timer()
   double ex = target_x_ - x;
   double ey = target_y_ - y;
 
+  if (should_log) log_route_wall_observation();
+
   const double position_error = std::hypot(ex, ey);
   if (handle_heading_recovery(yaw, position_error)) {
     return;
@@ -624,6 +626,7 @@ void DistanceController::check_completion(double ex, double ey, const rclcpp::Ti
       settling_ = true;
       RCLCPP_INFO(get_logger(), "Entering SETTLING state");
     } else if ((current_time - settle_start_time_).seconds() >= 0.5) {
+      log_route_wall_observation();
       segment_completed_ = true;
       dwell_start_time_ = current_time;
       RCLCPP_INFO(

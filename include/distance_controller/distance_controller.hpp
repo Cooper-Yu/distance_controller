@@ -116,7 +116,7 @@ private:
    * select side/rear windows and validate finite coverage and median absolute deviation.
    * @param[in] msg LaserScan supplied by the scan subscription; read ranges, angles,
    * frame and stamp, without modifying the message. Write estimates into left_wall_/right_wall_/rear_wall_.
-   * @note Invalid scans clear scan_valid_; guard logic stops motion. No wall-direction estimate.
+   * @note Invalid scans clear scan_valid_; guard logic stops motion. No wall-direction estimate. After initialization, scans update read-only observations and do not gate the route.
    */
   void on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg);
 
@@ -152,6 +152,24 @@ private:
    * route_initialized_. Controls rear distance only during preparation; does not perform route obstacle avoidance.
    */
   bool handle_initial_centering(const rclcpp::Time & current_time);
+
+  /**
+   * @brief Log side-wall observations and odometry during A-to-B without affecting commands.
+   * @par Observation
+   * Called by on_timer() at its log cadence and by check_completion() at B acceptance.
+   * Read on_scan() side estimates, validity and receipt age independently of rear validity;
+   * read on_odom() pose and route_y_ to report lateral odom displacement from A.
+   * @note Missing, invalid or stale sides print unavailable. No control flags or commands
+   * are changed; scene 1 and other route segments produce no output.
+   */
+  void log_route_wall_observation();
+
+  /// Latest scan left window passed coverage, dispersion and distance checks; logging only.
+  bool left_wall_valid_{false};
+  /// Latest scan right window passed coverage, dispersion and distance checks; logging only.
+  bool right_wall_valid_{false};
+  /// Steady receipt time of the last frame transformed for wall observation, for log freshness.
+  std::chrono::steady_clock::time_point wall_observation_time_{};
 
   /// Scan-to-body transform cache; used only for the fixed laser mounting in scene 2.
   std::unique_ptr<tf2_ros::Buffer> scan_tf_buffer_{};
