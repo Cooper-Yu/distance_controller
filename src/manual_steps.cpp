@@ -22,6 +22,7 @@ std::string DistanceController::step_status()
   std::ostringstream out;
   out << "state="
       << (fault_latched_         ? "FAULT"
+          : odom_recovering_     ? "RECOVERING"
           : !centering_complete_ ? "PREPARING"
           : manual_waiting_      ? "WAITING"
                                  : "RUNNING")
@@ -56,8 +57,8 @@ void DistanceController::on_step_request(
   const double age =
     std::chrono::duration<double>(std::chrono::steady_clock::now() - last_odom_time_).count();
   if (
-    fault_latched_ || !centering_complete_ || !manual_waiting_ || !received_odom_ || age > 0.5 ||
-    std::hypot(velocity.linear.x, velocity.linear.y) >= 0.01 ||
+    fault_latched_ || odom_recovering_ || !centering_complete_ || !manual_waiting_ ||
+    !received_odom_ || age > 0.5 || std::hypot(velocity.linear.x, velocity.linear.y) >= 0.01 ||
     std::abs(velocity.angular.z) >= 0.02 ||
     std::abs(heading_error(quaternion_to_yaw(last_odom_.pose.pose.orientation))) >
       heading_tolerance_) {

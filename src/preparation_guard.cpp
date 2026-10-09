@@ -154,3 +154,98 @@ void DistanceController::log_preparation_progress()
     (initial_alignment_complete_ ? centering_settling_ : alignment_settling_) ? "true" : "false",
     alignment_settle_duration_);
 }
+
+void DistanceController::begin_odom_recovery(const std::chrono::steady_clock::time_point & receipt)
+{
+  if (odom_recovering_ || fault_latched_) return;
+  odom_recovering_ = true;
+  odom_recovery_stable_ = false;
+  recovery_start_ = receipt;
+  recovery_anchor_ = last_odom_;
+  settling_ = segment_completed_ = alignment_settling_ = centering_settling_ = false;
+  reset_pid();
+  publish_stop();
+  RCLCPP_WARN(
+    get_logger(),
+    "ODOM_RECOVERING: zero commands; 2 s budget, require 0.3 s fresh stopped "
+    "feedback; current target retained");
+}
+
+bool DistanceController::validate_odom_recovery(
+  const nav_msgs::msg::Odometry & msg, const std::chrono::steady_clock::time_point & receipt)
+{
+  if (fault_latched_) return false;
+  const double gap = std::chrono::duration<double>(receipt - last_odom_time_).count();
+  if (received_odom_ && gap > 0.5) begin_odom_recovery(receipt);
+  if (odom_recovering_ && std::chrono::duration<double>(receipt - recovery_start_).count() >= 2.0) {
+    fail_odom_recovery("ODOM_RECOVERY_TIMEOUT");
+    return false;
+  }
+  const rclcpp::Time stamp(msg.header.stamp, get_clock()->get_clock_type());
+  const rclcpp::Time previous(last_odom_.header.stamp, get_clock()->get_clock_type());
+  const double age = (now() - stamp).seconds();
+  if (
+    stamp.nanoseconds() <= 0 || age < -0.1 || age > (odom_recovering_ ? 0.15 : 0.5) ||
+    (received_odom_ && stamp <= previous)) {
+    odom_recovery_stable_ = false;
+    return false;
+  }
+  if (!odom_recovering_) return true;
+  const auto & a = recovery_anchor_.pose.pose;
+  const auto & b = msg.pose.pose;
+  const double yaw_delta = quaternion_to_yaw(b.orientation) - quaternion_to_yaw(a.orientation);
+  if (
+    msg.header.frame_id != recovery_anchor_.header.frame_id ||
+    msg.child_frame_id != recovery_anchor_.child_frame_id ||
+    std::hypot(b.position.x - a.position.x, b.position.y - a.position.y) > 0.25 ||
+    std::abs(std::atan2(std::sin(yaw_delta), std::cos(yaw_delta))) > 0.35) {
+    fail_odom_recovery("ODOM_RECOVERY_POSE_OR_FRAME_JUMP");
+    return false;
+  }
+  const auto & v = msg.twist.twist;
+  const bool stopped = std::hypot(v.linear.x, v.linear.y) < 0.01 && std::abs(v.angular.z) < 0.02;
+  if (!stopped)
+    odom_recovery_stable_ = false;
+  else if (!odom_recovery_stable_ || gap > 0.15) {
+    odom_recovery_stable_ = true;
+    recovery_since_ = receipt;
+  }
+  return true;
+}
+
+bool DistanceController::handle_odom_recovery(const std::chrono::steady_clock::time_point & receipt)
+{
+  publish_stop();
+  if (std::chrono::duration<double>(receipt - recovery_start_).count() >= 2.0) {
+    fail_odom_recovery("ODOM_RECOVERY_TIMEOUT");
+    return true;
+  }
+  if (std::chrono::duration<double>(receipt - last_odom_time_).count() > 0.15) {
+    odom_recovery_stable_ = false;
+    return true;
+  }
+  if (
+    !odom_recovery_stable_ ||
+    std::chrono::duration<double>(receipt - recovery_since_).count() < 0.3)
+    return true;
+  odom_recovering_ = false;
+  reset_pid();
+  RCLCPP_INFO(
+    get_logger(), "ODOM_RECOVERED: fresh stopped feedback stable; resuming original target");
+  return true;
+}
+
+void DistanceController::fail_odom_recovery(const char * reason)
+{
+  fault_latched_ = true;
+  odom_recovering_ = false;
+  process_exit_code_ = 2;
+  reset_pid();
+  publish_stop();
+  RCLCPP_ERROR(
+    get_logger(), "%s: %s", reason,
+    base_command_watchdog_verified_
+      ? "base watchdog confirmed; exiting with status 2"
+      : "base watchdog unverified; latched zero commands until restart");
+  if (base_command_watchdog_verified_) rclcpp::shutdown();
+}

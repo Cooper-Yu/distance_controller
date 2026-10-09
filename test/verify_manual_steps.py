@@ -20,7 +20,11 @@ from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 from distance_controller.srv import ExecuteStep
 
 ROOT = Path(os.environ.get('FIXTURE_OUTPUT_ROOT', '/tmp/distance_controller_fixture'))
-OUT = ROOT / 'runtime_logs' / time.strftime('manual_steps_%Y%m%d_%H%M%S')
+OUT = (
+    ROOT
+    / 'runtime_logs'
+    / (time.strftime('manual_steps_%Y%m%d_%H%M%S') + '_' + str(time.time_ns() % 1_000_000_000))
+)
 OUT.mkdir(parents=True)
 EXE = (
     Path(
@@ -44,6 +48,9 @@ class Plant:
         self.frozen = False
         self.scan_enabled = True
         self.odom_enabled = True
+        self.odom_stamp_age = 0.0
+        self.odom_frame_override = None
+        self.feedback_speed_override = None
         self.front_bad = False
         self.side_bad = False
         self.prev = time.monotonic()
@@ -117,12 +124,18 @@ class Plant:
         if self.odom_enabled:
             odom = Odometry()
             odom.header.frame_id, odom.child_frame_id = 'odom', self.base
-            odom.header.stamp = self.node.get_clock().now().to_msg()
+            stamp = self.node.get_clock().now().nanoseconds - int(self.odom_stamp_age * 1e9)
+            odom.header.stamp.sec = stamp // 1_000_000_000
+            odom.header.stamp.nanosec = stamp % 1_000_000_000
+            if self.odom_frame_override:
+                odom.header.frame_id = self.odom_frame_override
             odom.pose.pose.position.x, odom.pose.pose.position.y = self.pose()
             odom.pose.pose.orientation.z = math.sin((self.yaw + self.angle) / 2)
             odom.pose.pose.orientation.w = math.cos((self.yaw + self.angle) / 2)
             odom.twist.twist.linear.x, odom.twist.twist.linear.y = vx, vy
             odom.twist.twist.angular.z = wz
+            if self.feedback_speed_override is not None:
+                odom.twist.twist.linear.x = self.feedback_speed_override
             self.odom_pub.publish(odom)
         if self.scan_enabled and now >= self.next_scan:
             self.next_scan = now + 0.05
@@ -264,7 +277,7 @@ def sequence(p):
     p.yaw += 0.09
     p.wait(0.2)
     assert abs(p.cmd[0]) < 1e-10 and abs(p.cmd[1]) < 1e-10 and p.cmd[2] < 0
-    p.until(lambda: abs(p.yaw + p.angle - reference) <= 0.02)
+    p.until(lambda: abs(p.yaw + p.angle - reference) <= 0.01)
     p.wait(0.2)
     for action, dx, dy in [
         ('forward', 0.06, 0),
@@ -283,7 +296,7 @@ def sequence(p):
             math.hypot(after[0] - before[0] - expected[0], after[1] - before[1] - expected[1])
             < 0.011
         )
-        assert abs(p.yaw + p.angle - reference) <= 0.0201
+        assert abs(p.yaw + p.angle - reference) <= 0.0101
     x, y = p.pose()
     p.move('target', x=x - 0.03, y=y + 0.02, label='D')
     assert math.hypot(p.pose()[0] - (x - 0.03), p.pose()[1] - (y + 0.02)) < 0.011
@@ -309,7 +322,7 @@ def laser_policies(p):
     p.scan_enabled = False
     p.wait(0.7)
     p.move('right', distance=0.04)
-    assert abs(p.yaw + p.angle - reference) <= 0.0201
+    assert abs(p.yaw + p.angle - reference) <= 0.0101
 
 
 def front_arrival(p):
@@ -351,6 +364,8 @@ def odom_loss(p):
     p.idle()
     p.odom_enabled = False
     p.wait(0.8)
+    assert 'state=RECOVERING' in p.call('status')
+    p.wait(2.0)
     assert 'state=FAULT' in p.call('status')
     assert max(abs(v) for v in p.cmd) < 1e-8
     p.call('forward', accepted=False, distance=0.1)
@@ -515,6 +530,112 @@ def waypoint_logs(p):
     assert p.proc.returncode == 0
 
 
+def start_outage(p):
+    p.idle()
+    p.call('forward', distance=0.15)
+    p.wait(0.2)
+    p.odom_enabled = False
+    p.until(lambda: 'ODOM_RECOVERING:' in p.text(), 2)
+    p.wait(0.1)
+    assert max(abs(v) for v in p.cmd) < 1e-8
+    assert p.text().count('Endpoint ') == 1
+    p.call('forward', accepted=False, distance=0.1)
+
+
+def odom_recover(p):
+    start_outage(p)
+    p.odom_enabled = True
+    p.wait(0.15)
+    assert 'ODOM_RECOVERED:' not in p.text()
+    assert max(abs(v) for v in p.cmd) < 1e-8
+    p.until(lambda: 'ODOM_RECOVERED:' in p.text(), 2)
+    p.until(lambda: p.text().count('Endpoint ') == 2, 8)
+    assert p.text().count('Segment 2/2 target=') == 1
+    assert 'state=WAITING' in p.call('status')
+
+
+def odom_exit(p):
+    start_outage(p)
+    p.until(lambda: p.proc.poll() is not None, 4)
+    assert p.proc.returncode == 2
+    assert 'ODOM_RECOVERY_TIMEOUT' in p.text()
+    assert max(abs(v) for v in p.cmd) < 1e-8
+    assert p.text().count('Endpoint ') == 1
+
+
+def odom_stale(p):
+    start_outage(p)
+    p.odom_stamp_age = 1.0
+    p.odom_enabled = True
+    p.fault('ODOM_RECOVERY_TIMEOUT')
+    assert 'ODOM_RECOVERED:' not in p.text()
+
+
+def odom_future(p):
+    start_outage(p)
+    p.odom_stamp_age = -1.0
+    p.odom_enabled = True
+    p.fault('ODOM_RECOVERY_TIMEOUT')
+    assert 'ODOM_RECOVERED:' not in p.text()
+
+
+def odom_not_stopped(p):
+    start_outage(p)
+    p.feedback_speed_override = 0.03
+    p.odom_enabled = True
+    p.fault('ODOM_RECOVERY_TIMEOUT')
+    assert 'ODOM_RECOVERED:' not in p.text()
+
+
+def odom_jump(p):
+    start_outage(p)
+    p.x += 0.30
+    p.odom_enabled = True
+    p.fault('ODOM_RECOVERY_POSE_OR_FRAME_JUMP')
+    assert 'ODOM_RECOVERED:' not in p.text()
+
+
+def odom_frame_jump(p):
+    start_outage(p)
+    p.odom_frame_override = 'changed_odom'
+    p.odom_enabled = True
+    p.fault('ODOM_RECOVERY_POSE_OR_FRAME_JUMP')
+
+
+def odom_single(p):
+    start_outage(p)
+    p.odom_enabled = True
+    p.tick()
+    p.odom_enabled = False
+    p.fault('ODOM_RECOVERY_TIMEOUT')
+    assert 'ODOM_RECOVERED:' not in p.text()
+
+
+def odom_dwell(p):
+    p.until(lambda: 'Entering DONE state | segment=0' in p.text(), 20)
+    p.odom_enabled = False
+    p.until(lambda: 'ODOM_RECOVERING:' in p.text(), 2)
+    assert 'Endpoint ' not in p.text()
+    p.odom_enabled = True
+    p.until(lambda: 'ODOM_RECOVERED:' in p.text(), 2)
+    p.wait(0.4)
+    assert 'Endpoint ' not in p.text()
+    p.until(lambda: p.text().count('Endpoint ') == 1, 5)
+    assert p.text().count('Entering DONE state | segment=0') >= 2
+
+
+def odom_budget(p):
+    p.idle()
+    p.call('forward', distance=0.5, timeout=1.0)
+    p.wait(0.15)
+    p.odom_enabled = False
+    p.until(lambda: 'ODOM_RECOVERING:' in p.text(), 2)
+    p.wait(0.4)
+    p.odom_enabled = True
+    p.fault('TIME_OR_TRAVEL_LIMIT')
+    assert p.text().count('Endpoint ') == 1
+
+
 def missing_extent(p):
     p.idle()
     p.call('front_wall', accepted=False, distance=0.15)
@@ -522,6 +643,16 @@ def missing_extent(p):
 
 
 try:
+    run_case('odom_recover', odom_recover)
+    run_case('odom_exit', odom_exit, {'base_command_watchdog_verified': 'true'})
+    run_case('odom_stale', odom_stale)
+    run_case('odom_future', odom_future)
+    run_case('odom_not_stopped', odom_not_stopped)
+    run_case('odom_jump', odom_jump)
+    run_case('odom_frame_jump', odom_frame_jump)
+    run_case('odom_single', odom_single)
+    run_case('odom_dwell', odom_dwell, {'dwell_duration': '1.0'})
+    run_case('odom_budget', odom_budget)
     run_case(
         'waypoint_logs',
         waypoint_logs,
@@ -603,4 +734,5 @@ try:
 finally:
     rclpy.shutdown()
     (OUT / 'results.json').write_text(json.dumps(RESULTS, indent=2))
+assert RESULTS, 'No matching STEP_CASE was executed'
 print(json.dumps({'out': str(OUT), 'results': RESULTS}))

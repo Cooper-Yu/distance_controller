@@ -19,7 +19,7 @@
  * @param[in] argv Argument strings supplied by the process runtime; ROS consumes its
  * options and main() reads the remaining scene argument for DistanceController().
  * This program does not modify the strings or return results through them.
- * @return Zero after normal spin completion, or one after a caught standard exception.
+ * @return Zero after normal completion, one for a caught exception, or two after failed odom recovery.
  * @note Initializes and shuts down the default ROS context. Scene 2 validates distance and heading parameters before creating motion interfaces.
  */
 int main(int argc, char ** argv)
@@ -36,7 +36,7 @@ int main(int argc, char ** argv)
 
     rclcpp::spin(node);
     if (rclcpp::ok()) rclcpp::shutdown();
-    return 0;
+    return node->process_exit_code();
   } catch (const std::exception & error) {
     std::cerr << "distance_controller: " << error.what() << std::endl;
     if (rclcpp::ok()) rclcpp::shutdown();

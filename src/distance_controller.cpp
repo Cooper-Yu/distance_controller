@@ -17,6 +17,8 @@ DistanceController::DistanceController(int scene_number) : Node{"distance_contro
   if (scene_number != 1 && scene_number != 2) throw std::invalid_argument("Scene must be 1 or 2");
   heading_control_enabled_ = (scene_number == 2);
   configure_heading_control();
+  base_command_watchdog_verified_ =
+    declare_parameter<bool>("base_command_watchdog_verified", false);
 
   const auto & overrides = get_node_parameters_interface()->get_parameter_overrides();
   if (overrides.find("use_sim_time") == overrides.end()) {
@@ -206,9 +208,11 @@ void DistanceController::on_odom(nav_msgs::msg::Odometry::SharedPtr msg)
       return;
     }
   }
+  const auto receipt = std::chrono::steady_clock::now();
+  if (heading_control_enabled_ && !validate_odom_recovery(*msg, receipt)) return;
   last_odom_ = *msg;
 
-  last_odom_time_ = std::chrono::steady_clock::now();
+  last_odom_time_ = receipt;
   received_odom_ = true;
 }
 
@@ -223,9 +227,14 @@ bool DistanceController::handle_odom_wait_or_timeout(
     return true;
   }
 
+  if (odom_recovering_) return handle_odom_recovery(now);
   double dt = std::chrono::duration<double>(now - last_odom_time_).count();
   if (dt > 0.5) {
     RCLCPP_WARN(get_logger(), "Odom timeout: %.2f seconds since last update", dt);
+    if (heading_control_enabled_) {
+      begin_odom_recovery(now);
+      return true;
+    }
     fault_latched_ = true;
     reset_pid();
     publish_stop();

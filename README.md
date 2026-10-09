@@ -218,7 +218,7 @@ ROS parameter overrides and topic remapping are supported. Pose is assumed to us
 5. Inside 0.01 m position tolerance, publish zero. Require feedback planar speed below 0.01 m/s and absolute yaw rate below 0.02 rad/s continuously for at least 0.5 node-clock seconds.
 6. Dwell for `dwell_duration`, then advance. After the final dwell, keep the zero command and shut down the ROS context.
 
-Feedback timeout uses local steady-clock receipt time with a 0.5 s threshold. Before the first message, keep waiting at zero velocity. PID, settling, and dwell use node time. Feedback timeout or backwards node time latches a fault; an observation interval above 0.2 s resets timing-related state and stops the current tick.
+Feedback timeout uses local steady-clock receipt time with a 0.5 s threshold. Before the first message, keep waiting at zero velocity. PID, settling, and dwell use node time. Scene 1 feedback timeout and backwards node time latch a fault; scene 2 has bounded recovery as described below; an observation interval above 0.2 s resets timing-related state and stops the current tick.
 
 Stop commands bypass acceleration limiting and clear ramp history. There is no obstacle avoidance; scene 2 holds the captured right-wall heading. Publishing zero and verifying standstill are separate steps.
 
@@ -347,7 +347,7 @@ These observations do not change route targets, steering, completion or stop con
 A nearby straight right wall defines forward heading. The fit uses transformed
 body-frame endpoints within +/-30 degrees of the right direction; this is separate
 from the narrower distance windows. At least 12 points, 50% coverage, 0.18 m tangent
-span and perpendicular RMS <=0.01 m are required. A fitted direction outside +/-30
+span and perpendicular RMS <=0.012 m are required. A fitted direction outside +/-30
 degrees of body forward is rejected. Place the robot roughly facing along the wall.
 The estimated odom-frame wall direction must remain within 0.02 rad of an anchor
 for 0.5 steady seconds before rotation is allowed. An inconsistent fit restarts
@@ -366,7 +366,7 @@ near B do not change it. This cannot correct later odometry drift relative to wa
 | --- | --- | --- |
 | `wall_heading_half_angle` | 0.523599 rad | Fitting window half-width; positive and less than pi/4 |
 | `wall_heading_min_span` | 0.18 m | Minimum observed wall length |
-| `wall_heading_max_rms` | 0.01 m | Maximum perpendicular fit residual |
+| `wall_heading_max_rms` | 0.012 m | Maximum perpendicular fit residual |
 
 `Right-wall alignment` prints validity, stability, relative angle, RMS and span.
 `Centered A` includes actual yaw and the captured reference. `A->B observation`
@@ -504,3 +504,41 @@ errors and tolerances, readiness flags and settling hold requirement. The headin
 basis changes from `right_wall` to `held_odom_heading` after alignment. Settling
 flags reflect the preceding tick. Invalid/missing scans and stage/total timeouts
 retain their explicit wait/fault messages; `Centered A recorded` marks completion.
+
+## Scene 2 odometry recovery
+
+A gap above 0.5 steady seconds in accepted odometry enters `ODOM_RECOVERING`.
+The controller continuously publishes zero, resets PID/ramp history and restarts
+settling/dwell. The current target, route index and completed history stay intact.
+A gap observed by the odom callback itself also enters recovery even if the timer
+has not yet run. Scene 1 retains its original immediate timeout fault.
+
+Recovery has a fixed 2 s budget measured from the detected stop, never extended
+by intermittent packets. Accepted scene-2 stamps must increase and be no older
+than 0.5 node-clock seconds (at most 0.1 s in the future). During recovery,
+the source-age limit tightens to 0.15 s. Recovery additionally
+requires 0.3 steady seconds of continuous fresh feedback, accepted intervals no
+larger than 0.15 s, planar speed below 0.01 m/s and yaw rate below 0.02 rad/s.
+Stale, duplicate or reordered samples do not refresh accepted feedback time.
+Compared with the last good pre-gap pose, a position change over 0.25 m, wrapped
+yaw change over 0.35 rad, or a changed parent/child frame terminates recovery.
+These are conservative continuity guards, not proof that localization is correct.
+
+`ODOM_RECOVERED` permits the next tick to re-evaluate the original target with
+new PID timing. It does not skip a waypoint or reuse old dwell time. Preparation
+and segment time budgets keep running. Manual motion requests are rejected while
+recovering; status/history remain readable and cancel remains available.
+
+`ODOM_RECOVERY_TIMEOUT` or `ODOM_RECOVERY_POSE_OR_FRAME_JUMP` ends automatic
+recovery. By default the node stays fault-latched and sends zero until restart.
+Automatic process exit requires an independently verified base velocity-command
+watchdog: set `base_command_watchdog_verified:=true` only after checking that
+actual base's command-timeout behavior. In that mode the node publishes zero,
+shuts down and returns process status 2. This parameter is an operator assertion,
+not automatic detection. Without that evidence, keeping the publisher alive is
+intentional; a final ROS message alone cannot guarantee delivery to a disconnected
+base. No base watchdog has yet been verified in the user's cloud environment.
+
+The right-wall fit RMS default is now 0.012 m, supported by the user's successful
+four-segment run with that override. This measurement tolerance is distinct from
+the 0.01 rad heading tolerance. The new recovery behavior still needs cloud tests.

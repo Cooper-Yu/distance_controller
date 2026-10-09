@@ -44,7 +44,54 @@ public:
    */
   explicit DistanceController(int scene_number = 1);
 
+  /** @brief Return process status to main() after shutdown.
+   * @return Two for exhausted odom recovery; zero unless a terminal failure set it.
+   * @note No state mutation; an unverified base watchdog keeps the node latched alive.
+   */
+  int process_exit_code() const
+  {
+    return process_exit_code_;
+  }
+
 private:
+  /** @brief Start a bounded stop after a feedback gap detected by on_odom() or the timer.
+   * @param[in] receipt Steady time from the detecting callback; copied as the fixed 2 s deadline origin.
+   * @note Reads last_odom_ as the continuity anchor; clears PID and settling, preserves target/history.
+   */
+  void begin_odom_recovery(const std::chrono::steady_clock::time_point & receipt);
+  /** @brief Check incoming feedback before on_odom() writes it to last_odom_.
+   * @param[in] msg New on_odom() sample; read source stamp, frames, pose and velocity.
+   * @param[in] receipt Current steady callback time; used for gap and recovery stability checks.
+   * @return True to accept the sample; false keeps the prior feedback and commands zero on recovery.
+   * @note Updates recovery stability only; rejects stale/reordered feedback and latches pose/frame jumps.
+   */
+  bool validate_odom_recovery(
+    const nav_msgs::msg::Odometry & msg, const std::chrono::steady_clock::time_point & receipt);
+  /** @brief Keep zero commands until recovery succeeds or its fixed deadline expires.
+   * @param[in] receipt Steady timer time from handle_odom_wait_or_timeout(); read for deadlines.
+   * @return True: this tick always stays stopped, including the recovery transition.
+   * @note Does not extend preparation or segment budgets, change targets, or add history entries.
+   */
+  bool handle_odom_recovery(const std::chrono::steady_clock::time_point & receipt);
+  /** @brief Latch unsuccessful recovery and optionally terminate with nonzero status.
+   * @param[in] reason Diagnostic literal from recovery checks; copied to the ROS error log.
+   * @note Publishes zero; exits only when base_command_watchdog_verified was explicitly enabled.
+   */
+  void fail_odom_recovery(const char * reason);
+  bool odom_recovering_{
+    false};  ///< Scene 2 feedback gap is in the bounded zero-command recovery phase.
+  bool odom_recovery_stable_{
+    false};  ///< Fresh stopped samples have remained continuous since recovery_since_.
+  bool base_command_watchdog_verified_{
+    false};                   ///< Operator confirms independent base command timeout before exit.
+  int process_exit_code_{0};  ///< Exit status read by main(); 2 denotes unrecovered odom failure.
+  std::chrono::steady_clock::time_point
+    recovery_start_{};  ///< Fixed steady-clock start of the 2 s recovery budget.
+  std::chrono::steady_clock::time_point
+    recovery_since_{};  ///< First sample of a continuous stopped recovery sequence.
+  nav_msgs::msg::Odometry
+    recovery_anchor_{};  ///< Last good pre-gap pose/frames; recovery jump comparison in odom.
+
   /**
    * @brief Calculate lateral centering velocity without publishing.
    * @par Centering calculation
@@ -254,7 +301,7 @@ private:
   /// Minimum observed tangent extent (m); prevents a short cluster defining heading.
   double wall_heading_min_span_{0.18};
   /// Maximum perpendicular line-fit RMS (m); no automatic fallback to odom zero.
-  double wall_heading_max_rms_{0.01};
+  double wall_heading_max_rms_{0.012};
 
   /// Latest scan left window passed coverage, dispersion and distance checks; logging only.
   bool left_wall_valid_{false};
@@ -430,7 +477,7 @@ private:
    * Copy the message to last_odom_, record steady-clock receipt time, and set received_odom_.
    *
    * @param[in] msg Message supplied by the subscription created in DistanceController(). Read its pose and twist into last_odom_ for on_timer(), log_control_state(), and check_completion(); do not modify the received message.
-   * @note Freshness measures callback receipt, not header.stamp. Frame names are assumed. Scene 2 rejects nonfinite consumed values or quaternion squared norm more than 0.01 from unity, latches a fault, and publishes stop.
+   * @note Scene 2 also rejects stale/nonincreasing header stamps and validates frame continuity during recovery. Receipt deadlines use the steady clock. Scene 2 rejects nonfinite consumed values or quaternion squared norm more than 0.01 from unity, latches a fault, and publishes stop.
    */
   void on_odom(nav_msgs::msg::Odometry::SharedPtr msg);
 
@@ -439,7 +486,7 @@ private:
    *
    * @par Check odometry feedback
    * Keep sending zero velocity until the first odometry message arrives.
-   * If no update arrives within the timeout, latch a fault, reset PID, and stop.
+   * If no update arrives within 0.5 s, reset PID and stop; scene 2 enters bounded recovery, scene 1 latches.
    * Otherwise, allow the current timer callback to continue.
    *
    * @param[in] now Steady-clock time captured by on_timer(). Read it to calculate
@@ -448,7 +495,7 @@ private:
    * @param[in] should_log Flag calculated by on_timer() from its logging interval.
    * Read it to decide whether to print the waiting message; do not write it back.
    * @return True to end this timer callback; false to continue control.
-   * @note A timeout fault stays latched until the node is restarted.
+   * @note Scene 2 stops for up to 2 s to qualify fresh stopped feedback; otherwise latches or exits with a verified base watchdog. Scene 1 retains immediate latching.
    */
   bool handle_odom_wait_or_timeout(
     const std::chrono::steady_clock::time_point & now, bool should_log);
@@ -603,7 +650,8 @@ private:
    * Called by handle_centering_guard() after accepting fresh scan data. Read pose from
    * on_odom(), wall measurements from on_scan(), and alignment/positioning state from
    * their handlers. Log meters, radians and configured thresholds without changing control.
-   * @return Nothing; progress is written to the ROS logger.
+   * @par Output
+   * Progress is written to the ROS logger; this function has no return value.
    * @note Settling flags describe the preceding tick; pre-alignment heading uses the right wall.
    */
   void log_preparation_progress();
@@ -615,7 +663,8 @@ private:
    * alignment/centering, and segments_ supplied by configure_route_steps(). Print
    * cumulative goals in the odometry header frame, meters and radians. Stop the
    * preview before a feedback-dependent endpoint; execution logs its actual target.
-   * @return Nothing; informational output only.
+   * @par Output
+   * Informational ROS log output only; this function has no return value.
    * @note Called after initial centering records A; does not modify targets or control state.
    */
   void log_route_waypoints() const;
@@ -794,7 +843,7 @@ private:
   /// Node-clock timestamp of PID initialization or last accepted interval; guarded by pid_initialized_.
   rclcpp::Time last_pid_time_{};
 
-  /// True after feedback timeout, backwards time, or invalid scene-2 odometry; stops until node restart.
+  /// True after unrecovered feedback timeout, backwards time, or invalid scene-2 odometry; stops until node restart.
   bool fault_latched_{false};
 
   /// True while the current uninterrupted standstill interval is being measured.

@@ -83,3 +83,15 @@ latches stop without fallback. The full interface contract is in manual_steps.md
 ## History and continuation
 
 Scene 2 records A once, captures each actual step start at target initialization and commits its stopped endpoint only after dwell. Completed return legs pop active ancestry but remain in the audit. A return batch uses the ordinary executor and goes to each recorded start in sequence. WAITING checks displacement before motion acceptance; excessive drift locks zero output. See history_return.md.
+
+## Scene 2 feedback interruption
+
+The odom guard runs before preparation or route execution. A gap over 0.5 s
+enters `RECOVERING`, publishes zero, clears settling/dwell qualification, resets
+PID, and preserves the target and route index. Within a fixed 2 s steady-clock
+budget, feedback must remain fresh and stopped for 0.3 s with unchanged frames
+and bounded pose change. Success resumes the original target on a later tick;
+failure latches zero commands. With an independently verified base watchdog and
+`base_command_watchdog_verified:=true`, terminal recovery failure exits with code 2.
+Preparation and segment deadlines are not restarted. History and new motion
+requests cannot advance an interrupted step. See the README for exact thresholds.
