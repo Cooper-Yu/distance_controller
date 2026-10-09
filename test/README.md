@@ -83,3 +83,23 @@ Current local results: 25/25 closed-loop fixture cases and 52/52 invalid paramet
 cases passed. Four route GoogleTests passed. Scene 1 completed 10/10 in local Gazebo
 and stopped/exited normally. The localhost fixture domains remain reserved for tests;
 these results do not replace cloud/hardware wall-quality and clearance verification.
+
+
+## Manual exploration and feedback policies
+
+```bash
+python3 test/verify_manual_steps.py
+```
+
+This fixture uses localhost-only domain 168, a synthetic rotated corridor, odometry,
+static mounting TF and the real ExecuteStep service. STEP_CASE selects one case and
+FIXTURE_OUTPUT_ROOT selects the evidence root. Cases cover all four directions,
+relative/absolute targets, held heading during idle and motion, busy/turn/invalid
+request rejection, independent side-laser policy, bounded front-wall arrival,
+front invalidity/already-too-close, timeout/path limit, idle odom loss, paused custom
+AB/BD with resume, and missing body geometry. The installed CLI status path is also
+exercised. No robot domain is contacted. The existing 25 right-wall cases and Task1
+Gazebo run provide regressions. Route GoogleTests now additionally cover policy
+compatibility and absolute-origin goals; startup probes include manual/laser policies.
+
+The manual fixture also verifies stale required scans and active cancellation: both latch a stop and reject continuation. Use `STEP_CASE=front_stale` or `STEP_CASE=cancel_step` for focused runs.

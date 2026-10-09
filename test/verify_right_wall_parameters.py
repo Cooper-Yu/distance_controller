@@ -35,6 +35,15 @@ names = [
     'preparation_max_travel',
 ]
 cases = [(n, v) for n in names for v in ['0.0', '.nan']] + [
+    ('start_paused', 'true'),
+    ('front_body_extent', '0.0'),
+    ('front_body_extent', '.nan'),
+    ('segments.AB.speed', '-0.1'),
+    ('segments.AB.timeout', '0.0'),
+    ('segments.AB.max_travel', '0.0'),
+    ('segments.AB.completion', 'turn'),
+    ('segments.AB.completion', 'front_wall'),
+    ('segments.BC.side_centering', 'true'),
     ('route', '[BC]'),
     ('route', '[AB, CB]'),
     ('route', '[AB, AB]'),

@@ -1,0 +1,21 @@
+# Accept one step only while manual mode is idle; response is acceptance, not completion.
+# action: forward/backward/left/right/relative/target/front_wall/resume/status/finish/cancel.
+string action
+# distance: positive meters; for front_wall this is front-body clearance.
+float64 distance
+# relative: signed dx/dy; target: absolute odom x/y, meters.
+float64 x
+float64 y
+# Zero speed/timeout/max_travel selects documented defaults. Dwell is literal seconds.
+float64 speed
+float64 dwell
+# Empty or route: initial route axes; heading: persistent held-heading axes.
+string frame
+bool side_centering
+float64 max_travel
+float64 timeout
+# Optional human-readable endpoint name for the recorded stopped pose.
+string label
+---
+bool accepted
+string message

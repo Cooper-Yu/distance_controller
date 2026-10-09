@@ -73,13 +73,25 @@ struct PlanarMotion
   static PlanarMotion move_right(double distance, double speed, double dwell);
 };
 
+/// Position arrival or independently measured front-body clearance arrival.
+enum class CompletionKind { Position, FrontWall };
+/// Fixed initial route axes, held heading axes, or absolute odom coordinates.
+enum class MotionFrame { Route, Heading, Odom };
+
 /// Independently reusable named edge; it does not select its successor or shut down ROS.
 struct RouteSegment
 {
-  std::string from{};  ///< Named planned start, such as A; used for continuity validation/logs.
-  std::string to{};  ///< Named planned destination, such as B; used for continuity validation/logs.
-  PlanarMotion
-    motion{};  ///< Relative displacement, speed and dwell applied by the shared executor.
+  std::string from{};     ///< Planned start label, used for continuity and logging.
+  std::string to{};       ///< Destination label recorded after verified completion.
+  PlanarMotion motion{};  ///< Displacement, speed and dwell for shared execution.
+  CompletionKind completion{CompletionKind::Position};  ///< Selects the arrival measurement.
+  MotionFrame frame{MotionFrame::Route};  ///< Translation axes; never changes heading_reference_.
+  bool relative_to_start{false};          ///< Manual steps anchor to the accepted starting pose.
+  bool side_centering{
+    false};  ///< Side walls replace odom lateral tracking when explicitly enabled.
+  double front_clearance{0.2};  ///< Target clearance from front body edge, meters.
+  double timeout{60.0};         ///< Steady execution budget including recovery, settling and dwell.
+  double max_travel{100.0};     ///< Maximum accumulated odom path length, meters.
 };
 
 /**
@@ -96,5 +108,61 @@ struct RouteSegment
 std::vector<RouteSegment> compose_route(
   const std::vector<std::string> & names, double forward_distance, double lateral_distance,
   double speed, double dwell);
+/**
+ * @brief Define the independently editable forward A-to-B segment.
+ * @par Segment definition
+ * Build motion data only; the timer executor owns feedback and publication.
+ * @param[in] distance Positive meters from compose_route()/configure_route_steps(); copied to motion.
+ * @param[in] speed Positive m/s from the route builder; copied to the segment speed cap.
+ * @param[in] dwell Nonnegative seconds from the route builder; copied to segment dwell.
+ * @return Named segment, ready for policy overrides and shared execution.
+ * @note No ROS side effects; invalid factory parameters throw std::invalid_argument.
+ */
+RouteSegment make_ab_segment(double distance, double speed, double dwell);
+
+/**
+ * @brief Define the independently editable right B-to-C segment.
+ * @par Segment definition
+ * Build motion data only; the timer executor owns feedback and publication.
+ * @param[in] distance Positive meters from compose_route()/configure_route_steps(); copied to motion.
+ * @param[in] speed Positive m/s from the route builder; copied to the segment speed cap.
+ * @param[in] dwell Nonnegative seconds from the route builder; copied to segment dwell.
+ * @return Named segment, ready for policy overrides and shared execution.
+ * @note No ROS side effects; invalid factory parameters throw std::invalid_argument.
+ */
+RouteSegment make_bc_segment(double distance, double speed, double dwell);
+
+/**
+ * @brief Define the independently editable left C-to-B segment.
+ * @par Segment definition
+ * Build motion data only; the timer executor owns feedback and publication.
+ * @param[in] distance Positive meters from compose_route()/configure_route_steps(); copied to motion.
+ * @param[in] speed Positive m/s from the route builder; copied to the segment speed cap.
+ * @param[in] dwell Nonnegative seconds from the route builder; copied to segment dwell.
+ * @return Named segment, ready for policy overrides and shared execution.
+ * @note No ROS side effects; invalid factory parameters throw std::invalid_argument.
+ */
+RouteSegment make_cb_segment(double distance, double speed, double dwell);
+
+/**
+ * @brief Define the independently editable backward B-to-A segment.
+ * @par Segment definition
+ * Build motion data only; the timer executor owns feedback and publication.
+ * @param[in] distance Positive meters from compose_route()/configure_route_steps(); copied to motion.
+ * @param[in] speed Positive m/s from the route builder; copied to the segment speed cap.
+ * @param[in] dwell Nonnegative seconds from the route builder; copied to segment dwell.
+ * @return Named segment, ready for policy overrides and shared execution.
+ * @note No ROS side effects; invalid factory parameters throw std::invalid_argument.
+ */
+RouteSegment make_ba_segment(double distance, double speed, double dwell);
+
+/**
+ * @brief Validate a complete step before it can replace idle state.
+ * @par Step contract
+ * Reject nonfinite bounds, unsupported side-centering directions and incompatible frames.
+ * @param[in] step Candidate from configure_route_steps() or on_step_request(); read only.
+ * @note Throws std::invalid_argument on invalid input; no mutation or publication.
+ */
+void validate_segment(const RouteSegment & step);
 }  // namespace distance_controller
 #endif

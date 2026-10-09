@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "distance_controller/route.hpp"
+#include "distance_controller/srv/execute_step.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -22,8 +23,8 @@
  * @brief Track a selected planar route using odometry and body-frame velocity commands.
  * @details Targets use the fixed initial route frame. Feedback receipt uses a steady
  * clock; PID, settling, and dwell use the node clock (simulation time when enabled).
- * The single-threaded executor in main() serializes callbacks. No obstacle avoidance
- * is implemented. Scene 2 aligns to the initial right wall and holds its captured odom heading.
+ * The single-threaded executor in main() serializes callbacks. No general obstacle avoidance
+ * is implemented; selected steps can use a front-clearance goal. Scene 2 aligns to the initial right wall and holds its captured odom heading.
  */
 class DistanceController : public rclcpp::Node
 {
@@ -44,6 +45,40 @@ public:
 
 private:
   /**
+   * @brief Calculate lateral centering velocity without publishing.
+   * @par Centering calculation
+   * Use the latest accepted side distances and the shared positioning deadband.
+   * @return Body-y m/s consumed by handle_initial_positioning().
+   * @note Reads left_wall_/right_wall_; no state changes.
+   */
+  double compute_centering_velocity() const;
+  /**
+   * @brief Calculate rear-distance positioning velocity without publishing.
+   * @par Rear positioning
+   * Positive output moves away from the rear wall toward the configured distance.
+   * @return Body-x m/s consumed by handle_initial_positioning().
+   * @note Reads rear_wall_/rear_target_distance_; no state changes.
+   */
+  double compute_rear_position_velocity() const;
+  /**
+   * @brief Calculate the yaw command toward the persistent heading reference.
+   * @par Heading hold
+   * Apply the existing heading deadband, gain and angular limit.
+   * @param[in] yaw Odom heading (rad) from the calling positioning, waiting or command method;
+   * read against heading_reference_ without redefining it.
+   * @return Body angular-z rad/s; caller combines it with its selected planar command.
+   * @note No publication or reference update. Future turn completion owns reference changes.
+   */
+  double compute_heading_hold_velocity(double yaw) const;
+  /**
+   * @brief Capture A only after joint initial positioning and standstill acceptance.
+   * @par Route origin
+   * Copy the latest odom position and previously aligned heading into the fixed route origin.
+   * @note Called by handle_initial_positioning(); initializes planned endpoint and logs A.
+   */
+  void record_route_origin();
+
+  /**
    * @brief Declare and validate scene-2 heading parameters before ROS interfaces exist.
    * @par Configuration
    * Called by DistanceController(); store startup overrides in heading members.
@@ -61,7 +96,7 @@ private:
    * @param[in] current_time Node time supplied by on_timer(); read elapsed settling time
    * and copy into alignment_settle_start_ when the interval begins. Input is unchanged.
    * @return True to end this tick; false when disabled or already completed.
-   * @note Publishes commands and resets PID through publish_heading_correction(). Centering follows through handle_initial_centering().
+   * @note Publishes commands and resets PID through publish_heading_correction(). Centering follows through handle_initial_positioning().
    */
   bool handle_initial_alignment(const rclcpp::Time & current_time);
 
@@ -82,7 +117,7 @@ private:
   /**
    * @brief Publish rotation only and clear planar PID and command-ramp history.
    * @par Rotation without translation
-   * Used by handle_initial_alignment(), handle_initial_centering(), and handle_heading_recovery().
+   * Used by handle_initial_alignment(), handle_initial_positioning(), and handle_heading_recovery().
    * @param[in] yaw Current-minus-target heading error (rad) from the caller; read to
    * compute cmd.angular.z using heading_gain_ and max_yaw_rate_. No input is modified.
    * @note Publishes zero linear velocity; all unused Twist components remain zero.
@@ -125,11 +160,11 @@ private:
 
   /**
    * @brief Reduce a wall window to a robust horizontal wall distance.
-   * @param[in,out] points on_scan() supplies positive body-y or rearward body-x distances (m); read and
+   * @param[in,out] points measure_wall_windows() supplies positive body-y or rearward body-x distances (m); read and
    * reorder the caller's vector to calculate median and dispersion. Not used after this call.
-   * @param[in] samples on_scan() counts every ray in this window, including invalid ranges;
+   * @param[in] samples measure_wall_windows() counts every ray in this window, including invalid ranges;
    * read as the coverage denominator; caller value unchanged.
-   * @param[out] distance Write the median distance (m) to on_scan()'s left_wall_, right_wall_ or rear_wall_; valid only when true is returned.
+   * @param[out] distance Write the median distance (m) to measure_wall_windows()'s left_wall_, right_wall_ or rear_wall_; valid only when true is returned.
    * @return True for sufficient coverage, low dispersion and accepted wall distance.
    * @note This assumes each window observes one nearby wall; it is not obstacle recognition.
    */
@@ -155,7 +190,7 @@ private:
    * @note Reads on_scan() distances and on_odom() pose/twist. Publishes bounded body-x/body-y/yaw commands; on success writes route_x_/route_y_/route_yaw_ and
    * route_initialized_. Controls rear distance only during preparation; does not perform route obstacle avoidance.
    */
-  bool handle_initial_centering(const rclcpp::Time & current_time);
+  bool handle_initial_positioning(const rclcpp::Time & current_time);
 
   /**
    * @brief Log side-wall observations and odometry during A-to-B without affecting commands.
@@ -173,9 +208,9 @@ private:
    * @par Startup measurement
    * on_scan() supplies a wider right window than the distance windows. Reject poor
    * coverage, short span, excessive perpendicular residual or ambiguous orientation.
-   * @param[in] points Body-frame (x,y) endpoints in meters from on_scan(); read only
+   * @param[in] points Body-frame (x,y) endpoints in meters from measure_wall_windows(); read only
    * to estimate the forward wall tangent. No point is changed.
-   * @param[in] samples Total window rays from on_scan(), including invalid ranges;
+   * @param[in] samples Total window rays from measure_wall_windows(), including invalid ranges;
    * read to check coverage, unchanged.
    * @note Writes right_wall_angle_/right_wall_rms_/right_wall_span_ and quality flags
    * for handle_initial_alignment(). Latest on_odom() yaw supplies the temporal
@@ -445,9 +480,9 @@ private:
    * If the interval is negative or exceeds 0.2 seconds, reset PID and stop.
    * For a valid interval, update the previous PID time and allow control to continue.
    *
-   * @param[in] ex Odom x error in meters, calculated as target_x_ minus data.x in execute_current_segment().
+   * @param[in] ex Odom-axis x control error (m) from execute_current_segment(), after apply_step_feedback() selects position or laser feedback.
    * Pass it to initialize_pid() when history is missing; do not modify the input.
-   * @param[in] ey Odom y error in meters, calculated as target_y_ minus data.y in execute_current_segment().
+   * @param[in] ey Odom-axis y control error (m) from execute_current_segment(), after apply_step_feedback() selects position or laser feedback.
    * Pass it to initialize_pid() when history is missing; do not modify the input.
    * @param[in] current_time ROS time captured by on_timer(). Read it to initialize
    * PID history or calculate the interval since last_pid_time_. Store it in
@@ -664,8 +699,8 @@ private:
    * absolute yaw rate below 0.02 rad/s for at least 0.5 node-clock seconds. Scene 2 also requires yaw error within heading_tolerance_.
    * Start or reset settling_. Route arrivals set segment_completed_ and dwell_start_time_; initial centering uses its own settling state.
    *
-   * @param[in] ex Odom x position error (m) calculated and passed by execute_current_segment(); read to test distance from the target without modifying the caller error.
-   * @param[in] ey Odom y position error (m) calculated and passed by execute_current_segment(); read to test distance from the target without modifying the caller error.
+   * @param[in] ex Odom-axis x control error (m) selected by apply_step_feedback() and passed by execute_current_segment(); read for the joint arrival test without modifying the caller error.
+   * @param[in] ey Odom-axis y control error (m) selected by apply_step_feedback() and passed by execute_current_segment(); read for the joint arrival test without modifying the caller error.
    * @param[in] current_time Node time captured by on_timer(); read for settling duration and copy to settle_start_time_ or dwell_start_time_ on state transitions. handle_completed_segment() later reads dwell_start_time_; the input is unchanged.
    * @note execute_current_segment() publishes zero before calling. Feedback speed comes from last_odom_.twist in the child frame; scene 2 also requires heading error relative to heading_reference_ within heading_tolerance_.
    */
@@ -763,6 +798,161 @@ private:
   rclcpp::Time dwell_start_time_{};
   /// Extra dwell after settling in node-clock seconds; nonnegative parameter, default 1 s.
   double dwell_duration_{1.0};
+
+  /**
+   * @brief Transform scan rays and update independent wall windows.
+   * @par Wall measurement
+   * Separate side/rear initialization validity from front and side observations used by steps.
+   * @param[in] scan Header/ranges validated by on_scan(); read ray geometry, unchanged.
+   * @param[in] mounting Fixed transform validated by on_scan(); read to convert rays to base_frame.
+   * @note Updates distance/quality/receipt state; right-wall fitting is initial alignment only.
+   */
+  void measure_wall_windows(
+    const sensor_msgs::msg::LaserScan & scan,
+    const geometry_msgs::msg::TransformStamped & mounting);
+  /**
+   * @brief Validate front-sector coverage and median spread.
+   * @par Front measurement
+   * Unlike side initialization limits, do not apply side_min_distance to front-body coordinates.
+   * @param[in,out] points Positive body-x endpoints collected by measure_wall_windows(); read and
+   * sort the same local vector to obtain its median; no member vector is retained.
+   * @param[in] samples Total rays in the front window from measure_wall_windows(); read for coverage.
+   * @param[out] distance Write the median body-x distance to front_wall_; usable only on true.
+   * @return True for at least six points, 50 percent coverage and accepted median deviation.
+   * @note Does not infer wall identity or clearance of the entire robot footprint.
+   */
+  bool estimate_front(std::vector<double> & points, std::size_t samples, double & distance) const;
+
+  /// ROS request type; acceptance and execution are separate events.
+  using StepService = distance_controller::srv::ExecuteStep;
+  /// Optional scene-2 service; callbacks only select data, timer owns normal control publication.
+  rclcpp::Service<StepService>::SharedPtr step_service_{};
+  /// True enables one-step-at-a-time continuation and preserves the node after arrival.
+  bool manual_mode_{false};
+  /// True pauses after initial A capture before executing the first configured segment.
+  bool start_paused_{false};
+  /// True while waiting for a resume/new-step request; linear command remains zero.
+  bool manual_waiting_{false};
+  /// Finish request is consumed by the next timer tick after the service response.
+  bool finish_requested_{false};
+  /// Label of the last completed endpoint; never used as a coordinate lookup.
+  std::string current_waypoint_{"A"};
+  /// Planned endpoint in odom meters; ordinary fixed-distance residuals do not alter it.
+  double planned_x_{};
+  /// Planned endpoint odom y, used with planned_x_ by target initialization.
+  double planned_y_{};
+  /// Steady start of active segment, including heading recovery, settling and dwell.
+  std::chrono::steady_clock::time_point step_started_{};
+  /// Accumulated odom path length since active-step initialization, meters.
+  double step_travel_{};
+  /// Last observed active-step odom x/y, meters, for accumulating path length.
+  double step_last_x_{};
+  /// Last observed active-step odom y, meters; paired with step_last_x_.
+  double step_last_y_{};
+  /// Frontmost body coordinate (m in base_frame); -1 means unconfigured and forbids front goals.
+  double front_body_extent_{-1.0};
+  /// Front +/-5 degree median body-x wall position, meters; valid only with fresh front_wall_valid_.
+  double front_wall_{};
+  /// Validity of the front sector in the latest processed scan; independent of rear availability.
+  bool front_wall_valid_{false};
+  /// Latest structurally accepted scan stamp, including route scans without rear returns.
+  int64_t observation_stamp_ns_{};
+
+  /**
+   * @brief Load named edges and per-edge policies before creating motion interfaces.
+   * @par Configuration
+   * Resolve standard AB/BC/CB/BA factories or custom two-letter edges with explicit dx/dy.
+   * @param[in] forward_distance Distance from select_waypoints(); read for AB/BA defaults, meters.
+   * @param[in] lateral_distance Distance from select_waypoints(); read for BC/CB defaults, meters.
+   * @note Writes segments_ and manual settings; rejects invalid configuration before execution.
+   */
+  void configure_route_steps(double forward_distance, double lateral_distance);
+  /**
+   * @brief Apply one named edge's startup parameter overrides.
+   * @par Policy selection
+   * Read segments.ID.* parameters and validate directions, feedback choice and bounds.
+   * @param[in] name Two-letter ID from configure_route_steps(); read to form the parameter prefix.
+   * @param[in,out] step Factory/default fields from configure_route_steps(); replace fields with
+   * validated overrides in the same object, subsequently copied into segments_.
+   * @note Parameter declarations are startup-only, not a live motion command interface.
+   */
+  void configure_segment(const std::string & name, distance_controller::RouteSegment & step);
+  /**
+   * @brief Create the optional manual-step service after startup validation.
+   * @par Interface creation
+   * Register ~/step only when scene-2 manual mode is enabled.
+   * @note Called by DistanceController(); does not start motion.
+   */
+  void configure_step_interface();
+  /**
+   * @brief Accept one validated idle step or a status/resume/finish/cancel request.
+   * @par Serialized request
+   * Reject busy/faulted/uninitialized states and never queue surprise commands behind an active step.
+   * @param[in] request ROS service input; read action/parameters to construct one segment.
+   * @param[out] response Write acceptance and reason for the service client; acceptance is not arrival.
+   * @note Mutates route/wait state only after validation; cancel latches a stopped fault.
+   */
+  void on_step_request(
+    const StepService::Request::SharedPtr request, StepService::Response::SharedPtr response);
+  /**
+   * @brief Convert a service request into one bounded planar step.
+   * @par Request conversion
+   * Resolve direction, fixed axes, goal kind and limits without changing active control state.
+   * @param[in] request Candidate supplied by on_step_request(); read all fields, unchanged.
+   * @return Validated segment for on_step_request() to install; throws on unsupported/invalid input.
+   * @note Turns are explicitly unsupported. Reads current odom only for default travel allowance.
+   */
+  distance_controller::RouteSegment make_requested_step(const StepService::Request & request);
+  /**
+   * @brief Keep manual idle stopped in translation while holding the persistent heading.
+   * @par Idle ownership
+   * Called after feedback/time/initialization guards; consume finish or publish yaw-only correction.
+   * @return True when this tick is handled by idle/finish; false to execute the active segment.
+   * @note Never captures a new heading from drift; idle does not resume automatically.
+   */
+  bool handle_manual_wait();
+  /**
+   * @brief Report current pose and active/idle/fault state to the service client.
+   * @par Observation
+   * Format latest odometry and persistent heading without modifying control state.
+   * @return Human-readable status; pose is unavailable until received_odom_.
+   * @note Caller on_step_request() uses the result for status and acceptance responses.
+   */
+  std::string step_status();
+  /**
+   * @brief Record a completed endpoint after settling and dwell.
+   * @par Endpoint evidence
+   * Log actual stopped odom pose and planned label; sensor-based goals become the new planned anchor.
+   * @note Called by advance_route(); writes planned_x_/planned_y_ and current_waypoint_.
+   */
+  void record_step_endpoint();
+  /**
+   * @brief Apply bounded execution guards and the selected arrival measurement.
+   * @par Active feedback
+   * Check steady timeout/path length and only the laser windows requested by this segment.
+   * @param[in,out] data Pose/errors from execute_current_segment(); replace errors with front
+   * clearance/side-centering errors when selected, for the same caller's PID and completion checks.
+   * @return False after a latched fault/stop; true when errors are valid for this tick.
+   * @note Does not change heading reference. Laser faults never silently fall back to odom.
+   */
+  bool apply_step_feedback(ControlDiagnostics & data);
+  /**
+   * @brief Bound front-approach speed after the ordinary acceleration calculation.
+   * @par Approach deceleration
+   * Use remaining clearance error to cap positive body-x speed near the wall.
+   * @param[in,out] cmd Command from compute_and_publish_command(); read/limit body x in the
+   * same object before publication; other components remain unchanged.
+   * @note Applies only to front-wall goals; stricter deceleration can bypass the acceleration ramp.
+   */
+  void apply_front_speed_bound(geometry_msgs::msg::Twist & cmd);
+  /**
+   * @brief Latch a step fault and publish zero without advancing the route.
+   * @par Fault ownership
+   * Reset PID/settling before recording the failure reason.
+   * @param[in] reason Description from apply_step_feedback()/on_step_request(); read for logging.
+   * @note Restart is required; no automatic retry or fallback.
+   */
+  void fail_step(const std::string & reason);
 };
 
 #endif

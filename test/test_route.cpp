@@ -84,3 +84,39 @@ TEST(Route, RejectDisconnectedOrUnknown)
   EXPECT_THROW(compose_route({"AB", "AB"}, 1, 1, 0.1, 1), std::invalid_argument);
   EXPECT_THROW(compose_route({"AD"}, 1, 1, 0.1, 1), std::invalid_argument);
 }
+
+TEST(StepPolicy, IndependentEdgesAndFeedback)
+{
+  using namespace distance_controller;
+  auto ab = make_ab_segment(0.9, 0.1, 1);
+  auto bc = make_bc_segment(0.5, 0.08, 0.5);
+  ab.side_centering = true;
+  EXPECT_NO_THROW(validate_segment(ab));
+  EXPECT_FALSE(bc.side_centering);
+  bc.side_centering = true;
+  EXPECT_THROW(validate_segment(bc), std::invalid_argument);
+  ab.completion = CompletionKind::FrontWall;
+  EXPECT_NO_THROW(validate_segment(ab));
+  auto ba = make_ba_segment(0.9, 0.1, 1);
+  ba.completion = CompletionKind::FrontWall;
+  EXPECT_THROW(validate_segment(ba), std::invalid_argument);
+}
+
+TEST(StepPolicy, AbsoluteOriginAndBounds)
+{
+  using namespace distance_controller;
+  RouteSegment point{"B", "D", {0, 0, 0.1, 0}};
+  point.frame = MotionFrame::Odom;
+  EXPECT_NO_THROW(validate_segment(point));
+  point.frame = MotionFrame::Heading;
+  EXPECT_THROW(validate_segment(point), std::invalid_argument);
+  point = make_ab_segment(0.2, 0.1, 0);
+  for (double invalid : {0.0, -1.0, std::numeric_limits<double>::quiet_NaN()}) {
+    point.timeout = invalid;
+    EXPECT_THROW(validate_segment(point), std::invalid_argument);
+    point.timeout = 10;
+    point.max_travel = invalid;
+    EXPECT_THROW(validate_segment(point), std::invalid_argument);
+    point.max_travel = 1;
+  }
+}

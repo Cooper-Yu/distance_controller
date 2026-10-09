@@ -28,15 +28,22 @@ digraph control {
   align -> rotate [label="pending"];
   align -> center [label="complete / scene 1"];
   center -> rotate [label="pending"];
-  center -> target [label="complete / scene 1"];
+  idle [label="Manual WAITING?\nHold yaw, zero translation\nAccept one validated step / resume",shape=diamond];
+  feedback [label="apply_step_feedback()\nTime/path bounds + selected laser validity\nPosition / front clearance / side error",shape=diamond];
+  center -> idle [label="complete / scene 1"];
+  idle -> stop [label="waiting / finish"];
+  idle -> target [label="active"];
+
   target -> valid;
   valid -> stop [label="no"];
   valid -> errors [label="yes"];
-  errors -> recover;
+  errors -> feedback;
+  feedback -> stop [label="fault"];
+  feedback -> recover [label="valid"];
   recover -> rotate [label="rotation required"];
   recover -> done [label="continue"];
   done -> dwell [label="yes"];
-  advance [label="on_timer(): Completed -> advance_route()\nReset for next tick or stop and shutdown"];
+  advance [label="on_timer(): Completed -> advance_route()\nRecord endpoint; manual wait, next tick or shutdown"];
   dwell -> advance [label="finished"];
   dwell -> stop [label="waiting"];
   done -> near [label="no"];

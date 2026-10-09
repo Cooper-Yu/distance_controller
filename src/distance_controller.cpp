@@ -36,6 +36,12 @@ DistanceController::DistanceController(int scene_number) : Node{"distance_contro
     max_acceleration_ <= 0.0 || !std::isfinite(dwell_duration_) || dwell_duration_ < 0.0) {
     throw std::invalid_argument("Invalid controller parameters");
   }
+  if (
+    scene_number == 1 &&
+    ((overrides.count("manual_mode") && overrides.at("manual_mode").get<bool>()) ||
+     (overrides.count("start_paused") && overrides.at("start_paused").get<bool>()))) {
+    throw std::invalid_argument("Manual continuation is available only in scene 2");
+  }
   select_waypoints(scene_number);
   const auto odom_topic = declare_parameter<std::string>("odom_topic", "/odometry/filtered");
   const auto cmd_topic = declare_parameter<std::string>("cmd_vel_topic", "/cmd_vel");
@@ -50,6 +56,7 @@ DistanceController::DistanceController(int scene_number) : Node{"distance_contro
 
   cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>(cmd_topic, 10);
   configure_centering();
+  configure_step_interface();
 }
 
 void DistanceController::configure_heading_control()
@@ -321,8 +328,17 @@ void DistanceController::compute_and_publish_command(ControlDiagnostics & data)
   geometry_msgs::msg::Twist cmd;
   cmd.linear.x = vx_robot;
   cmd.linear.y = vy_robot;
-  if (heading_control_enabled_ && std::abs(heading_error(data.yaw)) > heading_tolerance_) {
-    cmd.angular.z = compute_heading_command(heading_error(data.yaw), heading_gain_, max_yaw_rate_);
+  if (heading_control_enabled_) cmd.angular.z = compute_heading_hold_velocity(data.yaw);
+  apply_front_speed_bound(cmd);
+  if (
+    segments_[current_segment_index_].completion ==
+    distance_controller::CompletionKind::FrontWall) {
+    data.vx_robot = cmd.linear.x;
+    data.vy_robot = cmd.linear.y;
+    data.vx_odom = std::cos(data.yaw) * cmd.linear.x - std::sin(data.yaw) * cmd.linear.y;
+    data.vy_odom = std::sin(data.yaw) * cmd.linear.x + std::cos(data.yaw) * cmd.linear.y;
+    previous_vx_odom_ = data.vx_odom;
+    previous_vy_odom_ = data.vy_odom;
   }
   data.wz_robot = cmd.angular.z;
 
@@ -362,9 +378,11 @@ void DistanceController::on_timer()
     return;
   }
 
-  if (handle_initial_centering(current_time)) {
+  if (handle_initial_positioning(current_time)) {
     return;
   }
+
+  if (handle_manual_wait()) return;
 
   const auto result = execute_current_segment(current_time, should_log);
   if (result == SegmentResult::Completed) advance_route();

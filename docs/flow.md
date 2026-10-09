@@ -64,3 +64,18 @@ standstill and dwell.
 positioning 30 s, plus total 60 s. Stages advance once; poor fits do not reset deadlines.
 Faults distinguish stage/total deadlines, travel, invalid scans and stale scans.
 PID, settling and dwell still use node time.
+
+
+## Manual and feedback dispatch
+
+After initialization, manual WAITING bypasses segment execution: publish zero linear
+velocity and hold the persistent heading, while odom/time/fault guards remain active.
+A validated service request or resume transitions to exactly one active step.
+Busy/faulted requests are rejected. On completion, record the endpoint and either
+wait for another request, advance automatically, or exit according to mode.
+
+Before PID, apply_step_feedback checks active-step duration/path length and required
+laser windows. Position goals use frozen odom targets. Optional side centering replaces
+lateral odom error. Front goals use front-body clearance instead of longitudinal odom
+error. Both share heading recovery, measured standstill and dwell. Required laser loss
+latches stop without fallback. The full interface contract is in manual_steps.md.

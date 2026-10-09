@@ -57,10 +57,10 @@ std::vector<RouteSegment> compose_route(
   double speed, double dwell)
 {
   const std::vector<RouteSegment> definitions = {
-    {"A", "B", PlanarMotion::move_forward(forward_distance, speed, dwell)},
-    {"B", "C", PlanarMotion::move_right(lateral_distance, speed, dwell)},
-    {"C", "B", PlanarMotion::move_left(lateral_distance, speed, dwell)},
-    {"B", "A", PlanarMotion::move_backward(forward_distance, speed, dwell)}};
+    make_ab_segment(forward_distance, speed, dwell),
+    make_bc_segment(lateral_distance, speed, dwell),
+    make_cb_segment(lateral_distance, speed, dwell),
+    make_ba_segment(forward_distance, speed, dwell)};
   if (names.empty()) throw std::invalid_argument("route must contain at least one segment");
   std::vector<RouteSegment> route;
   std::string endpoint = "A";
@@ -76,5 +76,49 @@ std::vector<RouteSegment> compose_route(
     endpoint = found->to;
   }
   return route;
+}
+
+RouteSegment make_ab_segment(double distance, double speed, double dwell)
+{
+  return {"A", "B", PlanarMotion::move_forward(distance, speed, dwell)};
+}
+
+RouteSegment make_bc_segment(double distance, double speed, double dwell)
+{
+  return {"B", "C", PlanarMotion::move_right(distance, speed, dwell)};
+}
+
+RouteSegment make_cb_segment(double distance, double speed, double dwell)
+{
+  return {"C", "B", PlanarMotion::move_left(distance, speed, dwell)};
+}
+
+RouteSegment make_ba_segment(double distance, double speed, double dwell)
+{
+  return {"B", "A", PlanarMotion::move_backward(distance, speed, dwell)};
+}
+
+void validate_segment(const RouteSegment & step)
+{
+  const auto & m = step.motion;
+  if (
+    !std::isfinite(m.dx) || !std::isfinite(m.dy) || !std::isfinite(m.max_speed) ||
+    m.max_speed <= 0 || !std::isfinite(m.dwell) || m.dwell < 0 || !std::isfinite(step.timeout) ||
+    step.timeout <= 0 || !std::isfinite(step.max_travel) || step.max_travel <= 0 ||
+    !std::isfinite(step.front_clearance) || step.front_clearance <= 0.01) {
+    throw std::invalid_argument(
+      "Step requires finite coordinates, positive limits and clearance > 0.01 m");
+  }
+  if (step.frame != MotionFrame::Odom && m.dx == 0 && m.dy == 0) {
+    throw std::invalid_argument("Relative step cannot have zero displacement");
+  }
+  if (step.side_centering && (step.frame == MotionFrame::Odom || m.dy != 0 || m.dx == 0)) {
+    throw std::invalid_argument("Side centering is only available on forward/backward steps");
+  }
+  if (
+    step.completion == CompletionKind::FrontWall &&
+    (step.frame == MotionFrame::Odom || m.dx <= 0 || m.dy != 0)) {
+    throw std::invalid_argument("Front-wall completion requires a forward step");
+  }
 }
 }  // namespace distance_controller

@@ -1,7 +1,7 @@
 PROJECT_NAME = "distance_controller"
 PROJECT_BRIEF = "Package, control flow, and interface documentation"
 OUTPUT_DIRECTORY = docs/generated
-INPUT = README.md docs/mainpage.dox docs/api.dox docs/build_configuration.dox docs/flow.md docs/comment_checks.md docs/tooling.md docs/style_profile.md docs/TEMPLATE_SOURCES.md include src test/README.md
+INPUT = README.md docs/mainpage.dox docs/api.dox docs/build_configuration.dox docs/flow.md docs/manual_steps.md docs/comment_checks.md docs/tooling.md docs/style_profile.md docs/TEMPLATE_SOURCES.md include src test/README.md
 RECURSIVE = YES
 FILE_PATTERNS = *.hpp *.h *.cpp *.py *.md *.dox
 USE_MDFILE_AS_MAINPAGE =

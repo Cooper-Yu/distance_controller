@@ -85,11 +85,12 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
   right_wall_valid_ = false;
   scan_valid_ = false;
   right_heading_valid_ = false;
+  front_wall_valid_ = false;
   scan_rejection_reason_ = "invalid scan header, timestamp or range metadata";
   const rclcpp::Time stamp(msg->header.stamp, get_clock()->get_clock_type());
   const double age = (now() - stamp).seconds();
   if (
-    msg->header.frame_id.empty() || stamp.nanoseconds() <= last_scan_stamp_ns_ || age < -0.1 ||
+    msg->header.frame_id.empty() || stamp.nanoseconds() <= observation_stamp_ns_ || age < -0.1 ||
     age > scan_timeout_ || !std::isfinite(msg->angle_min) || !std::isfinite(msg->angle_increment) ||
     msg->angle_increment <= 0.0 || !std::isfinite(msg->range_min) ||
     !std::isfinite(msg->range_max) || msg->range_min < 0.0 || msg->range_max <= msg->range_min)
@@ -111,66 +112,11 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
     !std::isfinite(rotation.length2()) || std::abs(rotation.length2() - 1.0) > 0.01 ||
     !std::isfinite(t.x) || !std::isfinite(t.y) || up.z() < 0.99)
     return;
-  std::vector<std::pair<double, double>> wall_points;
-  std::size_t wall_samples = 0;
-  std::vector<double> left, right, rear;
-  std::size_t left_samples = 0, right_samples = 0, rear_samples = 0;
-  for (std::size_t i = 0; i < msg->ranges.size(); ++i) {
-    const double angle = msg->angle_min + static_cast<double>(i) * msg->angle_increment;
-    const auto direction =
-      tf2::quatRotate(rotation, tf2::Vector3(std::cos(angle), std::sin(angle), 0.0));
-    const double body_angle = std::atan2(direction.y(), direction.x());
-    const double range = msg->ranges[i];
-    const bool valid_range =
-      std::isfinite(range) && range >= msg->range_min && range <= msg->range_max;
-    if (
-      !initial_alignment_complete_ &&
-      std::abs(body_angle + 1.5707963267948966) <= wall_heading_half_angle_) {
-      ++wall_samples;
-      const double x = t.x + range * direction.x();
-      const double y = t.y + range * direction.y();
-      if (valid_range && -y >= side_min_distance_ && -y <= side_max_distance_) {
-        wall_points.emplace_back(x, y);
-      }
-    }
-    if (std::abs(std::abs(body_angle) - 3.141592653589793) <= rear_window_half_angle_) {
-      ++rear_samples;
-      const double rear_distance = -(t.x + range * direction.x());
-      if (valid_range && rear_distance > 0.0) rear.push_back(rear_distance);
-    }
-    if (std::abs(std::abs(body_angle) - 1.5707963267948966) > side_window_half_angle_) continue;
-    const bool is_left = body_angle > 0.0;
-    if (is_left)
-      ++left_samples;
-    else
-      ++right_samples;
-    if (!valid_range) continue;
-    const double y = t.y + range * direction.y();
-    if ((is_left && y > 0.0) || (!is_left && y < 0.0)) {
-      (is_left ? left : right).push_back(std::abs(y));
-    }
-  }
-  if (!initial_alignment_complete_) estimate_right_heading(wall_points, wall_samples);
-  wall_observation_time_ = std::chrono::steady_clock::now();
-  left_wall_valid_ = estimate_side(left, left_samples, left_wall_);
-  right_wall_valid_ = estimate_side(right, right_samples, right_wall_);
-  const bool rear_valid =
-    estimate_side(rear, rear_samples, rear_wall_) && rear_wall_ >= rear_min_distance_;
-  if (!left_wall_valid_ || !right_wall_valid_ || !rear_valid) {
-    scan_rejection_reason_ = "wall window invalid:";
-    if (!left_wall_valid_) scan_rejection_reason_ += " left";
-    if (!right_wall_valid_) scan_rejection_reason_ += " right";
-    if (!rear_valid) scan_rejection_reason_ += " rear";
-    return;
-  }
-  scan_rejection_reason_ = "none";
-  last_scan_stamp_ns_ = stamp.nanoseconds();
-  last_scan_time_ = std::chrono::steady_clock::now();
-  scan_valid_ = true;
-  accepted_scan_ = true;
+  observation_stamp_ns_ = stamp.nanoseconds();
+  measure_wall_windows(*msg, mounting);
 }
 
-bool DistanceController::handle_initial_centering(const rclcpp::Time & current_time)
+bool DistanceController::handle_initial_positioning(const rclcpp::Time & current_time)
 {
   if (!heading_control_enabled_ || centering_complete_) return false;
   const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
@@ -189,20 +135,14 @@ bool DistanceController::handle_initial_centering(const rclcpp::Time & current_t
     centering_settling_ = false;
     geometry_msgs::msg::Twist cmd;
     const double cap = std::min(centering_max_speed_, max_speed_);
-    if (std::abs(rear_error) > centering_tolerance_) {
-      cmd.linear.x = centering_gain_ * rear_error;
-    }
-    if (std::abs(error) > centering_tolerance_) {
-      cmd.linear.y = centering_gain_ * error;
-    }
+    cmd.linear.x = compute_rear_position_velocity();
+    cmd.linear.y = compute_centering_velocity();
     const double speed = std::hypot(cmd.linear.x, cmd.linear.y);
     if (speed > cap) {
       cmd.linear.x *= cap / speed;
       cmd.linear.y *= cap / speed;
     }
-    if (std::abs(yaw_error) > heading_tolerance_) {
-      cmd.angular.z = compute_heading_command(yaw_error, heading_gain_, max_yaw_rate_);
-    }
+    cmd.angular.z = compute_heading_hold_velocity(yaw);
     cmd_pub_->publish(cmd);
     return true;
   }
@@ -217,19 +157,7 @@ bool DistanceController::handle_initial_centering(const rclcpp::Time & current_t
     centering_settle_start_ = current_time;
     centering_settling_ = true;
   } else if ((current_time - centering_settle_start_).seconds() >= alignment_settle_duration_) {
-    route_x_ = last_odom_.pose.pose.position.x;
-    route_y_ = last_odom_.pose.pose.position.y;
-    route_yaw_ = heading_reference_;
-    route_initialized_ = true;
-    centering_complete_ = true;
-    centering_settling_ = false;
-    reset_pid();
-    RCLCPP_INFO(
-      get_logger(),
-      "Centered A recorded=(%.6f, %.6f), yaw=%.6f rad (%.3f deg), "
-      "left=%.3f right=%.3f rear=%.3f; starting route; heading_reference=%.6f rad",
-      route_x_, route_y_, yaw, yaw * 180.0 / 3.141592653589793, left_wall_, right_wall_, rear_wall_,
-      heading_reference_);
+    record_route_origin();
   }
   return true;
 }
@@ -258,4 +186,129 @@ void DistanceController::log_route_wall_observation()
     -std::sin(route_yaw_) * (pose.position.x - route_x_) +
       std::cos(route_yaw_) * (pose.position.y - route_y_),
     heading_error(yaw));
+}
+
+double DistanceController::compute_centering_velocity() const
+{
+  const double error = (left_wall_ - right_wall_) * 0.5;
+  return std::abs(error) > centering_tolerance_ ? centering_gain_ * error : 0.0;
+}
+
+double DistanceController::compute_rear_position_velocity() const
+{
+  const double error = rear_target_distance_ - rear_wall_;
+  return std::abs(error) > centering_tolerance_ ? centering_gain_ * error : 0.0;
+}
+
+double DistanceController::compute_heading_hold_velocity(double yaw) const
+{
+  const double error = heading_error(yaw);
+  return std::abs(error) > heading_tolerance_
+           ? std::clamp(-heading_gain_ * error, -max_yaw_rate_, max_yaw_rate_)
+           : 0.0;
+}
+
+void DistanceController::record_route_origin()
+{
+  const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+  route_x_ = last_odom_.pose.pose.position.x;
+  route_y_ = last_odom_.pose.pose.position.y;
+  route_yaw_ = heading_reference_;
+  route_initialized_ = true;
+  centering_complete_ = true;
+  centering_settling_ = false;
+  reset_pid();
+  RCLCPP_INFO(
+    get_logger(),
+    "Centered A recorded=(%.6f, %.6f), yaw=%.6f rad (%.3f deg), "
+    "left=%.3f right=%.3f rear=%.3f; starting route; heading_reference=%.6f rad",
+    route_x_, route_y_, yaw, yaw * 180.0 / 3.141592653589793, left_wall_, right_wall_, rear_wall_,
+    heading_reference_);
+  planned_x_ = route_x_;
+  planned_y_ = route_y_;
+  manual_waiting_ = manual_mode_ && start_paused_;
+}
+
+void DistanceController::measure_wall_windows(
+  const sensor_msgs::msg::LaserScan & scan, const geometry_msgs::msg::TransformStamped & mounting)
+{
+  const auto & q = mounting.transform.rotation;
+  const auto & t = mounting.transform.translation;
+  const tf2::Quaternion rotation(q.x, q.y, q.z, q.w);
+  std::vector<std::pair<double, double>> wall_points;
+  std::size_t wall_samples = 0;
+  std::vector<double> left, right, rear, front;
+  std::size_t front_samples = 0;
+  std::size_t left_samples = 0, right_samples = 0, rear_samples = 0;
+  for (std::size_t i = 0; i < scan.ranges.size(); ++i) {
+    const double angle = scan.angle_min + static_cast<double>(i) * scan.angle_increment;
+    const auto direction =
+      tf2::quatRotate(rotation, tf2::Vector3(std::cos(angle), std::sin(angle), 0.0));
+    const double body_angle = std::atan2(direction.y(), direction.x());
+    const double range = scan.ranges[i];
+    const bool valid_range =
+      std::isfinite(range) && range >= scan.range_min && range <= scan.range_max;
+    if (
+      !initial_alignment_complete_ &&
+      std::abs(body_angle + 1.5707963267948966) <= wall_heading_half_angle_) {
+      ++wall_samples;
+      const double x = t.x + range * direction.x();
+      const double y = t.y + range * direction.y();
+      if (valid_range && -y >= side_min_distance_ && -y <= side_max_distance_) {
+        wall_points.emplace_back(x, y);
+      }
+    }
+    if (std::abs(body_angle) <= 0.08726646259971647) {
+      ++front_samples;
+      const double body_x = t.x + range * direction.x();
+      if (valid_range && body_x > 0) front.push_back(body_x);
+    }
+    if (std::abs(std::abs(body_angle) - 3.141592653589793) <= rear_window_half_angle_) {
+      ++rear_samples;
+      const double rear_distance = -(t.x + range * direction.x());
+      if (valid_range && rear_distance > 0.0) rear.push_back(rear_distance);
+    }
+    if (std::abs(std::abs(body_angle) - 1.5707963267948966) > side_window_half_angle_) continue;
+    const bool is_left = body_angle > 0.0;
+    if (is_left)
+      ++left_samples;
+    else
+      ++right_samples;
+    if (!valid_range) continue;
+    const double y = t.y + range * direction.y();
+    if ((is_left && y > 0.0) || (!is_left && y < 0.0)) {
+      (is_left ? left : right).push_back(std::abs(y));
+    }
+  }
+  if (!initial_alignment_complete_) estimate_right_heading(wall_points, wall_samples);
+  wall_observation_time_ = std::chrono::steady_clock::now();
+  front_wall_valid_ = estimate_front(front, front_samples, front_wall_);
+  left_wall_valid_ = estimate_side(left, left_samples, left_wall_);
+  right_wall_valid_ = estimate_side(right, right_samples, right_wall_);
+  const bool rear_valid =
+    estimate_side(rear, rear_samples, rear_wall_) && rear_wall_ >= rear_min_distance_;
+  if (!left_wall_valid_ || !right_wall_valid_ || !rear_valid) {
+    scan_rejection_reason_ = "wall window invalid:";
+    if (!left_wall_valid_) scan_rejection_reason_ += " left";
+    if (!right_wall_valid_) scan_rejection_reason_ += " right";
+    if (!rear_valid) scan_rejection_reason_ += " rear";
+    return;
+  }
+  scan_rejection_reason_ = "none";
+  last_scan_stamp_ns_ = observation_stamp_ns_;
+  last_scan_time_ = std::chrono::steady_clock::now();
+  scan_valid_ = true;
+  accepted_scan_ = true;
+}
+
+bool DistanceController::estimate_front(
+  std::vector<double> & points, std::size_t samples, double & distance) const
+{
+  if (points.size() < 6 || samples == 0 || points.size() * 2 < samples) return false;
+  std::sort(points.begin(), points.end());
+  distance = points[points.size() / 2];
+  std::vector<double> deviations;
+  for (double x : points) deviations.push_back(std::abs(x - distance));
+  std::sort(deviations.begin(), deviations.end());
+  return deviations[deviations.size() / 2] <= side_max_mad_;
 }

@@ -9,6 +9,8 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+rosidl_generate_interfaces(${PROJECT_NAME} "srv/ExecuteStep.srv")
 find_package(rclcpp REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
@@ -16,18 +18,22 @@ find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 
-add_executable(distance_controller
+add_executable(distance_controller_node
   src/main.cpp
   src/distance_controller.cpp
   src/initial_centering.cpp
   src/right_wall_heading.cpp
   src/route.cpp
   src/route_execution.cpp
-  src/preparation_guard.cpp)
-target_include_directories(distance_controller PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  src/preparation_guard.cpp
+  src/step_configuration.cpp
+  src/manual_steps.cpp
+  src/step_feedback.cpp)
+set_target_properties(distance_controller_node PROPERTIES OUTPUT_NAME distance_controller)
+target_include_directories(distance_controller_node PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 ament_target_dependencies(
-  distance_controller
+  distance_controller_node
   rclcpp
   geometry_msgs
   nav_msgs
@@ -36,8 +42,14 @@ ament_target_dependencies(
   sensor_msgs
 )
 
+rosidl_get_typesupport_target(step_typesupport ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(distance_controller_node "${step_typesupport}")
+ament_export_dependencies(rosidl_default_runtime)
+install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
+install(PROGRAMS tools/step.py DESTINATION lib/${PROJECT_NAME} RENAME step)
+
 install(
-  TARGETS distance_controller
+  TARGETS distance_controller_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -1,6 +1,6 @@
 # distance_controller
 
-A ROS2 Humble planar distance controller for ROSBot XL. It uses odometry feedback, planar PID, speed and acceleration limits, and odom-to-body velocity conversion. Each segment ends with verified standstill and an extra dwell; the node stops and exits after the final segment.
+A ROS2 Humble planar distance controller for ROSBot XL. It uses odometry feedback, planar PID, speed and acceleration limits, and odom-to-body velocity conversion. Each segment ends with verified standstill and an extra dwell; the node stops and exits after the final segment unless manual continuation is enabled.
 
 The Task1 acceptance snapshot is Git tag `task1` (`e1a26a6`). The current working tree also contains the Task2 scene entry and the documented header/source refactor. Scene 2 contains four nominal corrected displacements; automatic hardware execution has not been validated.
 
@@ -172,7 +172,7 @@ errors suspend translation and clear planar PID/ramp history. At a position targ
 is corrected before settling. If position or heading leaves acceptance during dwell, the
 same target is reacquired and its settling/dwell starts again. Odom timeout, backwards time,
 or invalid scene-2 feedback latch a stopped fault; restart is required. A forward time jump
-resets settling, and frozen node time stops scene-2 commands. Laser is used only for initial centering. No route obstacle avoidance or physical corridor-alignment guarantee is included.
+resets settling, and frozen node time stops scene-2 commands. Laser sets the initial wall reference and position. Route laser feedback is opt-in per segment; see manual_steps.md. No general obstacle avoidance or physical corridor-alignment guarantee is included.
 
 Example after validating the hardware operating conditions:
 
@@ -214,7 +214,7 @@ Filtered scans use SensorDataQoS. A fixed TF from the scan header frame to `base
 
 Scan timestamps must advance and use the node's time basis. Before the first accepted scan/TF, remain stopped; after accepted data becomes invalid or stale, latch a stopped fault during preparation. Time/travel limit violations also latch stop. Restart is required. The initial planar command is proportional and vector-speed capped; the route's acceleration ramp is not applied during centering. Stop commands are immediate.
 
-After A is captured, scans no longer gate the four-segment route: right/left route movement must not be opposed by a centering controller. Rear positioning is only used before capturing A; there is no laser obstacle stop during the route.
+After A is captured, scans do not gate ordinary displacement steps. Explicit side-centering or front-wall goals require fresh valid windows and fault on loss. Right/left movement cannot enable side centering. Rear positioning is initialization only; no general route obstacle avoidance is provided.
 
 The fixed-A version's local empty-world success did not establish a repeatable real-world odom reference. The user subsequently reported reverse motion into a wall when starting at odom (0,0). This version removes that absolute-A approach; it still requires target-environment scan/TF verification and supervised testing before hardware acceptance.
 
@@ -311,16 +311,18 @@ at their last named endpoint; they do not automatically return to A.
 **descriptions** in `route.hpp` / `route.cpp`; they do not start motion or block.
 Forward/backward use fixed route x; left/right use fixed route y. Units are meters,
 meters per second and node-clock seconds. The controller also caps segment speed by
-`max_speed`. Named routes currently share startup speed/dwell; descriptions support
-per-segment values for future definitions.
+`max_speed`. Named routes default to startup speed/dwell; `segments.ID` overrides each segment independently.
 
-`compose_route()` joins named A/B/C edges and checks continuity.
+`configure_route_steps()` assembles independently configured edges and checks continuity;
+`compose_route()` remains the pure standard A/B/C composition helper.
 `execute_current_segment()` in `route_execution.cpp` advances one tick of tracking,
 standstill or dwell through shared PID/heading helpers. It returns `Running`,
 `Completed`, or `Failed`. Only Completed lets `on_timer()` call `advance_route()`.
 Faults stop without selecting another segment. Targets are frozen once per segment
 from initialized A plus cumulative planned displacement rotated by the captured heading.
-Actual stopping residuals never become new origins. Scene 1 retains ten displacements.
+Ordinary named steps use planned endpoints without accumulating stopping residuals.
+Sensor-defined steps deliberately use the measured final anchor; ad-hoc relative steps
+anchor to the accepted current pose. Scene 1 retains ten displacements.
 Turning is not included in this change.
 
 ## Initialization timeout diagnosis
@@ -353,14 +355,25 @@ and reset PID; restart after correcting the cause. Increasing a deadline does no
 repair bad measurements or failed movement.
 
 
-### Route-refactor verification (2026-10-09)
+### Local verification (2026-10-09)
 
-Four route GoogleTests, 25 isolated closed-loop/fault cases (24-case suite plus the
-alignment-fit-loss case), and 52 startup rejection cases passed. Losing fit quality
-never restarted the alignment deadline. Task1 completed 10/10 in local Gazebo in
-61.75 s, errors 7.102-7.998 mm in odom, peak command 0.40 m/s, final zero and exit 0.
-Doxygen generation/check, Ruff and whitespace checks passed. Clang-tidy reports only
-the reviewed on_scan (89 lines) and handle_initial_centering (61 lines) size warnings
-in the checked controller files. Scan decoding retains one coherent validity update;
-positioning retains one joint acceptance transition. No suppression was added.
+Six GoogleTests, 25 initialization/route regressions, 61 startup rejection cases and
+12 manual continuation scenarios passed. Task1 completed 10/10 in local Gazebo in
+62.39 s, errors 7.126-8.477 mm in odom, peak command 0.40 m/s, final zero and exit 0.
+An independent build/install also verified Python service typesupport and the CLI.
+Doxygen checks/generation, Ruff, XML and whitespace checks passed. The reviewed
+68-line measure_wall_windows() warning is retained: it collects independent sectors
+from one scan and publishes their validity. Generated ROSIDL serialization functions
+also exceed the size threshold; generated files are not edited to silence it.
 These tests do not certify cloud/hardware clearance or independent course acceptance.
+
+## Manual continuation and per-segment feedback
+
+See [Planar steps and manual exploration](docs/manual_steps.md) for ready-to-use
+commands, custom BD configuration, frame/heading contracts, front-body clearance,
+manual pause/resume and fault behavior. Scene 2 can now keep the node alive after AB
+with manual_mode:=true, accept one next planar step, and record the new endpoint.
+All planar directions hold the persistent heading; turn remains outside this version.
+The latest interface is described there. Task3 explicitly requires turn_controller.cpp and
+TurnController; Task4 reuses that program with real waypoints. Neither is implemented
+by this planar refactor.
