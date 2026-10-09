@@ -357,15 +357,23 @@ repair bad measurements or failed movement.
 
 ### Local verification (2026-10-09)
 
-Six GoogleTests, 25 initialization/route regressions, 61 startup rejection cases and
-12 manual continuation scenarios passed. Task1 completed 10/10 in local Gazebo in
-62.39 s, errors 7.126-8.477 mm in odom, peak command 0.40 m/s, final zero and exit 0.
+The history update passed 10 GoogleTests, 65 startup rejection cases and 21
+manual/automatic continuation scenarios, plus CLI/configuration conflict probes.
+The earlier initialization refactor passed 25 regression scenarios. Task1 completed 10/10 in local Gazebo in
+61.88 s, errors 6.954-8.007 mm in odom, peak command 0.40 m/s, final zero and exit 0.
 An independent build/install also verified Python service typesupport and the CLI.
-Doxygen checks/generation, Ruff, XML and whitespace checks passed. The reviewed
-68-line measure_wall_windows() warning is retained: it collects independent sectors
+Doxygen checks/generation, Ruff, XML and whitespace checks passed. The reviewed 63-line on_step_request() keeps one request transaction together.
+The existing 68-line measure_wall_windows() warning is retained: it collects independent sectors
 from one scan and publishes their validity. Generated ROSIDL serialization functions
 also exceed the size threshold; generated files are not edited to silence it.
 These tests do not certify cloud/hardware clearance or independent course acceptance.
+
+## Independent configuration and history return
+
+Use [Independent segments and history return](docs/history_return.md) for the primary
+YAML configuration and completed-route return commands. `config/segments.yaml` stores
+each edge independently; `route` selects order. The legacy distance parameters remain
+compatible without this profile. History is current-process only; no restart restoration.
 
 ## Manual continuation and per-segment feedback
 

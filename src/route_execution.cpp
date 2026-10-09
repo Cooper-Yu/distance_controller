@@ -43,6 +43,8 @@ void DistanceController::initialize_segment_target()
   }
 
   const auto & step = segments_[current_segment_index_];
+  if (step.reverse_of != 0 && !check_continuation_position()) return;
+  step_start_pose_ = current_recorded_pose();
   const double anchor_x = step.relative_to_start ? last_odom_.pose.pose.position.x : planned_x_;
   const double anchor_y = step.relative_to_start ? last_odom_.pose.pose.position.y : planned_y_;
   const double axes =
@@ -117,6 +119,7 @@ bool DistanceController::handle_completed_segment(const rclcpp::Time & current_t
 void DistanceController::advance_route()
 {
   publish_stop();
+  if (!record_completed_history()) return;
   record_step_endpoint();
   ++current_segment_index_;
   reset_pid();
@@ -124,7 +127,9 @@ void DistanceController::advance_route()
   segment_completed_ = false;
   target_initialized_ = false;
   if (manual_mode_) {
-    manual_waiting_ = true;
+    if (return_remaining_ > 0) --return_remaining_;
+    manual_waiting_ = return_remaining_ == 0;
+    if (!manual_waiting_) return;
     RCLCPP_INFO(get_logger(), "Manual WAITING: %s", step_status().c_str());
   } else if (current_segment_index_ >= segments_.size()) {
     RCLCPP_INFO(get_logger(), "Route completed.");

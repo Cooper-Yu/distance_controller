@@ -11,6 +11,18 @@
 void DistanceController::configure_route_steps(double forward_distance, double lateral_distance)
 {
   using namespace distance_controller;
+  const auto mode = declare_parameter<std::string>("segment_configuration", "legacy");
+  if (mode != "legacy" && mode != "independent")
+    throw std::invalid_argument("segment_configuration must be legacy or independent");
+  const auto & overrides = get_node_parameters_interface()->get_parameter_overrides();
+  if (
+    mode == "independent" &&
+    (overrides.count("forward_distance") || overrides.count("lateral_distance")))
+    throw std::invalid_argument(
+      "Independent segments do not accept forward_distance/lateral_distance");
+  resume_position_tolerance_ = declare_parameter<double>("resume_position_tolerance", 0.02);
+  if (!std::isfinite(resume_position_tolerance_) || resume_position_tolerance_ <= 0)
+    throw std::invalid_argument("resume_position_tolerance must be finite and positive");
   manual_mode_ = declare_parameter<bool>("manual_mode", false);
   start_paused_ = declare_parameter<bool>("start_paused", false);
   front_body_extent_ = declare_parameter<double>("front_body_extent", -1.0);
@@ -22,11 +34,13 @@ void DistanceController::configure_route_steps(double forward_distance, double l
   }
   const auto names = declare_parameter<std::vector<std::string>>("route", {"AB", "BC", "CB", "BA"});
   if (names.empty()) throw std::invalid_argument("route cannot be empty");
-  std::map<std::string, RouteSegment> definitions = {
-    {"AB", make_ab_segment(forward_distance, max_speed_, dwell_duration_)},
-    {"BC", make_bc_segment(lateral_distance, max_speed_, dwell_duration_)},
-    {"CB", make_cb_segment(lateral_distance, max_speed_, dwell_duration_)},
-    {"BA", make_ba_segment(forward_distance, max_speed_, dwell_duration_)}};
+  std::map<std::string, RouteSegment> definitions;
+  if (mode == "legacy")
+    definitions = {
+      {"AB", make_ab_segment(forward_distance, max_speed_, dwell_duration_)},
+      {"BC", make_bc_segment(lateral_distance, max_speed_, dwell_duration_)},
+      {"CB", make_cb_segment(lateral_distance, max_speed_, dwell_duration_)},
+      {"BA", make_ba_segment(forward_distance, max_speed_, dwell_duration_)}};
   std::map<std::string, RouteSegment> configured;
   std::string endpoint = "A";
   for (const auto & name : names) {

@@ -28,7 +28,9 @@ add_executable(distance_controller_node
   src/preparation_guard.cpp
   src/step_configuration.cpp
   src/manual_steps.cpp
-  src/step_feedback.cpp)
+  src/step_feedback.cpp
+  src/route_history.cpp
+  src/history_control.cpp)
 set_target_properties(distance_controller_node PROPERTIES OUTPUT_NAME distance_controller)
 target_include_directories(distance_controller_node PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -55,7 +57,7 @@ install(
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
-  ament_add_gtest(test_route test/test_route.cpp src/route.cpp)
+  ament_add_gtest(test_route test/test_route.cpp test/test_history.cpp src/route.cpp src/route_history.cpp)
   target_include_directories(test_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights

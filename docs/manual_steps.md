@@ -58,7 +58,7 @@ the actual stopped pose after dwell. Save the controller log as trial evidence.
 
 `resume` executes the next preconfigured segment; it is required when that segment
 is still pending. New ad-hoc steps are accepted only after the configured route has
-finished. `cancel` immediately latches a stopped fault and requires node restart.
+finished. History-return requests may instead replace the pending route explicitly. `cancel` immediately latches a stopped fault and requires node restart.
 `finish` shuts down from an aligned, stopped WAITING state. Ordinary Ctrl+C also
 ends the process; the ROS runtime and robot's command watchdog remain external.
 
@@ -82,8 +82,8 @@ ends the process; the ROS runtime and robot's command watchdog remain external.
   participates in arrival. Lateral moves cannot enable this opposing correction.
 
 Default steps ignore route laser availability. No automatic side centering or laser
-obstacle stop is added to ordinary translation. In manual waiting, only heading is
-held; position is not automatically recovered if the robot is physically displaced.
+obstacle stop is added to ordinary translation. In manual waiting, heading is held; displacement beyond resume_position_tolerance
+locks the controller stopped instead of automatically recovering position.
 
 ## Use front clearance as the arrival condition
 
@@ -168,3 +168,7 @@ retrying instead of repeating a possibly accepted request.
 
 Local synthetic tests and Task1 regression do not constitute Task2 cloud/hardware
 or independent learner acceptance. See the test directory for actual test entry points.
+
+## Independent configuration and history return
+
+See [Independent segments and history return](history_return.md) for the preferred YAML profile, history/backtrack/return_to commands, repeated visit IDs and waiting-position checks.

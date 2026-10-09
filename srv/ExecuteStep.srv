@@ -1,5 +1,5 @@
-# Accept one step only while manual mode is idle; response is acceptance, not completion.
-# action: forward/backward/left/right/relative/target/front_wall/resume/status/finish/cancel.
+# Accept a step or return batch while manual mode is idle; response is not completion.
+# action: forward/backward/left/right/relative/target/front_wall/resume/status/history/backtrack/return_to/finish/cancel.
 string action
 # distance: positive meters; for front_wall this is front-body clearance.
 float64 distance
@@ -16,6 +16,10 @@ float64 max_travel
 float64 timeout
 # Optional human-readable endpoint name for the recorded stopped pose.
 string label
+# Return controls; used only by backtrack / return_to. History is current-process only.
+uint32 steps
+bool use_visit_id
+uint64 visit_id
 ---
 bool accepted
 string message

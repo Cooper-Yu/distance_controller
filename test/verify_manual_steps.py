@@ -79,8 +79,15 @@ class Plant:
             'scan_topic': self.ns + '/scan',
             'base_frame': self.base,
         }
-        params.update(extra or {})
+        extra = dict(extra or {})
+        params_file = extra.pop('_params_file', None)
+        if params_file:
+            params.pop('forward_distance')
+            params.pop('lateral_distance')
+        params.update(extra)
         args = [str(EXE), '2', '--ros-args', '-r', '__ns:=' + self.ns]
+        if params_file:
+            args.extend(['--params-file', str(params_file)])
         for key, value in params.items():
             args.extend(['-p', key + ':=' + value])
         self.proc = subprocess.Popen(args, stdout=self.log, stderr=subprocess.STDOUT)
@@ -176,14 +183,15 @@ class Plant:
         assert response.accepted == accepted, (self.case, action, response.message)
         return response.message
 
-    def cli_status(self):
+    def cli_status(self, action='status', *values):
         command = subprocess.Popen(
             [
                 'ros2',
                 'run',
                 'distance_controller',
                 'step',
-                'status',
+                action,
+                *values,
                 '--service',
                 self.ns + '/distance_controller/step',
             ],
@@ -194,7 +202,9 @@ class Plant:
         try:
             self.until(lambda: command.poll() is not None, 10)
             out, err = command.communicate()
-            assert command.returncode == 0 and 'state=WAITING' in out, (out, err)
+            assert command.returncode == 0 and 'ACCEPTED:' in out, (out, err)
+            if action == 'status':
+                assert 'state=WAITING' in out
         finally:
             if command.poll() is None:
                 command.kill()
@@ -291,8 +301,10 @@ def sequence(p):
 
 def laser_policies(p):
     reference = p.idle()
+    p.call('forward', distance=0.05, side_centering=True, label='D')
     p.y = 0.035
-    p.move('forward', distance=0.05, side_centering=True, label='D')
+    p.until(lambda: p.text().count('Endpoint ') == 2)
+    p.wait(0.1)
     assert abs(p.y) < 0.011
     p.scan_enabled = False
     p.wait(0.7)
@@ -376,6 +388,110 @@ def cancel_step(p):
     assert p.text().count('Endpoint ') == 1
 
 
+def wait_return(p, legs, **kwargs):
+    previous = p.text().count('Endpoint ')
+    p.call(**kwargs)
+    p.until(lambda: p.text().count('Endpoint ') == previous + legs, 35)
+    p.wait(0.15)
+    assert 'state=WAITING' in p.call('status')
+    assert max(abs(v) for v in p.cmd) < 1e-8
+
+
+def return_chain(p):
+    reference = p.idle()
+    b = p.pose()
+    p.move('right', distance=0.06, label='C')
+    c = p.pose()
+    p.move('forward', distance=0.06, label='D')
+    assert 'completed=3 outward=3' in p.call('history')
+    p.call('return_to', accepted=False, label='Z')
+    p.call('backtrack', accepted=False, steps=0)
+    p.call('backtrack', accepted=False, steps=99)
+    wait_return(p, 1, action='backtrack', steps=1)
+    assert math.hypot(p.pose()[0] - c[0], p.pose()[1] - c[1]) < 0.012
+    assert 'completed=4 outward=2' in p.call('history')
+    wait_return(p, 1, action='return_to', label='B')
+    assert math.hypot(p.pose()[0] - b[0], p.pose()[1] - b[1]) < 0.012
+    p.move('left', distance=0.04, label='E')
+    wait_return(p, 2, action='return_to', label='A')
+    assert 'outward=0' in p.call('history')
+    assert abs(p.yaw + p.angle - reference) < 0.021
+    p.call('backtrack', accepted=False, steps=1)
+
+
+def repeated_visits(p):
+    p.idle()
+    p.move('right', distance=0.04, label='C')
+    p.move('left', distance=0.04, label='B')
+    p.call('return_to', accepted=False, label='B')
+    wait_return(p, 2, action='return_to', use_visit_id=True, visit_id=1)
+    assert 'current_visit=1' in p.call('history')
+    p.call('return_to', accepted=False, use_visit_id=True, visit_id=3)
+
+
+def waiting_displacement(p):
+    p.idle()
+    p.x += 0.04
+    p.fault('WAIT_POSITION_CHANGED')
+    assert 'completed=1 outward=1' in p.call('history')
+    p.call('backtrack', accepted=False, steps=1)
+
+
+def return_failure(p):
+    p.idle()
+    p.move('right', distance=0.06, label='D')
+    p.call('return_to', label='A')
+    p.wait(0.2)
+    p.call('cancel')
+    p.fault('MANUAL_CANCEL')
+    assert 'completed=2 outward=2' in p.call('history')
+
+
+def return_laser_conversion(p):
+    p.idle()
+    b = p.pose()
+    p.move('front_wall', distance=0.15, max_travel=0.5, timeout=20.0, label='D')
+    p.scan_enabled = False
+    p.wait(0.7)
+    wait_return(p, 1, action='return_to', label='B')
+    assert math.hypot(p.pose()[0] - b[0], p.pose()[1] - b[1]) < 0.012
+    history = p.call('history')
+    assert 'completion=front_wall' in history and 'reverse_of=2' in history
+    reverse = next(line for line in history.splitlines() if line.startswith('edge=3 '))
+    assert 'speed=0.03' in reverse
+
+
+def return_replaces_pending(p):
+    p.idle()
+    assert 'pending=1' in p.call('status')
+    wait_return(p, 1, action='return_to', label='A')
+    assert 'pending=0' in p.call('status')
+    p.call('resume', accepted=False)
+    assert 'Endpoint D recorded=' not in p.text()
+
+
+def cli_returns(p):
+    p.idle()
+    p.cli_status('history')
+    p.move('right', distance=0.04, label='D')
+    p.cli_status('backtrack', '1')
+    p.until(lambda: p.text().count('Endpoint ') == 3)
+    p.wait(0.15)
+    p.cli_status('return_to', '--visit-id', '0')
+    p.until(lambda: p.text().count('Endpoint ') == 4)
+    p.wait(0.15)
+    assert 'outward=0' in p.call('history')
+
+
+def automatic_independent(p):
+    p.until(lambda: 'Route completed.' in p.text(), 30)
+    assert p.text().count('Endpoint ') == 2
+    assert 'Endpoint D recorded=' in p.text()
+    assert max(abs(v) for v in p.cmd) < 1e-8
+    p.proc.wait(timeout=3)
+    assert p.proc.returncode == 0
+
+
 def missing_extent(p):
     p.idle()
     p.call('front_wall', accepted=False, distance=0.15)
@@ -383,6 +499,45 @@ def missing_extent(p):
 
 
 try:
+    run_case(
+        'automatic_independent',
+        automatic_independent,
+        {
+            '_params_file': Path(__file__).resolve().parents[1] / 'config/segments.yaml',
+            'manual_mode': 'false',
+            'route': '[AB, BD]',
+            'segments.AB.dx': '.06',
+            'segments.AB.dwell': '.02',
+            'segments.BD.dx': '.04',
+            'segments.BD.speed': '.1',
+            'segments.BD.dwell': '.02',
+        },
+    )
+    run_case('cli_returns', cli_returns)
+    run_case('return_chain', return_chain)
+    run_case('repeated_visits', repeated_visits)
+    run_case('waiting_displacement', waiting_displacement)
+    run_case('return_failure', return_failure)
+    run_case('return_laser_conversion', return_laser_conversion)
+    run_case(
+        'return_replaces_pending',
+        return_replaces_pending,
+        {'route': '[AB, BD]', 'segments.BD.dx': '.04', 'segments.BD.dy': '0.0'},
+    )
+    run_case(
+        'independent_yaml',
+        paused_route,
+        {
+            '_params_file': Path(__file__).resolve().parents[1] / 'config/segments.yaml',
+            'route': '[AB, BD]',
+            'start_paused': 'true',
+            'segments.AB.dx': '.06',
+            'segments.AB.dwell': '.02',
+            'segments.BD.dx': '.04',
+            'segments.BD.speed': '.1',
+            'segments.BD.dwell': '.02',
+        },
+    )
     run_case('sequence', sequence)
     run_case('laser_policies', laser_policies)
     run_case('front_arrival', front_arrival)

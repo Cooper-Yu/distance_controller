@@ -227,6 +227,9 @@ void DistanceController::record_route_origin()
   planned_x_ = route_x_;
   planned_y_ = route_y_;
   manual_waiting_ = manual_mode_ && start_paused_;
+  waiting_pose_ = current_recorded_pose();
+  waiting_pose_valid_ = true;
+  history_.initialize(waiting_pose_);
 }
 
 void DistanceController::measure_wall_windows(

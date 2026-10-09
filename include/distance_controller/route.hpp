@@ -3,6 +3,7 @@
  */
 #ifndef DISTANCE_CONTROLLER__ROUTE_HPP_
 #define DISTANCE_CONTROLLER__ROUTE_HPP_
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -91,6 +92,7 @@ struct RouteSegment
     false};  ///< Side walls replace odom lateral tracking when explicitly enabled.
   double front_clearance{0.2};  ///< Target clearance from front body edge, meters.
   double timeout{60.0};         ///< Steady execution budget including recovery, settling and dwell.
+  std::uint64_t reverse_of{};   ///< Nonzero completed edge ID only for a planned return.
   double max_travel{100.0};     ///< Maximum accumulated odom path length, meters.
 };
 

@@ -26,7 +26,8 @@ std::string DistanceController::step_status()
           : manual_waiting_      ? "WAITING"
                                  : "RUNNING")
       << " waypoint=" << current_waypoint_
-      << " pending=" << (segments_.size() - current_segment_index_);
+      << " pending=" << (segments_.size() - current_segment_index_)
+      << " return_remaining=" << return_remaining_;
   if (received_odom_) {
     out << " pose=(" << last_odom_.pose.pose.position.x << "," << last_odom_.pose.pose.position.y
         << "," << quaternion_to_yaw(last_odom_.pose.pose.orientation) << ")"
@@ -40,9 +41,9 @@ void DistanceController::on_step_request(
   const StepService::Request::SharedPtr request, StepService::Response::SharedPtr response)
 {
   response->accepted = false;
-  if (request->action == "status") {
+  if (request->action == "status" || request->action == "history") {
     response->accepted = true;
-    response->message = step_status();
+    response->message = request->action == "history" ? history_.describe() : step_status();
     return;
   }
   if (request->action == "cancel") {
@@ -64,6 +65,11 @@ void DistanceController::on_step_request(
       "Requires initialized, fresh, stopped, aligned WAITING state; " + step_status();
     return;
   }
+  if (!check_continuation_position()) {
+    response->message =
+      "WAIT_POSITION_CHANGED; restart after verifying placement and odom reference";
+    return;
+  }
   if (request->action == "finish") {
     finish_requested_ = true;
     response->accepted = true;
@@ -72,7 +78,9 @@ void DistanceController::on_step_request(
   }
   try {
     if (finish_requested_) throw std::invalid_argument("Shutdown already requested");
-    if (request->action == "resume") {
+    if (request->action == "backtrack" || request->action == "return_to") {
+      prepare_history_return(*request);
+    } else if (request->action == "resume") {
       if (current_segment_index_ >= segments_.size())
         throw std::invalid_argument("No pending route; submit a new step");
     } else {
@@ -87,7 +95,10 @@ void DistanceController::on_step_request(
     settling_ = false;
     reset_pid();
     response->accepted = true;
-    response->message = "Accepted; wait for endpoint completion. " + step_status();
+    response->message =
+      (return_remaining_ > 0 ? "Return accepted; pending route replaced, laser policies disabled. "
+                             : "Accepted; wait for endpoint completion. ") +
+      step_status();
   } catch (const std::exception & error) {
     response->message = error.what();
   }
@@ -158,6 +169,7 @@ bool DistanceController::handle_manual_wait()
     rclcpp::shutdown();
     return true;
   }
+  if (!check_continuation_position()) return true;
   const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
   if (std::abs(heading_error(yaw)) > heading_tolerance_)
     publish_heading_correction(heading_error(yaw));

@@ -28,7 +28,7 @@ digraph control {
   align -> rotate [label="pending"];
   align -> center [label="complete / scene 1"];
   center -> rotate [label="pending"];
-  idle [label="Manual WAITING?\nHold yaw, zero translation\nAccept one validated step / resume",shape=diamond];
+  idle [label="Manual WAITING?\nCheck stopped-position drift; hold yaw\nAccept step / resume / history return",shape=diamond];
   feedback [label="apply_step_feedback()\nTime/path bounds + selected laser validity\nPosition / front clearance / side error",shape=diamond];
   center -> idle [label="complete / scene 1"];
   idle -> stop [label="waiting / finish"];
@@ -43,7 +43,7 @@ digraph control {
   recover -> rotate [label="rotation required"];
   recover -> done [label="continue"];
   done -> dwell [label="yes"];
-  advance [label="on_timer(): Completed -> advance_route()\nRecord endpoint; manual wait, next tick or shutdown"];
+  advance [label="on_timer(): Completed -> advance_route()\nCommit completed history; return leg / wait / next / exit"];
   dwell -> advance [label="finished"];
   dwell -> stop [label="waiting"];
   done -> near [label="no"];

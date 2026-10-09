@@ -103,3 +103,7 @@ Gazebo run provide regressions. Route GoogleTests now additionally cover policy
 compatibility and absolute-origin goals; startup probes include manual/laser policies.
 
 The manual fixture also verifies stale required scans and active cancellation: both latch a stop and reject continuation. Use `STEP_CASE=front_stale` or `STEP_CASE=cancel_step` for focused runs.
+
+## History return verification
+
+`test_history.cpp` covers return order, recorded endpoints, repeated names/visit IDs, branches, policy conversion and rejection without consumption. `verify_manual_steps.py` adds return_chain, repeated_visits, waiting_displacement, return_failure, return_laser_conversion, return_replaces_pending and independent_yaml cases. The displacement fault is intentional; the older side-policy fixture now introduces its disturbance during active motion instead of moving an idle robot. These localhost fixtures do not certify physical collision clearance or restart recovery.

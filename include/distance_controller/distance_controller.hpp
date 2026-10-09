@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "distance_controller/route.hpp"
+#include "distance_controller/route_history.hpp"
 #include "distance_controller/srv/execute_step.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -885,12 +886,12 @@ private:
    */
   void configure_step_interface();
   /**
-   * @brief Accept one validated idle step or a status/resume/finish/cancel request.
+   * @brief Accept a validated idle step, history-return batch or management request.
    * @par Serialized request
    * Reject busy/faulted/uninitialized states and never queue surprise commands behind an active step.
-   * @param[in] request ROS service input; read action/parameters to construct one segment.
+   * @param[in] request ROS service input; read an action, step parameters or a history destination.
    * @param[out] response Write acceptance and reason for the service client; acceptance is not arrival.
-   * @note Mutates route/wait state only after validation; cancel latches a stopped fault.
+   * @note Mutates route/wait state after validation; return replaces pending steps, cancel latches stop.
    */
   void on_step_request(
     const StepService::Request::SharedPtr request, StepService::Response::SharedPtr response);
@@ -906,7 +907,7 @@ private:
   /**
    * @brief Keep manual idle stopped in translation while holding the persistent heading.
    * @par Idle ownership
-   * Called after feedback/time/initialization guards; consume finish or publish yaw-only correction.
+   * Called after feedback/time/initialization guards; check waiting-position drift, then hold yaw.
    * @return True when this tick is handled by idle/finish; false to execute the active segment.
    * @note Never captures a new heading from drift; idle does not resume automatically.
    */
@@ -953,6 +954,37 @@ private:
    * @note Restart is required; no automatic retry or fallback.
    */
   void fail_step(const std::string & reason);
+  distance_controller::RouteHistory history_{};  ///< Current-process completed traversal audit.
+  distance_controller::RecordedPose
+    step_start_pose_{};  ///< Actual pose before the active step moves.
+  distance_controller::RecordedPose
+    waiting_pose_{};                ///< Last accepted stopped pose for continuation.
+  bool waiting_pose_valid_{false};  ///< Set after A or a verified endpoint; never from a request.
+  double resume_position_tolerance_{0.02};  ///< Maximum displacement while waiting, meters in odom.
+  std::size_t return_remaining_{};  ///< Return legs left in the accepted batch; zero otherwise.
+
+  /** @brief Read the current validated odom pose for history and continuation checks.
+   * @return A copy of last_odom_ position and yaw, consumed by target/history methods.
+   * @note Caller must first pass the existing odom guard; does not redefine heading.
+   */
+  distance_controller::RecordedPose current_recorded_pose();
+  /** @brief Stop and latch when the robot has moved from its last accepted wait pose.
+   * @par Continuation gate
+   * Compare current odom with waiting_pose_; do not automatically relocate or recenter.
+   * @return True when displacement is within resume_position_tolerance_; false after fault.
+   * @note Called by on_step_request(), handle_manual_wait() and reverse-leg startup.
+   */
+  bool check_continuation_position();
+  /** @brief Validate a return plan before replacing the unexecuted route tail.
+   * @param[in] request Service input from on_step_request(); read count or destination visit.
+   * @note Sets return_remaining_ and segments_ only after full validation; pending route is replaced.
+   */
+  void prepare_history_return(const StepService::Request & request);
+  /** @brief Commit the completed scene-2 step before any route index advances.
+   * @return True on success or scene-1 bypass; false after a history consistency fault.
+   * @note advance_route() supplies current members; copies poses/policy to history_ and updates wait pose.
+   */
+  bool record_completed_history();
 };
 
 #endif

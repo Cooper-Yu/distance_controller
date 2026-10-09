@@ -3,11 +3,12 @@
   ros__parameters:
     manual_mode: true
     route: [AB, BD]
-    forward_distance: 0.93
-    lateral_distance: 0.516780
+    segment_configuration: independent
     heading_tolerance: 0.01
     segments:
       AB:
+        dx: 0.93
+        dy: 0.0
         speed: 0.10
         dwell: 1.0
         side_centering: false

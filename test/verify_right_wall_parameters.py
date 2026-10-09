@@ -35,6 +35,10 @@ names = [
     'preparation_max_travel',
 ]
 cases = [(n, v) for n in names for v in ['0.0', '.nan']] + [
+    ('segment_configuration', 'invalid'),
+    ('segment_configuration', 'independent'),
+    ('resume_position_tolerance', '0.0'),
+    ('resume_position_tolerance', '.nan'),
     ('start_paused', 'true'),
     ('front_body_extent', '0.0'),
     ('front_body_extent', '.nan'),

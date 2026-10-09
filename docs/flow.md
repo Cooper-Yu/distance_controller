@@ -79,3 +79,7 @@ laser windows. Position goals use frozen odom targets. Optional side centering r
 lateral odom error. Front goals use front-body clearance instead of longitudinal odom
 error. Both share heading recovery, measured standstill and dwell. Required laser loss
 latches stop without fallback. The full interface contract is in manual_steps.md.
+
+## History and continuation
+
+Scene 2 records A once, captures each actual step start at target initialization and commits its stopped endpoint only after dwell. Completed return legs pop active ancestry but remain in the audit. A return batch uses the ordinary executor and goes to each recorded start in sequence. WAITING checks displacement before motion acceptance; excessive drift locks zero output. See history_return.md.

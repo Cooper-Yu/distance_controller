@@ -1,0 +1,55 @@
+# Independent segment definitions; route selects their order.
+# Values preserve the last user trial, not a new hardware acceptance claim.
+/**:
+  ros__parameters:
+    segment_configuration: independent
+    route: [AB, BC, CB, BA]
+    manual_mode: true
+    heading_tolerance: 0.01
+    resume_position_tolerance: 0.02
+    segments:
+      AB:
+        dx: 0.93
+        dy: 0.0
+        speed: 0.10
+        dwell: 1.0
+        completion: position
+        side_centering: false
+        timeout: 60.0
+        max_travel: 1.18
+      BC:
+        dx: 0.0
+        dy: -0.516780
+        speed: 0.10
+        dwell: 1.0
+        completion: position
+        side_centering: false
+        timeout: 60.0
+        max_travel: 0.77
+      CB:
+        dx: 0.0
+        dy: 0.516780
+        speed: 0.10
+        dwell: 1.0
+        completion: position
+        side_centering: false
+        timeout: 60.0
+        max_travel: 0.77
+      BA:
+        dx: -0.93
+        dy: 0.0
+        speed: 0.10
+        dwell: 1.0
+        completion: position
+        side_centering: false
+        timeout: 60.0
+        max_travel: 1.18
+      BD:
+        dx: 0.20
+        dy: 0.0
+        speed: 0.03
+        dwell: 1.0
+        completion: position
+        side_centering: false
+        timeout: 30.0
+        max_travel: 0.45
