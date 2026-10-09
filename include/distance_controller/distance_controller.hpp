@@ -1057,6 +1057,15 @@ private:
    * @note advance_route() supplies current members; copies poses/policy to history_ and updates wait pose.
    */
   bool record_completed_history();
+  /** @brief Adopt a stopped intermediate pose before any wall preparation.
+   * @param[in] current_time ROS time from on_timer(), used for continuous stopped qualification.
+   * @return True while startup is consuming this tick; false after adoption or when disabled.
+   * @note Reads validated odom; writes heading_reference_ and a fresh local history origin A.
+   * Clears pending routes and enters WAITING. Never restores old history or commands motion.
+   */
+  bool handle_current_pose_start(const rclcpp::Time & current_time);
+  bool adopt_current_pose_{false}; ///< Startup-only opt-in for scene-2 manual intermediate stops.
+
 };
 
 #endif

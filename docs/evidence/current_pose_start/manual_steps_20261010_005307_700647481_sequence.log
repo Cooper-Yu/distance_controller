@@ -1,0 +1,80 @@
+[INFO] [1791564787.848055161] [step_fixture.sequence.distance_controller]: Scene 2: 1 segments, use_sim_time=false, max_speed=0.100
+[INFO] [1791564787.899036662] [step_fixture.sequence.distance_controller]: Preparation stage=wall_measurement deadline=20.0 s (total limit=60.0 s)
+[INFO] [1791564787.899077762] [step_fixture.sequence.distance_controller]: Right-wall alignment: valid=true stable=false angle=-5.730 deg rms=0.0000 m span=0.321 m
+[INFO] [1791564788.449077063] [step_fixture.sequence.distance_controller]: Preparation stage=heading_alignment deadline=30.0 s (total limit=60.0 s)
+[INFO] [1791564788.849009628] [step_fixture.sequence.distance_controller]: Initialization progress: stage=heading_alignment | pose: x=0.004967 y=-0.024502 yaw=0.224266 rad | left=0.325 right=0.276 rear=0.280 rear_target=0.280 m | center_error=0.0245 rear_error=-0.0002 tolerance=0.0100 m | heading_error=0.0253 tolerance=0.0100 rad heading_basis=right_wall | position_ready=false heading_ready=false settling=false required_hold=0.10 s
+[INFO] [1791564788.949079026] [step_fixture.sequence.distance_controller]: Right-wall alignment: valid=true stable=true angle=-1.014 deg rms=0.0000 m span=0.315 m
+[INFO] [1791564789.349152553] [step_fixture.sequence.distance_controller]: Initial alignment complete: yaw=0.207257; right-wall reference captured; starting laser centering next tick
+[INFO] [1791564789.399061583] [step_fixture.sequence.distance_controller]: Preparation stage=positioning deadline=30.0 s (total limit=60.0 s)
+[INFO] [1791564789.849094189] [step_fixture.sequence.distance_controller]: Initialization progress: stage=positioning | pose: x=0.002249 y=-0.011577 yaw=0.207257 rad | left=0.312 right=0.288 rear=0.280 rear_target=0.280 m | center_error=0.0120 rear_error=0.0001 tolerance=0.0100 m | heading_error=0.0000 tolerance=0.0100 rad heading_basis=held_odom_heading | position_ready=false heading_ready=true settling=false required_hold=0.10 s
+[INFO] [1791564790.099189706] [step_fixture.sequence.distance_controller]: Centered A recorded=(0.001763, -0.009265), yaw=0.207257 rad (11.875 deg), left=0.309 right=0.291 rear=0.280; starting route; heading_reference=0.207257 rad
+[INFO] [1791564790.099241426] [step_fixture.sequence.distance_controller]: Waypoints: frame=odom, position=m, yaw=rad; fixed position goals
+[INFO] [1791564790.099245978] [step_fixture.sequence.distance_controller]: Waypoint 0 A: x=0.001763 y=-0.009265 yaw=0.207257 (held heading)
+[INFO] [1791564790.099249891] [step_fixture.sequence.distance_controller]: Waypoint 1 B: x=0.080051 y=0.007197 yaw=0.207257 (held heading)
+[INFO] [1791564790.149112363] [step_fixture.sequence.distance_controller]: Segment 1/1 target=(0.080051, 0.007197), yaw=0.207257 rad, heading_control=enabled
+[INFO] [1791564790.149179032] [step_fixture.sequence.distance_controller]: Route segment A->B: speed=0.100 m/s dwell=0.020 s
+[INFO] [1791564790.899146997] [step_fixture.sequence.distance_controller]: A->B observation: x=0.041787 y=-0.000849 dy_from_A=0.008416 m yaw=0.207257 rad (11.875 deg) | left=0.309024 right=0.291029 m scan_age=0.021 s | cross_track=-0.000000 m heading_error=0.000000 rad | read-only
+[INFO] [1791564790.899236023] [step_fixture.sequence.distance_controller]: Pose: x=0.042, y=-0.001, yaw=0.207 | Velocity: vx=0.064, vy=0.000, wz=0.000 | Target: x=0.080, y=0.007, yaw=0.207 rad | Current segment index:0 | Error: ex=0.038, ey=0.008 | pid_dt=0.050 | integral=(0.046, 0.010) | odom_raw=(0.057, 0.012) | odom_limited=(0.057, 0.012) | robot_cmd=(0.059, 0.000), wz=0.000
+[INFO] [1791564791.849189488] [step_fixture.sequence.distance_controller]: Entering SETTLING state
+[INFO] [1791564791.949249397] [step_fixture.sequence.distance_controller]: A->B observation: x=0.070741 y=0.005239 dy_from_A=0.014505 m yaw=0.207257 rad (11.875 deg) | left=0.308802 right=0.291252 m scan_age=0.016 s | cross_track=-0.000000 m heading_error=0.000000 rad | read-only
+[INFO] [1791564792.349193999] [step_fixture.sequence.distance_controller]: A->B observation: x=0.070741 y=0.005239 dy_from_A=0.014505 m yaw=0.207257 rad (11.875 deg) | left=0.308802 right=0.291252 m scan_age=0.050 s | cross_track=-0.000000 m heading_error=0.000000 rad | read-only
+[INFO] [1791564792.349258970] [step_fixture.sequence.distance_controller]: Entering DONE state | segment=0 error=0.009513 speed=0.000000 wz=0.000000 sim=1791564792.349
+[INFO] [1791564792.399155425] [step_fixture.sequence.distance_controller]: Endpoint B recorded=(0.070741, 0.005239), yaw=0.207257 heading_reference=0.207257
+[INFO] [1791564792.399203410] [step_fixture.sequence.distance_controller]: Reached B via A->B | actual: x=0.070741 y=0.005239 yaw=0.207257 rad | target: x=0.080051 y=0.007197 yaw=0.207257 rad | stopped and dwell complete
+[INFO] [1791564792.399237536] [step_fixture.sequence.distance_controller]: Manual WAITING: state=WAITING waypoint=B pending=0 return_remaining=0 pose=(0.0707411,0.00523938,0.207257) heading_reference=0.207257
+[INFO] [1791564795.599187534] [step_fixture.sequence.distance_controller]: Segment 2/2 target=(0.129457, 0.017586), yaw=0.207257 rad, heading_control=enabled
+[INFO] [1791564795.599251332] [step_fixture.sequence.distance_controller]: Route segment B->point_2: speed=0.100 m/s dwell=0.020 s
+[INFO] [1791564796.049253881] [step_fixture.sequence.distance_controller]: Pose: x=0.088, y=0.009, yaw=0.216 | Velocity: vx=0.069, vy=-0.001, wz=0.000 | Target: x=0.129, y=0.018, yaw=0.207 rad | Current segment index:1 | Error: ex=0.042, ey=0.009 | pid_dt=0.050 | integral=(0.024, 0.005) | odom_raw=(0.063, 0.013) | odom_limited=(0.063, 0.013) | robot_cmd=(0.064, -0.001), wz=0.000
+[INFO] [1791564797.049269166] [step_fixture.sequence.distance_controller]: Entering SETTLING state
+[INFO] [1791564797.549286695] [step_fixture.sequence.distance_controller]: Entering DONE state | segment=1 error=0.009603 speed=0.000000 wz=0.000000 sim=1791564797.549
+[INFO] [1791564797.599351869] [step_fixture.sequence.distance_controller]: Endpoint point_2 recorded=(0.120060, 0.015610), yaw=0.216201 heading_reference=0.207257
+[INFO] [1791564797.599401745] [step_fixture.sequence.distance_controller]: Reached point_2 via B->point_2 | actual: x=0.120060 y=0.015610 yaw=0.216201 rad | target: x=0.129457 y=0.017586 yaw=0.207257 rad | stopped and dwell complete
+[INFO] [1791564797.599418901] [step_fixture.sequence.distance_controller]: Manual WAITING: state=WAITING waypoint=point_2 pending=0 return_remaining=0 pose=(0.12006,0.01561,0.216201) heading_reference=0.207257
+[INFO] [1791564797.749240821] [step_fixture.sequence.distance_controller]: Segment 3/3 target=(0.080916, 0.007379), yaw=0.207257 rad, heading_control=enabled
+[INFO] [1791564797.749309189] [step_fixture.sequence.distance_controller]: Route segment point_2->point_3: speed=0.100 m/s dwell=0.020 s
+[INFO] [1791564798.049289213] [step_fixture.sequence.distance_controller]: Pose: x=0.113, y=0.014, yaw=0.216 | Velocity: vx=-0.050, vy=0.000, wz=0.000 | Target: x=0.081, y=0.007, yaw=0.207 rad | Current segment index:2 | Error: ex=-0.032, ey=-0.007 | pid_dt=0.050 | integral=(-0.011, -0.002) | odom_raw=(-0.048, -0.010) | odom_limited=(-0.048, -0.010) | robot_cmd=(-0.049, 0.000), wz=0.000
+[INFO] [1791564798.899281298] [step_fixture.sequence.distance_controller]: Entering SETTLING state
+[INFO] [1791564799.399354047] [step_fixture.sequence.distance_controller]: Entering DONE state | segment=2 error=0.009353 speed=0.000000 wz=0.000000 sim=1791564799.399
+[INFO] [1791564799.449382858] [step_fixture.sequence.distance_controller]: Endpoint point_3 recorded=(0.090069, 0.009304), yaw=0.216201 heading_reference=0.207257
+[INFO] [1791564799.449434735] [step_fixture.sequence.distance_controller]: Reached point_3 via point_2->point_3 | actual: x=0.090069 y=0.009304 yaw=0.216201 rad | target: x=0.080916 y=0.007379 yaw=0.207257 rad | stopped and dwell complete
+[INFO] [1791564799.449454628] [step_fixture.sequence.distance_controller]: Manual WAITING: state=WAITING waypoint=point_3 pending=0 return_remaining=0 pose=(0.0900687,0.00930352,0.216201) heading_reference=0.207257
+[INFO] [1791564799.599270430] [step_fixture.sequence.distance_controller]: Segment 4/4 target=(0.081838, 0.048447), yaw=0.207257 rad, heading_control=enabled
+[INFO] [1791564799.599327296] [step_fixture.sequence.distance_controller]: Route segment point_3->point_4: speed=0.100 m/s dwell=0.020 s
+[INFO] [1791564800.049344358] [step_fixture.sequence.distance_controller]: Pose: x=0.087, y=0.023, yaw=0.216 | Velocity: vx=0.000, vy=0.042, wz=0.000 | Target: x=0.082, y=0.048, yaw=0.207 rad | Current segment index:3 | Error: ex=-0.005, ey=0.025 | pid_dt=0.050 | integral=(-0.003, 0.015) | odom_raw=(-0.008, 0.038) | odom_limited=(-0.008, 0.038) | robot_cmd=(0.000, 0.039), wz=0.000
+[INFO] [1791564800.749338751] [step_fixture.sequence.distance_controller]: Entering SETTLING state
+[INFO] [1791564801.249352880] [step_fixture.sequence.distance_controller]: Entering DONE state | segment=3 error=0.009350 speed=0.000000 wz=0.000000 sim=1791564801.249
+[INFO] [1791564801.299342250] [step_fixture.sequence.distance_controller]: Endpoint point_4 recorded=(0.083762, 0.039297), yaw=0.216201 heading_reference=0.207257
+[INFO] [1791564801.299385162] [step_fixture.sequence.distance_controller]: Reached point_4 via point_3->point_4 | actual: x=0.083762 y=0.039297 yaw=0.216201 rad | target: x=0.081838 y=0.048447 yaw=0.207257 rad | stopped and dwell complete
+[INFO] [1791564801.299402293] [step_fixture.sequence.distance_controller]: Manual WAITING: state=WAITING waypoint=point_4 pending=0 return_remaining=0 pose=(0.0837617,0.0392974,0.216201) heading_reference=0.207257
+[INFO] [1791564801.449306994] [step_fixture.sequence.distance_controller]: Segment 5/5 target=(0.091993, 0.000153), yaw=0.207257 rad, heading_control=enabled
+[INFO] [1791564801.449359104] [step_fixture.sequence.distance_controller]: Route segment point_4->point_5: speed=0.100 m/s dwell=0.020 s
+[INFO] [1791564802.149347350] [step_fixture.sequence.distance_controller]: Pose: x=0.088, y=0.017, yaw=0.216 | Velocity: vx=-0.000, vy=-0.028, wz=0.000 | Target: x=0.092, y=0.000, yaw=0.207 rad | Current segment index:4 | Error: ex=0.004, ey=-0.017 | pid_dt=0.050 | integral=(0.004, -0.020) | odom_raw=(0.005, -0.025) | odom_limited=(0.005, -0.025) | robot_cmd=(-0.000, -0.026), wz=0.000
+[INFO] [1791564802.599409371] [step_fixture.sequence.distance_controller]: Entering SETTLING state
+[INFO] [1791564803.149418958] [step_fixture.sequence.distance_controller]: Entering DONE state | segment=4 error=0.009236 speed=0.000000 wz=0.000000 sim=1791564803.149
+[INFO] [1791564803.199443740] [step_fixture.sequence.distance_controller]: Endpoint point_5 recorded=(0.090092, 0.009192), yaw=0.216201 heading_reference=0.207257
+[INFO] [1791564803.199490011] [step_fixture.sequence.distance_controller]: Reached point_5 via point_4->point_5 | actual: x=0.090092 y=0.009192 yaw=0.216201 rad | target: x=0.091993 y=0.000153 yaw=0.207257 rad | stopped and dwell complete
+[INFO] [1791564803.199507151] [step_fixture.sequence.distance_controller]: Manual WAITING: state=WAITING waypoint=point_5 pending=0 return_remaining=0 pose=(0.0900922,0.00919203,0.216201) heading_reference=0.207257
+[INFO] [1791564803.349348567] [step_fixture.sequence.distance_controller]: Segment 6/6 target=(0.060092, 0.029192), yaw=0.207257 rad, heading_control=enabled
+[INFO] [1791564803.349404013] [step_fixture.sequence.distance_controller]: Route segment point_5->D: speed=0.100 m/s dwell=0.020 s
+[INFO] [1791564804.149395134] [step_fixture.sequence.distance_controller]: Pose: x=0.071, y=0.022, yaw=0.216 | Velocity: vx=-0.015, vy=0.015, wz=0.000 | Target: x=0.060, y=0.029, yaw=0.207 rad | Current segment index:5 | Error: ex=-0.011, ey=0.007 | pid_dt=0.050 | integral=(-0.016, 0.011) | odom_raw=(-0.016, 0.011) | odom_limited=(-0.016, 0.011) | robot_cmd=(-0.014, 0.014), wz=0.000
+[INFO] [1791564804.399392926] [step_fixture.sequence.distance_controller]: Entering SETTLING state
+[INFO] [1791564804.899434575] [step_fixture.sequence.distance_controller]: Entering DONE state | segment=5 error=0.009547 speed=0.000000 wz=0.000000 sim=1791564804.899
+[INFO] [1791564804.949460630] [step_fixture.sequence.distance_controller]: Endpoint D recorded=(0.068036, 0.023896), yaw=0.216201 heading_reference=0.207257
+[INFO] [1791564804.949519048] [step_fixture.sequence.distance_controller]: Reached D via point_5->D | actual: x=0.068036 y=0.023896 yaw=0.216201 rad | target: x=0.060092 y=0.029192 yaw=0.207257 rad | stopped and dwell complete
+[INFO] [1791564804.949537337] [step_fixture.sequence.distance_controller]: Manual WAITING: state=WAITING waypoint=D pending=0 return_remaining=0 pose=(0.0680361,0.0238961,0.216201) heading_reference=0.207257
+[INFO] [1791564805.099369842] [step_fixture.sequence.distance_controller]: Segment 7/7 target=(0.101510, 0.010497), yaw=0.207257 rad, heading_control=enabled
+[INFO] [1791564805.099430145] [step_fixture.sequence.distance_controller]: Route segment D->point_7: speed=0.100 m/s dwell=0.020 s
+[INFO] [1791564805.149411322] [step_fixture.sequence.distance_controller]: Pose: x=0.068, y=0.024, yaw=0.216 | Velocity: vx=0.000, vy=0.000, wz=0.000 | Target: x=0.102, y=0.010, yaw=0.207 rad | Current segment index:6 | Error: ex=0.033, ey=-0.013 | pid_dt=0.050 | integral=(0.002, -0.001) | odom_raw=(0.050, -0.020) | odom_limited=(0.009, -0.004) | robot_cmd=(0.008, -0.006), wz=0.000
+[INFO] [1791564806.149458800] [step_fixture.sequence.distance_controller]: Entering SETTLING state
+[INFO] [1791564806.649459836] [step_fixture.sequence.distance_controller]: Entering DONE state | segment=6 error=0.009547 speed=0.000000 wz=0.000000 sim=1791564806.649
+[INFO] [1791564806.699543179] [step_fixture.sequence.distance_controller]: Endpoint point_7 recorded=(0.092646, 0.014045), yaw=0.216201 heading_reference=0.207257
+[INFO] [1791564806.699589097] [step_fixture.sequence.distance_controller]: Reached point_7 via D->point_7 | actual: x=0.092646 y=0.014045 yaw=0.216201 rad | target: x=0.101510 y=0.010497 yaw=0.207257 rad | stopped and dwell complete
+[INFO] [1791564806.699607702] [step_fixture.sequence.distance_controller]: Manual WAITING: state=WAITING waypoint=point_7 pending=0 return_remaining=0 pose=(0.092646,0.0140453,0.216201) heading_reference=0.207257
+[INFO] [1791564806.849403870] [step_fixture.sequence.distance_controller]: Segment 8/8 target=(0.131790, 0.022276), yaw=0.207257 rad, heading_control=enabled
+[INFO] [1791564806.849455001] [step_fixture.sequence.distance_controller]: Route segment point_7->point_8: speed=0.100 m/s dwell=0.020 s
+[INFO] [1791564807.149461987] [step_fixture.sequence.distance_controller]: Pose: x=0.100, y=0.016, yaw=0.216 | Velocity: vx=0.050, vy=-0.000, wz=0.000 | Target: x=0.132, y=0.022, yaw=0.207 rad | Current segment index:7 | Error: ex=0.032, ey=0.007 | pid_dt=0.050 | integral=(0.011, 0.002) | odom_raw=(0.048, 0.010) | odom_limited=(0.048, 0.010) | robot_cmd=(0.049, -0.000), wz=0.000
+[INFO] [1791564807.999548116] [step_fixture.sequence.distance_controller]: Entering SETTLING state
+[INFO] [1791564808.549478982] [step_fixture.sequence.distance_controller]: Entering DONE state | segment=7 error=0.009278 speed=0.000000 wz=0.000000 sim=1791564808.549
+[INFO] [1791564808.599539521] [step_fixture.sequence.distance_controller]: Endpoint point_8 recorded=(0.122711, 0.020367), yaw=0.216201 heading_reference=0.207257
+[INFO] [1791564808.599588581] [step_fixture.sequence.distance_controller]: Reached point_8 via point_7->point_8 | actual: x=0.122711 y=0.020367 yaw=0.216201 rad | target: x=0.131790 y=0.022276 yaw=0.207257 rad | stopped and dwell complete
+[INFO] [1791564808.599604747] [step_fixture.sequence.distance_controller]: Manual WAITING: state=WAITING waypoint=point_8 pending=0 return_remaining=0 pose=(0.122711,0.0203672,0.216201) heading_reference=0.207257

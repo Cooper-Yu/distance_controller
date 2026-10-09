@@ -197,3 +197,31 @@ void DistanceController::record_step_endpoint()
     current_waypoint_.c_str(), pose.position.x, pose.position.y,
     quaternion_to_yaw(pose.orientation), heading_reference_);
 }
+
+bool DistanceController::handle_current_pose_start(const rclcpp::Time & current_time)
+{
+  if (!adopt_current_pose_ || centering_complete_) return false;
+  publish_stop();
+  const auto & velocity = last_odom_.twist.twist;
+  if (
+    std::hypot(velocity.linear.x, velocity.linear.y) >= 0.01 ||
+    std::abs(velocity.angular.z) >= 0.02) {
+    alignment_settling_ = false;
+    return true;
+  }
+  if (!alignment_settling_) {
+    alignment_settling_ = true;
+    alignment_settle_start_ = current_time;
+  }
+  if ((current_time - alignment_settle_start_).seconds() < alignment_settle_duration_) return true;
+  heading_reference_ = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+  initial_alignment_complete_ = true;
+  segments_.clear();
+  record_route_origin();
+  RCLCPP_INFO(
+    get_logger(),
+    "Manual WAITING: adopted current pose as session-local A; "
+    "old history unavailable; heading_reference=%.6f",
+    heading_reference_);
+  return true;
+}

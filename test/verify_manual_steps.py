@@ -267,6 +267,30 @@ def run_case(name, fn, extra=None):
         (OUT / 'results.json').write_text(json.dumps(RESULTS, indent=2))
 
 
+def adopt_pose(p):
+    p.scan_enabled = False
+    p.yaw = -1.7
+    initial = p.pose()
+    p.feedback_speed_override = 0.03
+    p.wait(0.5)
+    assert 'adopted current pose' not in p.text()
+    assert max(abs(v) for v in p.cmd) < 1e-8
+    p.feedback_speed_override = None
+    reference = p.idle()
+    assert abs(reference - (p.yaw + p.angle)) < 0.01
+    assert math.hypot(p.pose()[0] - initial[0], p.pose()[1] - initial[1]) < 0.001
+    assert 'pending=0' in p.call('status')
+    assert 'Centered A recorded' not in p.text()
+    p.move('forward', distance=0.06, speed=0.03, frame='heading', label='P04_trial')
+    moved = (p.pose()[0] - initial[0], p.pose()[1] - initial[1])
+    along = moved[0] * math.cos(reference) + moved[1] * math.sin(reference)
+    cross = -moved[0] * math.sin(reference) + moved[1] * math.cos(reference)
+    assert 0.045 < along < 0.075 and abs(cross) < 0.01, (along, cross)
+    p.call('finish')
+    p.until(lambda: p.proc.poll() is not None, 3)
+    assert p.proc.returncode == 0
+
+
 def sequence(p):
     reference = p.idle()
     p.cli_status()
@@ -709,6 +733,7 @@ try:
             'segments.BD.dwell': '.02',
         },
     )
+    run_case('adopt_pose', adopt_pose, {'adopt_current_pose': 'true'})
     run_case('sequence', sequence)
     run_case('laser_policies', laser_policies)
     run_case('front_arrival', front_arrival)

@@ -25,6 +25,9 @@ void DistanceController::configure_route_steps(double forward_distance, double l
     throw std::invalid_argument("resume_position_tolerance must be finite and positive");
   manual_mode_ = declare_parameter<bool>("manual_mode", false);
   start_paused_ = declare_parameter<bool>("start_paused", false);
+  if (adopt_current_pose_ && !manual_mode_)
+    throw std::invalid_argument("adopt_current_pose requires manual_mode");
+  if (adopt_current_pose_) start_paused_ = true;
   front_body_extent_ = declare_parameter<double>("front_body_extent", -1.0);
   if (
     (start_paused_ && !manual_mode_) || !std::isfinite(front_body_extent_) ||

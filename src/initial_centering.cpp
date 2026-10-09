@@ -218,12 +218,13 @@ void DistanceController::record_route_origin()
   centering_complete_ = true;
   centering_settling_ = false;
   reset_pid();
-  RCLCPP_INFO(
-    get_logger(),
-    "Centered A recorded=(%.6f, %.6f), yaw=%.6f rad (%.3f deg), "
-    "left=%.3f right=%.3f rear=%.3f; starting route; heading_reference=%.6f rad",
-    route_x_, route_y_, yaw, yaw * 180.0 / 3.141592653589793, left_wall_, right_wall_, rear_wall_,
-    heading_reference_);
+  if (!adopt_current_pose_)
+    RCLCPP_INFO(
+      get_logger(),
+      "Centered A recorded=(%.6f, %.6f), yaw=%.6f rad (%.3f deg), "
+      "left=%.3f right=%.3f rear=%.3f; starting route; heading_reference=%.6f rad",
+      route_x_, route_y_, yaw, yaw * 180.0 / 3.141592653589793, left_wall_, right_wall_, rear_wall_,
+      heading_reference_);
   planned_x_ = route_x_;
   planned_y_ = route_y_;
   manual_waiting_ = manual_mode_ && start_paused_;

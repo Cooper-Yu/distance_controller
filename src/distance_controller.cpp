@@ -15,6 +15,9 @@
 DistanceController::DistanceController(int scene_number) : Node{"distance_controller"}
 {
   if (scene_number != 1 && scene_number != 2) throw std::invalid_argument("Scene must be 1 or 2");
+  adopt_current_pose_ = declare_parameter<bool>("adopt_current_pose", false);
+  if (adopt_current_pose_ && scene_number != 2)
+    throw std::invalid_argument("adopt_current_pose requires scene 2");
   heading_control_enabled_ = (scene_number == 2);
   configure_heading_control();
   base_command_watchdog_verified_ =
@@ -379,6 +382,8 @@ void DistanceController::on_timer()
   if (handle_ros_time_jump(current_time)) {
     return;
   }
+
+  if (handle_current_pose_start(current_time)) return;
 
   if (handle_centering_guard(now, should_log)) {
     return;

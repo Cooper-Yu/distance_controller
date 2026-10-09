@@ -543,3 +543,34 @@ remain pending. A final ROS message alone does not guarantee delivery.
 The right-wall fit RMS default is now 0.012 m, supported by the user's successful
 four-segment run with that override. This measurement tolerance is distinct from
 the 0.01 rad heading tolerance. The new recovery behavior still needs cloud tests.
+
+
+## Continue from an intermediate stopped pose
+
+After the previous velocity publisher has exited, start a new manual session:
+
+```bash
+ros2 run distance_controller distance_controller 2 --ros-args \
+  -p manual_mode:=true -p adopt_current_pose:=true -p max_speed:=0.03
+```
+
+This requires fresh stopped odometry continuously for alignment_settle_duration.
+No wall preparation or automatic AB motion occurs. Current yaw becomes the held
+heading and the route axes; pending configured segments are discarded. WAITING
+accepts manual steps. Scene 1 and non-manual adoption are rejected.
+
+```bash
+ros2 run distance_controller step status
+ros2 run distance_controller step forward 0.30 --speed 0.03 --frame heading --label P04_trial
+```
+
+The new history calls its origin A, but physically this can be P03. It does not
+restore the original A/B history or reset odom. `return_to A` now means this new
+session origin. Fixed-distance motion does not use laser stopping; inspect clearance
+and remeasure after completion. No physical robot was driven by the local tests.
+
+Verification: isolated no-scan fixture rejects adoption while measured linear speed
+is nonzero, remains stopped, captures a rotated pose, moves forward along its heading,
+then stops/exits. Existing manual sequence regression also passed. Build and GTest passed.
+The general colcon suite is not fully green: flake8/uncrustify style failures and
+xmllint timeout remain; the repository uses Ruff/clang-format conventions.
