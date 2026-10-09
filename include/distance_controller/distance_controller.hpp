@@ -598,6 +598,17 @@ private:
   double quaternion_to_yaw(const geometry_msgs::msg::Quaternion & q);
 
   /**
+   * @brief Report initialization measurements, errors and settling state at the log cadence.
+   * @par Initialization progress
+   * Called by handle_centering_guard() after accepting fresh scan data. Read pose from
+   * on_odom(), wall measurements from on_scan(), and alignment/positioning state from
+   * their handlers. Log meters, radians and configured thresholds without changing control.
+   * @return Nothing; progress is written to the ROS logger.
+   * @note Settling flags describe the preceding tick; pre-alignment heading uses the right wall.
+   */
+  void log_preparation_progress();
+
+  /**
    * @brief Print fixed route waypoints after initial centering records A.
    * @par Planned pose list
    * Read route_x_, route_y_, route_yaw_ and heading_reference_ captured by initial

@@ -123,5 +123,34 @@ bool DistanceController::handle_centering_guard(
     return true;
   }
   update_preparation_stage(now);
+  if (should_log) log_preparation_progress();
   return false;
+}
+
+void DistanceController::log_preparation_progress()
+{
+  const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+  const double lateral_error = (left_wall_ - right_wall_) * 0.5;
+  const double rear_error = rear_target_distance_ - rear_wall_;
+  const double yaw_error = initial_alignment_complete_ ? heading_error(yaw) : -right_wall_angle_;
+  RCLCPP_INFO(
+    get_logger(),
+    "Initialization progress: stage=%s | pose: x=%.6f y=%.6f yaw=%.6f rad | "
+    "left=%.3f right=%.3f rear=%.3f rear_target=%.3f m | "
+    "center_error=%.4f rear_error=%.4f tolerance=%.4f m | "
+    "heading_error=%.4f tolerance=%.4f rad heading_basis=%s | "
+    "position_ready=%s heading_ready=%s settling=%s required_hold=%.2f s",
+    preparation_stage_name(), last_odom_.pose.pose.position.x, last_odom_.pose.pose.position.y, yaw,
+    left_wall_, right_wall_, rear_wall_, rear_target_distance_, lateral_error, rear_error,
+    centering_tolerance_, yaw_error, heading_tolerance_,
+    initial_alignment_complete_ ? "held_odom_heading" : "right_wall",
+    std::abs(lateral_error) <= centering_tolerance_ && std::abs(rear_error) <= centering_tolerance_
+      ? "true"
+      : "false",
+    right_heading_valid_ && right_heading_stable_ && !initial_alignment_complete_
+      ? (std::abs(yaw_error) <= heading_tolerance_ ? "true" : "false")
+      : (initial_alignment_complete_ && std::abs(yaw_error) <= heading_tolerance_ ? "true"
+                                                                                  : "false"),
+    (initial_alignment_complete_ ? centering_settling_ : alignment_settling_) ? "true" : "false",
+    alignment_settle_duration_);
 }

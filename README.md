@@ -479,3 +479,10 @@ actual pose only after stopping and completing dwell. Feedback-dependent goals
 (front-wall arrival, side centering, or runtime-relative steps) stop the startup
 preview; their execution targets and actual endpoints are reported at runtime.
 The preview is informational and does not change route execution.
+
+Initialization also logs stage changes and throttled `Initialization progress`:
+current odom pose, left/right/rear distances, rear target, centering/rear/heading
+errors and tolerances, readiness flags and settling hold requirement. The heading
+basis changes from `right_wall` to `held_odom_heading` after alignment. Settling
+flags reflect the preceding tick. Invalid/missing scans and stage/total timeouts
+retain their explicit wait/fault messages; `Centered A recorded` marks completion.

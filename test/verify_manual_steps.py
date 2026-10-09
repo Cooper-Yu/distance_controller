@@ -500,6 +500,11 @@ def waypoint_logs(p):
     points = re.findall(r'Waypoint (\d+) (\w+): x=([-\d.]+) y=([-\d.]+) yaw=([-\d.]+)', text)
     goals = re.findall(r'Segment \d+/4 target=\(([-\d.]+), ([-\d.]+)\), yaw=([-\d.]+)', text)
     reached = re.findall(r'Reached (\w+) via', text)
+    assert 'Initialization progress: stage=' in text
+    assert 'center_error=' in text and 'rear_target=' in text
+    assert 'heading_basis=held_odom_heading' in text
+    assert 'required_hold=' in text
+    assert text.index('Initialization progress:') < text.index('Centered A recorded=')
     assert [point[1] for point in points] == ['A', 'B', 'C', 'B', 'A'], points
     assert reached == ['B', 'C', 'B', 'A'], reached
     assert [point[2:] for point in points[1:]] == goals, (points, goals)
