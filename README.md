@@ -2,7 +2,72 @@
 
 A ROS2 Humble planar distance controller for ROSBot XL. It uses odometry feedback, planar PID, speed and acceleration limits, and odom-to-body velocity conversion. Each segment ends with verified standstill and an extra dwell; the node stops and exits after the final segment unless manual continuation is enabled.
 
-The Task1 acceptance snapshot is Git tag `task1` (`e1a26a6`). The current working tree also contains the Task2 scene entry and the documented header/source refactor. Scene 2 contains four nominal corrected displacements; automatic hardware execution has not been validated.
+The Task1 acceptance snapshot is Git tag `task1` (`e1a26a6`), which remains unchanged. Scene 2 supports independently configured segments, manual continuation, completed-step history and sequential return. Current history/return features have local test coverage; their cloud/hardware acceptance remains pending.
+
+## Scene 2 quick start: independent segments
+
+Update and rebuild in the cloud workspace:
+
+```bash
+cd ~/ros2_ws/src/distance_controller
+git pull --ff-only origin master
+cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select distance_controller
+source install/setup.bash
+```
+
+Start with AB using the installed profile:
+
+```bash
+ros2 run distance_controller distance_controller 2 --ros-args \
+  --params-file "$(ros2 pkg prefix distance_controller)/share/distance_controller/config/segments.yaml" \
+  -p 'route:=[AB]'
+```
+
+The profile selects independent configuration and manual mode. AB is 0.93 m;
+BC/CB are 0.516780 m laterally, with heading_tolerance=0.01 rad. Each edge owns
+its displacement, speed, dwell and feedback policy. `route` selects order only.
+Do not combine this profile with forward_distance/lateral_distance overrides.
+Change an individual edge with, for example, `-p segments.AB.dx:=0.90`.
+
+Initialization aligns to the right wall, centers left/right, adjusts rear distance
+and records A. AB then executes and stops at B. Keep this controller terminal running.
+From a second terminal, source ROS and the same overlay, then inspect the state:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 run distance_controller step status
+ros2 run distance_controller step history
+```
+
+Once WAITING, choose one action and wait for completion before submitting another:
+
+| Command | Result |
+| --- | --- |
+| `ros2 run distance_controller step forward 0.10 --label D` | Explore a point 10 cm forward while holding heading |
+| `ros2 run distance_controller step backward 0.05` | Move backward 5 cm |
+| `ros2 run distance_controller step left 0.05` | Move left 5 cm |
+| `ros2 run distance_controller step right 0.05` | Move right 5 cm |
+| `ros2 run distance_controller step backtrack 1` | Return along one completed edge; 1 means a segment count, not meters |
+| `ros2 run distance_controller step return_to A` | Follow the active history chain back to A |
+| `ros2 run distance_controller step return_to --visit-id 1` | Select an exact historical visit when labels repeat |
+| `ros2 run distance_controller step resume` | Execute the next pending configured segment |
+| `ros2 run distance_controller step finish` | Exit from an accepted stopped WAITING state |
+| `ros2 run distance_controller step cancel` | Stop and latch a fault; restart required |
+
+An accepted return replaces pending configured segments. Return legs proceed in order
+with arrival/standstill/dwell checks, then enter WAITING at the selected destination.
+History exists only in the current process and odom reference; restart recovery and
+obstacle avoidance are not implemented. Waiting displacement beyond 0.02 m locks a
+stop instead of re-running A initialization at an intermediate point. Turn control
+remains reserved for Task3/4; default planar gains remain P=1.5, I=0, D=0.
+
+See [Independent segments and history return](docs/history_return.md) for visit IDs,
+return-policy conversion and bounds, and [Planar steps and manual exploration](docs/manual_steps.md)
+for frames and optional laser arrival. Commands are examples to select, not a script
+of consecutive unobserved robot motions.
 
 ## Layout and reading order
 
@@ -11,28 +76,53 @@ distance_controller/
 ├── README.md
 ├── CMakeLists.txt
 ├── package.xml
-├── include/distance_controller/distance_controller.hpp
-├── src/main.cpp
-├── src/distance_controller.cpp
-├── src/initial_centering.cpp
-├── src/right_wall_heading.cpp
+├── config/segments.yaml
+├── config/route_ab_bd.yaml
+├── srv/ExecuteStep.srv
+├── include/distance_controller/
+│   ├── distance_controller.hpp
+│   ├── route.hpp
+│   └── route_history.hpp
+├── src/
+│   ├── main.cpp
+│   ├── distance_controller.cpp
+│   ├── initial_centering.cpp
+│   ├── right_wall_heading.cpp
+│   ├── preparation_guard.cpp
+│   ├── route.cpp
+│   ├── route_execution.cpp
+│   ├── step_configuration.cpp
+│   ├── step_feedback.cpp
+│   ├── manual_steps.cpp
+│   ├── route_history.cpp
+│   └── history_control.cpp
 ├── docs/
 ├── test/
-└── tools/
+└── tools/step.py
 ```
 
 | File | Responsibility |
 | --- | --- |
 | `main.cpp` | Initialize ROS, parse the optional scene, construct the node, and spin serially |
 | `distance_controller.hpp` | Class declarations, interface documentation, state descriptions, and member defaults |
-| `distance_controller.cpp` | Feedback, timing, targets, PID, limiting, stopping, and route transitions |
+| `distance_controller.cpp` | Timer dispatch, odometry/time guards, PID, speed limits and heading control |
 | `right_wall_heading.cpp` | Startup right-wall line fitting and temporal consistency |
-| `initial_centering.cpp` | Initial scan validation, side distances, adjustment bounds, and centered A capture |
+| `initial_centering.cpp` | Scan windows, initial side/rear positioning and A capture |
+| `preparation_guard.cpp` | Initialization stage deadlines, scan validity and travel limits |
+| `route.hpp` / `route.cpp` | Motion descriptions, named-edge factories and validation |
+| `route_execution.cpp` | Frozen targets, per-tick execution, standstill/dwell and route advancement |
+| `step_configuration.cpp` | Independent/legacy startup configuration and per-edge parameters |
+| `step_feedback.cpp` | Selected odom/laser feedback, step time/travel bounds and front speed cap |
+| `manual_steps.cpp` | Service requests, WAITING state and endpoint logging |
+| `route_history.hpp` / `route_history.cpp` | Completed traversal audit, visit IDs and pure reverse-plan construction |
+| `history_control.cpp` | History/controller integration and continuation-position checks |
+| `config/segments.yaml` | Independent segment geometry and policies; route selects order |
+| `srv/ExecuteStep.srv` / `tools/step.py` | Typed request interface and installed command-line client |
 | <code>\ref build_cmake "CMakeLists.txt"</code> / <code>\ref build_package_xml "package.xml"</code> | Build targets and ROS dependencies |
 
 Read `main()`, then the class interface and state, then follow `on_timer()` into its helpers. This README is the package entry; no duplicate README is needed under `src/`.
 
-## Build and simulation
+## Task1 build and simulation
 
 Use ROS2 Humble with the ROSBot XL simulation dependencies already available:
 
@@ -63,9 +153,9 @@ ros2 run distance_controller distance_controller
 
 No scene argument selects scene 1, equivalent to an explicit `1`. Scene 1 defaults to simulation time and the ten-segment route. Both terminals need matching ROS communication settings; odometry and a simulation clock must be available.
 
-## Scene 2: laser-positioned A and adjustable distances
+## Scene 2 compatibility mode: shared distance parameters
 
-`DistanceController::select_waypoints()` configures forward 0.90 m, right 0.516780 m, left 0.516780 m, and backward 0.90 m.
+Without an independent profile, `segment_configuration=legacy` preserves the older shared-length interface. Its defaults are forward 0.90 m, right 0.516780 m, left 0.516780 m and backward 0.90 m. For new experiments, use the independent quick start above.
 
 Scene 2 reads `forward_distance` (default 0.90 m) and `lateral_distance` (default 0.516780 m) once at startup. Both must be finite and positive. These parameters define route lengths; changing them during execution does not rebuild the route.
 
@@ -367,13 +457,6 @@ The existing 68-line measure_wall_windows() warning is retained: it collects ind
 from one scan and publishes their validity. Generated ROSIDL serialization functions
 also exceed the size threshold; generated files are not edited to silence it.
 These tests do not certify cloud/hardware clearance or independent course acceptance.
-
-## Independent configuration and history return
-
-Use [Independent segments and history return](docs/history_return.md) for the primary
-YAML configuration and completed-route return commands. `config/segments.yaml` stores
-each edge independently; `route` selects order. The legacy distance parameters remain
-compatible without this profile. History is current-process only; no restart restoration.
 
 ## Manual continuation and per-segment feedback
 
