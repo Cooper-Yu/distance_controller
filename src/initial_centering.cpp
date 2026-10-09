@@ -221,8 +221,9 @@ bool DistanceController::handle_initial_centering(const rclcpp::Time & current_t
     reset_pid();
     RCLCPP_INFO(
       get_logger(),
-      "Centered A recorded=(%.6f, %.6f), left=%.3f right=%.3f rear=%.3f; starting route", route_x_,
-      route_y_, left_wall_, right_wall_, rear_wall_);
+      "Centered A recorded=(%.6f, %.6f), yaw=%.6f rad (%.3f deg), "
+      "left=%.3f right=%.3f rear=%.3f; starting route",
+      route_x_, route_y_, yaw, yaw * 180.0 / 3.141592653589793, left_wall_, right_wall_, rear_wall_);
   }
   return true;
 }
