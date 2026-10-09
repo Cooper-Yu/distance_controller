@@ -48,16 +48,12 @@ DistanceController::DistanceController(int scene_number) : Node{"distance_contro
   timer_ = create_wall_timer(std::chrono::milliseconds(50), [this]() { on_timer(); });
 
   cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>(cmd_topic, 10);
+  configure_centering();
 }
 
 void DistanceController::configure_heading_control()
 {
   if (!heading_control_enabled_) return;
-  start_x_ = declare_parameter<double>("start_x", -0.5966712675567971);
-  start_y_ = declare_parameter<double>("start_y", 0.6207941570417486);
-  if (!std::isfinite(start_x_) || !std::isfinite(start_y_)) {
-    throw std::invalid_argument("start_x and start_y must be finite odom coordinates");
-  }
   heading_gain_ = declare_parameter<double>("heading_gain", 1.0);
   max_yaw_rate_ = declare_parameter<double>("max_yaw_rate", 0.25);
   heading_tolerance_ = declare_parameter<double>("heading_tolerance", 0.02);
@@ -100,7 +96,7 @@ bool DistanceController::handle_initial_alignment(const rclcpp::Time & current_t
     alignment_settling_ = false;
     reset_pid();
     RCLCPP_INFO(
-      get_logger(), "Initial alignment complete: yaw=%.6f; approaching configured A next tick",
+      get_logger(), "Initial alignment complete: yaw=%.6f; starting laser centering next tick",
       yaw);
   }
   return true;
@@ -234,6 +230,7 @@ bool DistanceController::handle_ros_time_jump(const rclcpp::Time & current_time)
 
     if (ros_dt > 0.2) {
       alignment_settling_ = false;
+      centering_settling_ = false;
       if (segment_completed_) {
         dwell_start_time_ = current_time;
       }
@@ -333,7 +330,15 @@ void DistanceController::on_timer()
     return;
   }
 
+  if (handle_centering_guard(now, should_log)) {
+    return;
+  }
+
   if (handle_initial_alignment(current_time)) {
+    return;
+  }
+
+  if (handle_initial_centering(current_time)) {
     return;
   }
 
@@ -493,19 +498,11 @@ void DistanceController::initialize_segment_target()
   }
 
   if (!route_initialized_) {
-    route_x_ = heading_control_enabled_ ? start_x_ : last_odom_.pose.pose.position.x;
-    route_y_ = heading_control_enabled_ ? start_y_ : last_odom_.pose.pose.position.y;
+    route_x_ = last_odom_.pose.pose.position.x;
+    route_y_ = last_odom_.pose.pose.position.y;
     route_yaw_ =
       heading_control_enabled_ ? 0.0 : quaternion_to_yaw(last_odom_.pose.pose.orientation);
     route_initialized_ = true;
-  }
-
-  if (heading_control_enabled_ && !start_reached_) {
-    target_x_ = route_x_;
-    target_y_ = route_y_;
-    target_initialized_ = true;
-    RCLCPP_INFO(get_logger(), "Approaching fixed A target=(%.6f, %.6f)", target_x_, target_y_);
-    return;
   }
 
   double total_dx = 0.0;
@@ -627,14 +624,6 @@ void DistanceController::check_completion(double ex, double ey, const rclcpp::Ti
       settling_ = true;
       RCLCPP_INFO(get_logger(), "Entering SETTLING state");
     } else if ((current_time - settle_start_time_).seconds() >= 0.5) {
-      if (heading_control_enabled_ && !start_reached_) {
-        start_reached_ = true;
-        target_initialized_ = false;
-        settling_ = false;
-        reset_pid();
-        RCLCPP_INFO(get_logger(), "Fixed A reached and stopped; starting four-segment route");
-        return;
-      }
       segment_completed_ = true;
       dwell_start_time_ = current_time;
       RCLCPP_INFO(

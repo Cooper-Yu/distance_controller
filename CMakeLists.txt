@@ -11,10 +11,12 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 
-add_executable(distance_controller src/main.cpp src/distance_controller.cpp)
+add_executable(distance_controller src/main.cpp src/distance_controller.cpp src/initial_centering.cpp)
 target_include_directories(distance_controller PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 ament_target_dependencies(
@@ -23,6 +25,8 @@ ament_target_dependencies(
   geometry_msgs
   nav_msgs
   tf2
+  tf2_ros
+  sensor_msgs
 )
 
 install(

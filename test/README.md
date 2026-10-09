@@ -25,3 +25,11 @@ Cases observed: initial translation blocked until aligned/stopped; large injecte
 ## Fixed-start verification (2026-10-09)
 
 The existing code_lab now also provides verify_fixed_start_fixture.py, verify_fixed_start_parameters.py and analyze_fixed_start.py. They check a configured A different from initial placement, rotation before translation, simultaneous x/y approach, unchanged segment numbering, targets derived from configured A, final return, invalid-coordinate rejection and updated defaults. The three fixture cases and 16 parameter cases passed. verify_current_task2.bash exercised the default A/L/W in the local Gazebo adapter; analyze_heading_run.py and analyze_fixed_start.py checked telemetry and transition order. Evidence stays in the authoritative training verification record, not in generated HTML.
+
+## Initial laser centering (current)
+
+The Coach-owned verify_centering_fixture.py uses isolated domain 166, a synthetic parallel corridor, best-effort scans, odometry feedback and a static 180-degree mounting TF. Two full routes check centering signs, initial body-x zero, A capture and no recentering after route start. Eight failure cases check scan loss, invalid ranges, old stamps, missing frame/TF, absent scans, travel and time bounds. verify_centering_parameters.py rejects 24 invalid limits or obsolete start_x/start_y overrides. Existing fixed-start fixtures describe the historical version and are not current acceptance tests. Real scene-2 scan windows and rear-wall sensing remain pending; no hardware acceptance is claimed.
+
+## Side/rear initialization (current)
+
+verify_rear_fixture.py extends the isolated fixture with a rear wall, nonzero forward/backward placement errors, and simultaneous lateral errors. It asserts rotation before translation, the combined 0.03 m/s speed cap, correct correction signs, captured A near the geometric wall-based target, four-segment completion, and independence from scans after initialization. Twelve cases passed (two routes, eight existing faults, rear loss and rear too close). Side-only fixture descriptions above are historical; current initialization requires all three windows. No real hardware movement was performed by these tests.

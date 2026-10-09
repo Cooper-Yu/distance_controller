@@ -12,6 +12,9 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 
 /**
  * @brief Track a selected planar route using odometry and body-frame velocity commands.
@@ -39,9 +42,9 @@ public:
 
 private:
   /**
-   * @brief Declare and validate scene-2 fixed-start and heading parameters before ROS interfaces exist.
+   * @brief Declare and validate scene-2 heading parameters before ROS interfaces exist.
    * @par Configuration
-   * Called by DistanceController(); store startup overrides in start_x_/start_y_ and heading members. Start coordinates may be negative but must be finite.
+   * Called by DistanceController(); store startup overrides in heading members.
    * @throws std::invalid_argument For nonfinite, nonpositive, or inconsistent limits.
    * @note Scene 1 bypasses heading configuration and preserves its original behavior.
    */
@@ -52,11 +55,11 @@ private:
    * @par Initial alignment
    * Read last_odom_ from on_odom(); rotate only outside heading_tolerance_, otherwise
    * stop and require low measured speeds for alignment_settle_duration_. Mark
-   * initial_alignment_complete_ once; on_timer() targets configured A on the following tick; x/y approach follows with heading held.
+   * initial_alignment_complete_ once; on_timer() begins laser centering on the following tick.
    * @param[in] current_time Node time supplied by on_timer(); read elapsed settling time
    * and copy into alignment_settle_start_ when the interval begins. Input is unchanged.
    * @return True to end this tick; false when disabled or already completed.
-   * @note Publishes commands and resets PID through publish_heading_correction(). No centering.
+   * @note Publishes commands and resets PID through publish_heading_correction(). Centering follows through handle_initial_centering().
    */
   bool handle_initial_alignment(const rclcpp::Time & current_time);
 
@@ -65,7 +68,7 @@ private:
    * @par Heading error
    * Wrap target-minus-current error into [-pi, pi] before symmetric rate limiting.
    * @param[in] yaw Odom heading (rad), passed by publish_heading_correction() from
-   * last_odom_ or by compute_and_publish_command() from data.yaw; read only.
+   * last_odom_, by handle_initial_centering() from last_odom_, or by compute_and_publish_command() from data.yaw; read only.
    * @param[in] gain Positive gain (1/s), supplied from heading_gain_; scales error, unchanged.
    * @param[in] max_yaw_rate Positive cap (rad/s), supplied from max_yaw_rate_; bounds output, unchanged.
    * @return Angular command for the caller's cmd.angular.z; does not publish itself.
@@ -76,7 +79,7 @@ private:
   /**
    * @brief Publish rotation only and clear planar PID and command-ramp history.
    * @par Rotation without translation
-   * Used by handle_initial_alignment() and handle_heading_recovery().
+   * Used by handle_initial_alignment(), handle_initial_centering(), and handle_heading_recovery().
    * @param[in] yaw Current odom heading (rad) from the caller's feedback; read to
    * compute cmd.angular.z using heading_gain_ and max_yaw_rate_. No input is modified.
    * @note Publishes zero linear velocity; all unused Twist components remain zero.
@@ -97,14 +100,124 @@ private:
    */
   bool handle_heading_recovery(double yaw, double position_error);
 
+  /**
+   * @brief Configure initial laser side/rear positioning and create scene-2 scan/TF interfaces.
+   * @par Startup
+   * Called by DistanceController(); validate parameters before scan subscription creation.
+   * @throws std::invalid_argument For invalid limits or obsolete fixed-start overrides.
+   * @note SensorDataQoS accepts reliable and best-effort scan publishers; scene 1 bypasses.
+   */
+  void configure_centering();
+
+  /**
+   * @brief Estimate left/right/rear body-frame wall distances from one fresh scan.
+   * @par Scan input
+   * Transform scan points into base_frame_ using the latest fixed mounting TF, then
+   * select side/rear windows and validate finite coverage and median absolute deviation.
+   * @param[in] msg LaserScan supplied by the scan subscription; read ranges, angles,
+   * frame and stamp, without modifying the message. Write estimates into left_wall_/right_wall_/rear_wall_.
+   * @note Invalid scans clear scan_valid_; guard logic stops motion. No wall-direction estimate.
+   */
+  void on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg);
+
+  /**
+   * @brief Reduce a wall window to a robust horizontal wall distance.
+   * @param[in,out] points on_scan() supplies positive body-y or rearward body-x distances (m); read and
+   * reorder the caller's vector to calculate median and dispersion. Not used after this call.
+   * @param[in] samples on_scan() counts every ray in this window, including invalid ranges;
+   * read as the coverage denominator; caller value unchanged.
+   * @param[out] distance Write the median distance (m) to on_scan()'s left_wall_, right_wall_ or rear_wall_; valid only when true is returned.
+   * @return True for sufficient coverage, low dispersion and accepted wall distance.
+   * @note This assumes each window observes one nearby wall; it is not obstacle recognition.
+   */
+  bool estimate_side(std::vector<double> & points, std::size_t samples, double & distance) const;
+
+  /**
+   * @brief Stop initial adjustment when scan, travel or duration limits are violated.
+   * @param[in] now Steady-clock observation from on_timer(); read receipt age and
+   * initialization duration, copied to preparation_start_ on first entry.
+   * @param[in] should_log on_timer() supplies the log throttle decision; read only.
+   * @return True after publishing stop; false if disabled, complete, or ready to adjust.
+   * @note Starts preparation position tracking from last_odom_; latches faults after
+   * accepted scans become unavailable, or time/travel bounds are exceeded.
+   */
+  bool handle_centering_guard(const std::chrono::steady_clock::time_point & now, bool should_log);
+
+  /**
+   * @brief Position from side/rear walls while holding odom yaw zero, then capture A after standstill.
+   * @param[in] current_time Node time from on_timer(); read continuous settling duration
+   * and copy to centering_settle_start_ when settling begins; caller time unchanged.
+   * @return True to end this tick during preparation; false once complete or in scene 1.
+   * @note Reads on_scan() distances and on_odom() pose/twist. Publishes bounded body-x/body-y/yaw commands; on success writes route_x_/route_y_/route_yaw_ and
+   * route_initialized_. Controls rear distance only during preparation; does not perform route obstacle avoidance.
+   */
+  bool handle_initial_centering(const rclcpp::Time & current_time);
+
+  /// Scan-to-body transform cache; used only for the fixed laser mounting in scene 2.
+  std::unique_ptr<tf2_ros::Buffer> scan_tf_buffer_{};
+  /// Subscribes to TF and fills scan_tf_buffer_; owns its default TF listener thread.
+  std::shared_ptr<tf2_ros::TransformListener> scan_tf_listener_{};
+  /// Scene-2 filtered LaserScan input with sensor-data QoS.
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_{};
+  /// Body frame used for side-window selection and horizontal distance, normally base_link.
+  std::string base_frame_{"base_link"};
+  /// True after centered pose and standstill acceptance; disables initial scan gating thereafter.
+  bool centering_complete_{false};
+  /// True only when the latest scan passed transform, timestamp and window checks.
+  bool scan_valid_{false};
+  /// True after at least one valid scan; subsequent loss during preparation latches stop.
+  bool accepted_scan_{false};
+  /// Last accepted message timestamp in nanoseconds; rejects repeated or reversed scan stamps.
+  int64_t last_scan_stamp_ns_{0};
+  /// Steady receipt time of the latest accepted scan; valid after accepted_scan_.
+  std::chrono::steady_clock::time_point last_scan_time_{};
+  /// Estimated positive horizontal distances (m) from body origin to left and right walls.
+  double left_wall_{0.0};
+  /// Latest accepted right-wall horizontal distance from body origin (m).
+  double right_wall_{0.0};
+  /// Latest accepted rearward body-x distance from base_frame_ origin to rear wall (m).
+  double rear_wall_{0.0};
+  /// Desired rear-wall distance from body origin, not rear bumper clearance (m).
+  double rear_target_distance_{0.28};
+  /// Minimum accepted rear-wall distance from body origin (m); below it scan gating stops.
+  double rear_min_distance_{0.22};
+  /// Rear window half-width around body +/-pi (rad); narrower than side windows.
+  double rear_window_half_angle_{0.08726646259971647};
+  /// True while centered yaw and low measured velocities remain uninterrupted.
+  bool centering_settling_{false};
+  /// Node-clock beginning of centered standstill, valid while centering_settling_.
+  rclcpp::Time centering_settle_start_{};
+  /// True after first initial-adjustment guard entry records pose and steady start time.
+  bool preparation_started_{false};
+  /// Initial preparation odom position (m), used only to limit total displacement.
+  double preparation_x_{0.0};
+  /// Initial preparation odom y (m), paired with preparation_x_ for the travel bound.
+  double preparation_y_{0.0};
+  /// Steady-clock start of initial adjustment, independent of simulation pauses.
+  std::chrono::steady_clock::time_point preparation_start_{};
+  /// Proportional lateral offset gain (1/s); positive left-minus-right error commands left.
+  double centering_gain_{0.5};
+  /// Maximum initial combined planar command (m/s), additionally capped by max_speed_.
+  double centering_max_speed_{0.03};
+  /// Allowed center offset and rear-target error, meters.
+  double centering_tolerance_{0.01};
+  /// Side-window angular half-width around body +/-pi/2, radians.
+  double side_window_half_angle_{0.17453292519943295};
+  /// Valid horizontal wall-distance interval from body origin, meters.
+  double side_min_distance_{0.18};
+  /// Maximum accepted horizontal side-wall distance from body origin (m).
+  double side_max_distance_{1.5};
+  /// Maximum median absolute deviation of a side's body-y distances, meters.
+  double side_max_mad_{0.03};
+  /// Maximum scan receipt/stamp age during preparation, seconds.
+  double scan_timeout_{0.5};
+  /// Maximum preparation duration (steady seconds) and displacement from initial pose (m).
+  double preparation_timeout_{60.0};
+  /// Maximum preparation displacement from the first observed odom pose (m).
+  double preparation_max_travel_{0.20};
+
   /// Constructor sets true for scene 2 only; gates all new heading behavior.
   bool heading_control_enabled_{false};
-  /// Configured fixed A x coordinate (m, odom); copied into route_x_, never recaptured from arrival.
-  double start_x_{-0.5966712675567971};
-  /// Configured fixed A y coordinate (m, odom); copied into route_y_, never recaptured from arrival.
-  double start_y_{0.6207941570417486};
-  /// True after initial approach to A passes joint pose/standstill acceptance; remains true for the route.
-  bool start_reached_{false};
   /// True after initial yaw acceptance and standstill; latched until node restart.
   bool initial_alignment_complete_{false};
   /// True while initial yaw and measured speed acceptance remain uninterrupted.
@@ -258,7 +371,7 @@ private:
    *
    * @par Control tick
    * Check latched faults, feedback age, and node time before target initialization.
-   * Gate initial rotation before approaching configured A; start the four route segments only after A is accepted. In scene 2, recover heading and revoke drifted dwell before handling completion, settling, and PID timing.
+   * Gate initial rotation and laser centering before recording the current pose as A; then start the four route segments. In scene 2, recover heading and revoke drifted dwell before handling completion, settling, and PID timing.
    * Only routine logging is throttled; command calculation runs on each eligible tick.
    *
    * @note Mutates route and PID state through helpers, publishes velocity, and may shut down the ROS context at route completion. A wall timer continues firing when simulation time pauses.
@@ -329,9 +442,8 @@ private:
    *
    * @par Target setup
    * Called by on_timer() when target_initialized_ is false. Capture route_x_, route_y_,
-   * once from configured start_x_/start_y_ in scene 2 or last_odom_ in scene 1. Set route_yaw_
-   * to zero in scene 2 or measured yaw in scene 1. First target A until start_reached_,
-   * then sum segments through the current index and
+   * once from last_odom_ (after centering in scene 2). Set route_yaw_
+   * to zero in scene 2 or measured yaw in scene 1. Sum segments through the current index and
    * rotate the sum into odom and store target_x_, target_y_, and target_initialized_.
    *
    * @note An out-of-range index only logs and returns. Actual segment stopping error is not accumulated into later targets.
@@ -426,7 +538,7 @@ private:
    * @par Verify standstill
    * Require position error below 0.01 m, planar feedback speed below 0.01 m/s, and
    * absolute yaw rate below 0.02 rad/s for at least 0.5 node-clock seconds. Scene 2 also requires yaw error within heading_tolerance_.
-   * Start or reset settling_. Initial scene-2 arrival marks start_reached_, clears target/PID/settling, and leaves segment index unchanged; route arrivals set segment_completed_ and dwell_start_time_.
+   * Start or reset settling_. Route arrivals set segment_completed_ and dwell_start_time_; initial centering uses its own settling state.
    *
    * @param[in] ex Odom x position error (m) calculated and passed by on_timer(); read to test distance from the target without modifying the caller error.
    * @param[in] ey Odom y position error (m) calculated and passed by on_timer(); read to test distance from the target without modifying the caller error.
@@ -514,11 +626,11 @@ private:
   /// Previous node-clock observation, independent of PID execution, including settling/dwell.
   rclcpp::Time last_ros_time_{};
 
-  /// True after the fixed route frame is initialized: configured A/yaw zero in scene 2, initial feedback in scene 1.
+  /// True after the fixed route frame is initialized: centered feedback/yaw zero in scene 2, initial feedback in scene 1.
   bool route_initialized_{false};
-  /// Fixed route origin x in odom (m); copied from configured A in scene 2, valid after route_initialized_.
+  /// Fixed route origin x in odom (m); captured after centering in scene 2, valid after route_initialized_.
   double route_x_{0.0};
-  /// Fixed route origin y in odom (m); copied from configured A in scene 2, valid after route_initialized_.
+  /// Fixed route origin y in odom (m); captured after centering in scene 2, valid after route_initialized_.
   double route_y_{0.0};
   /// Fixed route heading in odom (rad): zero for scene 2, initial measured yaw for scene 1.
   double route_yaw_{0.0};
