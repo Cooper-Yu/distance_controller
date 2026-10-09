@@ -383,7 +383,7 @@ private:
   /// Positive symmetric angular command cap (rad/s); stops bypass limiting.
   double max_yaw_rate_{0.25};
   /// Absolute heading-error tolerance (rad), used at startup, during motion and at completion.
-  double heading_tolerance_{0.02};
+  double heading_tolerance_{0.01};
   /// Above this absolute yaw error (rad), translation pauses for rotation-only recovery.
   double translation_pause_angle_{0.15};
   /// Continuous initial standstill duration in node-clock seconds.

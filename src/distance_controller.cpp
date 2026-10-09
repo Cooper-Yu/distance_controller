@@ -64,7 +64,7 @@ void DistanceController::configure_heading_control()
   if (!heading_control_enabled_) return;
   heading_gain_ = declare_parameter<double>("heading_gain", 1.0);
   max_yaw_rate_ = declare_parameter<double>("max_yaw_rate", 0.25);
-  heading_tolerance_ = declare_parameter<double>("heading_tolerance", 0.02);
+  heading_tolerance_ = declare_parameter<double>("heading_tolerance", 0.01);
   translation_pause_angle_ = declare_parameter<double>("translation_pause_angle", 0.15);
   alignment_settle_duration_ = declare_parameter<double>("alignment_settle_duration", 0.5);
   if (

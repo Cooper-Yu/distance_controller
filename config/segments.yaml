@@ -1,5 +1,5 @@
 # Independent segment definitions; route selects their order.
-# Values preserve the last user trial, not a new hardware acceptance claim.
+# Distances and heading tolerance match program defaults; manual mode is explicit.
 /**:
   ros__parameters:
     segment_configuration: independent
@@ -9,14 +9,14 @@
     resume_position_tolerance: 0.02
     segments:
       AB:
-        dx: 0.93
+        dx: 0.90
         dy: 0.0
         speed: 0.10
         dwell: 1.0
         completion: position
         side_centering: false
         timeout: 60.0
-        max_travel: 1.18
+        max_travel: 1.15
       BC:
         dx: 0.0
         dy: -0.516780
@@ -36,14 +36,14 @@
         timeout: 60.0
         max_travel: 0.77
       BA:
-        dx: -0.93
+        dx: -0.90
         dy: 0.0
         speed: 0.10
         dwell: 1.0
         completion: position
         side_centering: false
         timeout: 60.0
-        max_travel: 1.18
+        max_travel: 1.15
       BD:
         dx: 0.20
         dy: 0.0

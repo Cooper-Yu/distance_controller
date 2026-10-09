@@ -18,7 +18,7 @@ Official grading and independent learner reconstruction are separate, pending
 checks. Manual history/return extensions have local tests; their cloud validation
 is not claimed by this four-segment acceptance.
 
-## Frozen default configuration
+## Current tag configuration (updated after the accepted run)
 
 | Setting | Accepted default |
 | --- | --- |
@@ -27,7 +27,7 @@ is not claimed by this four-segment acceptance.
 | Right / left distance | 0.516780 m |
 | Speed cap | 0.10 m/s |
 | Dwell per segment | 1.0 s |
-| Heading tolerance | 0.02 rad |
+| Heading tolerance | 0.01 rad |
 | Rear distance from base_link origin | 0.28 m |
 | Manual mode / simulation time | false / false |
 
@@ -36,11 +36,15 @@ centering and adjusting rear distance, then records A. Route goals are relative
 to that initialized origin and heading, not hard-coded absolute odom locations.
 The route uses position feedback and held heading; it is not general obstacle avoidance.
 
-`config/segments.yaml` is an optional independent-segment experiment profile:
-it uses 0.93 m forward distance, 0.01 rad heading tolerance, and manual mode.
-It is **not** automatically loaded by the accepted command. An earlier run with
-that profile and manual mode overridden to false also completed successfully;
-its measurements must not be substituted for the default run below.
+`config/segments.yaml` now uses the same 0.90 m forward distance and 0.01 rad
+heading tolerance. It still explicitly enables manual mode, unlike the course
+command. The AB/BD example also uses 0.90 m for AB.
+
+The user requested replacing the published task2 tag after this unification.
+The prior snapshot remains commit `735d329`. Its successful default run used
+0.90 m / 0.02 rad; the earlier YAML run used 0.93 m / 0.01 rad. The exact new
+0.90 m / 0.01 rad combination has not yet been revalidated on the real robot.
+The measurements below are historical evidence, not results of the new defaults.
 
 ## Observed default-run results
 
@@ -71,8 +75,8 @@ Evidence references in the local training record:
 ## Evaluation snapshot
 
 The annotated `task2` tag freezes this acceptance documentation and the existing
-controller implementation. This closeout changes documentation only; the
-controller code remains as in b487cf2. The historical `task1` tag is unchanged.
+controller implementation. This revision changes the heading default and YAML
+distances only; no control algorithm is rewritten. The historical `task1` tag is unchanged.
 
 Use a clean checkout/worktree of `task2` for evaluation, rebuild the package,
 and source that workspace before running the accepted command. Do not assume

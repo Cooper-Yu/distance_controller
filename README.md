@@ -10,14 +10,16 @@ The Task1 acceptance snapshot is Git tag `task1` (`e1a26a6`), which remains unch
 ros2 run distance_controller distance_controller 2
 ```
 
-The default four-segment route completed on the real robot on 2026-10-09;
+The previous default four-segment route completed on the real robot on 2026-10-09;
 the learner confirmed no wall contact and final stopping. The `task2` snapshot
-uses 0.90 m forward/backward, 0.516780 m lateral travel, and 0.02 rad heading
-tolerance. It runs automatically and exits after the final dwell. Official
+uses 0.90 m forward/backward, 0.516780 m lateral travel, and 0.01 rad heading
+tolerance after the requested configuration unification. This exact combination
+still needs real-robot revalidation. It runs automatically and exits after the final dwell. Official
 grading remains pending. See the [Task2 acceptance record](docs/task2_acceptance.md)
 for measured results, limitations and reproduction instructions.
 
-The independent YAML profile below is optional and has different test settings;
+The independent YAML profile below uses the same distances and heading tolerance,
+but enables manual mode;
 it is not required for the accepted course command.
 
 ## Scene 2 quick start: independent segments
@@ -41,7 +43,7 @@ ros2 run distance_controller distance_controller 2 --ros-args \
   -p 'route:=[AB]'
 ```
 
-The profile selects independent configuration and manual mode. AB is 0.93 m;
+The profile selects independent configuration and manual mode. AB is 0.90 m;
 BC/CB are 0.516780 m laterally, with heading_tolerance=0.01 rad. Each edge owns
 its displacement, speed, dwell and feedback policy. `route` selects order only.
 Do not combine this profile with forward_distance/lateral_distance overrides.
@@ -268,7 +270,7 @@ settling duration. Initial side/rear positioning follows. After center offset, r
 | --- | --- | --- |
 | `heading_gain` | 1.0 | Proportional yaw gain, 1/s |
 | `max_yaw_rate` | 0.25 | Symmetric angular speed cap, rad/s |
-| `heading_tolerance` | 0.02 | Absolute heading acceptance and command deadband, rad |
+| `heading_tolerance` | 0.01 | Absolute heading acceptance and command deadband, rad |
 | `translation_pause_angle` | 0.15 | Pause translation above this yaw error, rad |
 | `alignment_settle_duration` | 0.5 | Initial continuous standstill, node-clock seconds |
 
@@ -375,7 +377,7 @@ For the user's recent trial distances and heading tolerance (explicit overrides)
 
 ```bash
 ros2 run distance_controller distance_controller 2 --ros-args \
-  -p forward_distance:=0.93 -p lateral_distance:=0.516780 \
+  -p forward_distance:=0.90 -p lateral_distance:=0.516780 \
   -p heading_tolerance:=0.01
 ```
 
@@ -400,7 +402,7 @@ initial right-wall alignment and side/rear positioning.
 ```bash
 # A -> B, then stop and exit after dwell; recent user trial overrides.
 ros2 run distance_controller distance_controller 2 --ros-args \
-  -p forward_distance:=0.93 -p lateral_distance:=0.516780 \
+  -p forward_distance:=0.90 -p lateral_distance:=0.516780 \
   -p heading_tolerance:=0.01 -p 'route:=[AB]'
 # Substitute the route argument to choose another composition:
 # -p 'route:=[AB, BA]'
@@ -408,7 +410,7 @@ ros2 run distance_controller distance_controller 2 --ros-args \
 # -p 'route:=[AB, BC, CB, BA]'
 ```
 
-Package defaults remain L=0.90 m, W=0.516780 m and heading_tolerance=0.02 rad.
+Package defaults remain L=0.90 m, W=0.516780 m and heading_tolerance=0.01 rad.
 The example deliberately uses the latest user trial overrides. Shorter routes finish
 at their last named endpoint; they do not automatically return to A.
 
