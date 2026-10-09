@@ -59,17 +59,17 @@ ros2 run distance_controller distance_controller
 
 No scene argument selects scene 1, equivalent to an explicit `1`. Scene 1 defaults to simulation time and the ten-segment route. Both terminals need matching ROS communication settings; odometry and a simulation clock must be available.
 
-## Scene 2: nominal corrected displacements
+## Scene 2: fixed A and adjustable distances
 
-`DistanceController::select_waypoints()` configures forward 1.360566 m, right 0.766780 m, left 0.766780 m, and backward 1.360566 m.
+`DistanceController::select_waypoints()` configures forward 0.90 m, right 0.516780 m, left 0.516780 m, and backward 0.90 m.
 
-Scene 2 reads `forward_distance` (default 1.360566 m) and `lateral_distance` (default 0.766780 m) once at startup. Both must be finite and positive. These parameters define route lengths; changing them during execution does not rebuild the route.
+Scene 2 reads `forward_distance` (default 0.90 m) and `lateral_distance` (default 0.516780 m) once at startup. Both must be finite and positive. These parameters define route lengths; changing them during execution does not rebuild the route.
 
 - Units are meters; each row is a segment displacement in the fixed route frame (odom yaw zero for scene 2).
 - Positive x is route forward; positive y is route left. Enter `0.0` for an unused axis.
 - The four segments go from start to corner, corner to goal, back to corner, and back to start.
-- Defaults originate from the earlier manual geometry estimate. L and W are adjustable route lengths; live targets use the newly recorded A, not the old absolute A/B/C coordinates.
-- Scene 2 aligns to odom yaw zero before recording A and maintains that heading along the route. It does not center the robot or use laser clearance checks. Odom zero must be physically meaningful for the intended route; restarting odometry can change that reference.
+- Defaults use the distances selected during the user tests. L and W remain adjustable; all four targets use the configured fixed A, never the actual arrival residual.
+- Scene 2 first aligns to odom yaw zero, then approaches configured A with simultaneous x/y control while maintaining that heading. It does not center the robot or use laser clearance checks. Odom zero must be physically meaningful for the intended route; restarting odometry can change that reference.
 
 Once configuration and hardware operating conditions have been verified, the entry is:
 
@@ -108,7 +108,7 @@ ROS parameter overrides and topic remapping are supported. Pose is assumed to us
 
 Feedback timeout uses local steady-clock receipt time with a 0.5 s threshold. Before the first message, keep waiting at zero velocity. PID, settling, and dwell use node time. Feedback timeout or backwards node time latches a fault; an observation interval above 0.2 s resets timing-related state and stops the current tick.
 
-Stop commands bypass acceleration limiting and clear ramp history. There is no obstacle avoidance or target-heading controller. Publishing zero and verifying standstill are separate steps.
+Stop commands bypass acceleration limiting and clear ramp history. There is no obstacle avoidance; scene 2 holds odom yaw zero. Publishing zero and verifying standstill are separate steps.
 
 ## Documentation and initialization conventions
 
@@ -143,7 +143,7 @@ The check includes private members. HTML starts at `docs/generated/html/index.ht
 
 2026-10-09: the documented refactor and initialization changes build locally. Doxygen checks/HTML generation and whitespace checks passed. The historical function-size warning for `on_timer()` was reviewed as a coordination responsibility; its old line count included comments removed later.
 
-The current code completed all ten segments in the local WSL empty-world adapter: about 61.84 s, completion errors 7.652–8.114 mm, peak commanded speed 0.40 m/s, no controller warnings, and normal exit code 0 after stopping. Cloud and hardware were not revalidated in that run. `test/` still contains planning, not a complete automated behavior suite.
+The earlier refactor completed all ten segments in the local WSL empty-world adapter: about 61.84 s, completion errors 7.652–8.114 mm, peak commanded speed 0.40 m/s, no controller warnings, and normal exit code 0 after stopping. Cloud and hardware were not revalidated in that run. `test/` still contains planning, not a complete automated behavior suite.
 
 Official Task1 acceptance uses tag `task1`. Preserve working changes before switching versions, rebuild, and source the overlay: checking out source alone does not replace the installed executable.
 
@@ -152,7 +152,7 @@ Official Task1 acceptance uses tag `task1`. Preserve working changes before swit
 Only scene 2 enables heading control. Initial alignment publishes zero linear velocity and a
 bounded yaw rate toward odom yaw zero. The robot must then remain within heading tolerance,
 with measured planar speed below 0.01 m/s and yaw rate below 0.02 rad/s, for the configured
-settling duration. The next tick records A. Route axes remain at odom yaw zero, avoiding a
+settling duration. The next tick targets configured A. Simultaneous x/y control approaches A while holding yaw zero. After joint position, heading, and standstill acceptance for 0.5 seconds, the four segments begin without consuming a segment index. Route axes remain at odom yaw zero, avoiding a
 small residual alignment error rotating all four targets.
 
 | Startup parameter | Default | Meaning |
@@ -176,13 +176,28 @@ Example after validating the hardware operating conditions:
 
 ```bash
 ros2 run distance_controller distance_controller 2 --ros-args \
-  -p forward_distance:=1.361 -p lateral_distance:=0.767 \
+  -p forward_distance:=0.90 -p lateral_distance:=0.516780 \
   -p heading_gain:=1.0 -p max_yaw_rate:=0.25
 ```
 
 For a scene-2 local simulation, add `-p use_sim_time:=true`. Scene 1 and the existing `task1`
 tag retain their original acceptance boundary. Local tests do not certify the real course route.
 
-### Heading-version local verification (2026-10-09)
+### Historical heading-version verification (2026-10-09, before fixed A)
 
 Scene 2 completed 4/4 segments in the local Gazebo empty world using default distances and speed: 53.14 s, completion errors 7.708–8.778 mm, peak commanded speed 0.10 m/s, final yaw 0.001212 rad, final zero command and normal exit. The isolated odometry fixture also verified initial rotation without translation, injected heading recovery, interrupted dwell recovery, feedback timeout and invalid-data latching. Parameter and clock probes checked six invalid heading configurations, frozen time and backwards time. Scene 1 was rerun to verify the existing ten-segment route. These are local observations, not hardware or official acceptance. The 82-line on_timer coordination warning is retained after responsibility review; helper functions contain the new control policies.
+
+## Fixed A approach
+
+`start_x` defaults to -0.5966712675567971 m and `start_y` to 0.6207941570417486 m in odom. Both must be finite; negative coordinates are valid. These startup parameters are declared only for scene 2. Initial rotation precedes translation; x and y are then controlled together, with the same speed limits and heading recovery as the route.
+
+| Point | Odom x (m) | Odom y (m) |
+| --- | --- | --- |
+| A | -0.5966712676 | 0.6207941570 |
+| B = A + (L, 0) | 0.3033287324 | 0.6207941570 |
+| C = B + (0, -W) | 0.3033287324 | 0.1040141570 |
+
+The return targets are B and then A. Actual stopping errors do not redefine these points. The coordinates are reusable only while the original odom frame remains meaningful. Resetting or restarting odometry requires re-establishing that reference. Place the robot near A with a clear direct approach; simultaneous x/y control does not plan a collision-free path.
+### Fixed-start local verification (2026-10-09)
+
+The current fixed-start version completed initial A approach and 4/4 route segments in the local empty-world adapter: 50.29 s, segment acceptance errors 7.047–7.514 mm, final odom distance to configured A 7.521 mm, final yaw 0.001383 rad, maximum commanded planar speed 0.10 m/s, final zero command, and exit code 0. Log assertions checked all four absolute targets and that A acceptance preceded segment 1. Isolated fixtures verified simultaneous x/y approach, initial rotation gating, heading/dwell recovery and feedback faults; 16 parameter cases passed. This does not validate the real corridor or a reset odom reference.

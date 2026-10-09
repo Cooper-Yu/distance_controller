@@ -39,9 +39,9 @@ public:
 
 private:
   /**
-   * @brief Declare and validate scene-2 heading parameters before ROS interfaces exist.
+   * @brief Declare and validate scene-2 fixed-start and heading parameters before ROS interfaces exist.
    * @par Configuration
-   * Called by DistanceController(); store startup overrides in the heading members.
+   * Called by DistanceController(); store startup overrides in start_x_/start_y_ and heading members. Start coordinates may be negative but must be finite.
    * @throws std::invalid_argument For nonfinite, nonpositive, or inconsistent limits.
    * @note Scene 1 bypasses heading configuration and preserves its original behavior.
    */
@@ -52,7 +52,7 @@ private:
    * @par Initial alignment
    * Read last_odom_ from on_odom(); rotate only outside heading_tolerance_, otherwise
    * stop and require low measured speeds for alignment_settle_duration_. Mark
-   * initial_alignment_complete_ once; on_timer() captures A on the following tick.
+   * initial_alignment_complete_ once; on_timer() targets configured A on the following tick; x/y approach follows with heading held.
    * @param[in] current_time Node time supplied by on_timer(); read elapsed settling time
    * and copy into alignment_settle_start_ when the interval begins. Input is unchanged.
    * @return True to end this tick; false when disabled or already completed.
@@ -99,6 +99,12 @@ private:
 
   /// Constructor sets true for scene 2 only; gates all new heading behavior.
   bool heading_control_enabled_{false};
+  /// Configured fixed A x coordinate (m, odom); copied into route_x_, never recaptured from arrival.
+  double start_x_{-0.5966712675567971};
+  /// Configured fixed A y coordinate (m, odom); copied into route_y_, never recaptured from arrival.
+  double start_y_{0.6207941570417486};
+  /// True after initial approach to A passes joint pose/standstill acceptance; remains true for the route.
+  bool start_reached_{false};
   /// True after initial yaw acceptance and standstill; latched until node restart.
   bool initial_alignment_complete_{false};
   /// True while initial yaw and measured speed acceptance remain uninterrupted.
@@ -252,7 +258,7 @@ private:
    *
    * @par Control tick
    * Check latched faults, feedback age, and node time before target initialization.
-   * Gate initial alignment before capturing the route origin. In scene 2, recover heading and revoke drifted dwell before handling completion, settling, and PID timing.
+   * Gate initial rotation before approaching configured A; start the four route segments only after A is accepted. In scene 2, recover heading and revoke drifted dwell before handling completion, settling, and PID timing.
    * Only routine logging is throttled; command calculation runs on each eligible tick.
    *
    * @note Mutates route and PID state through helpers, publishes velocity, and may shut down the ROS context at route completion. A wall timer continues firing when simulation time pauses.
@@ -323,7 +329,9 @@ private:
    *
    * @par Target setup
    * Called by on_timer() when target_initialized_ is false. Capture route_x_, route_y_,
-   * once from last_odom_; set route_yaw_ to zero for scene 2 or measured yaw for scene 1. Sum segments through the current index, then
+   * once from configured start_x_/start_y_ in scene 2 or last_odom_ in scene 1. Set route_yaw_
+   * to zero in scene 2 or measured yaw in scene 1. First target A until start_reached_,
+   * then sum segments through the current index and
    * rotate the sum into odom and store target_x_, target_y_, and target_initialized_.
    *
    * @note An out-of-range index only logs and returns. Actual segment stopping error is not accumulated into later targets.
@@ -417,8 +425,8 @@ private:
    *
    * @par Verify standstill
    * Require position error below 0.01 m, planar feedback speed below 0.01 m/s, and
-   * absolute yaw rate below 0.02 rad/s for at least 0.5 node-clock seconds.
-   * Start or reset settling_; on completion set segment_completed_ and dwell_start_time_.
+   * absolute yaw rate below 0.02 rad/s for at least 0.5 node-clock seconds. Scene 2 also requires yaw error within heading_tolerance_.
+   * Start or reset settling_. Initial scene-2 arrival marks start_reached_, clears target/PID/settling, and leaves segment index unchanged; route arrivals set segment_completed_ and dwell_start_time_.
    *
    * @param[in] ex Odom x position error (m) calculated and passed by on_timer(); read to test distance from the target without modifying the caller error.
    * @param[in] ey Odom y position error (m) calculated and passed by on_timer(); read to test distance from the target without modifying the caller error.
@@ -506,11 +514,11 @@ private:
   /// Previous node-clock observation, independent of PID execution, including settling/dwell.
   rclcpp::Time last_ros_time_{};
 
-  /// True after the fixed route origin and heading are captured once from feedback.
+  /// True after the fixed route frame is initialized: configured A/yaw zero in scene 2, initial feedback in scene 1.
   bool route_initialized_{false};
-  /// Fixed route origin x in odom (m); captured after initial alignment in scene 2, valid after route_initialized_.
+  /// Fixed route origin x in odom (m); copied from configured A in scene 2, valid after route_initialized_.
   double route_x_{0.0};
-  /// Fixed route origin y in odom (m); captured after initial alignment in scene 2, valid after route_initialized_.
+  /// Fixed route origin y in odom (m); copied from configured A in scene 2, valid after route_initialized_.
   double route_y_{0.0};
   /// Fixed route heading in odom (rad): zero for scene 2, initial measured yaw for scene 1.
   double route_yaw_{0.0};
