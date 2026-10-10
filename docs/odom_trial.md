@@ -119,3 +119,19 @@ After updating/building, with the robot at physical P01:
 At odom>, use run_to P02, then next for each subsequent action; P03 arrival and
 P03 rotation are separate. run_to P09 executes the whole prefix if desired.
 There is no action after P09 in this configuration. Repeated next stays stopped.
+
+
+## Optional mapping readiness audit
+With the cloud robot environment connected, run `bash tools/nav2_preflight.bash`
+from this repository. No build is required. It only queries ROS interfaces and
+parameters; it never publishes commands or starts SLAM/Nav2. Reports are saved
+under ~/ros2_ws/nav2_preflight_TIMESTAMP_PID and packed into a .tar.gz archive.
+Each query is bounded to 8 seconds plus a 2-second shutdown allowance; a fully
+unavailable environment may take several minutes. Continuous tf2_echo normally
+ends by timeout; inspect its transform output, not exit status alone. Missing
+map before mapping/localization and unavailable optional packages are observations,
+not automatic failures. Nonstandard frame/node/topic names need follow-up from
+the inventory. This is a first inventory, not timing or navigation certification.
+The report includes robot_description for footprint/mount review, topic endpoints,
+TF probes and package locations. Ubuntu-22.04 bash syntax checked; cloud execution
+is pending. Existing PID Task6 acceptance remains separate from Nav2 exploration.
