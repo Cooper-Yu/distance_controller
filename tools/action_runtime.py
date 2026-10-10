@@ -230,6 +230,10 @@ class PlannedRunner(Runner):
 
     def prepare_start(self):
         """Run existing A-wall preparation once, finish it, then let Session capture its origin."""
+        print(
+            'Preparing start only; the action-session route will be shown after handoff.',
+            flush=True,
+        )
         try:
             self.start(
                 [

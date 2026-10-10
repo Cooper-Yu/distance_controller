@@ -51,8 +51,9 @@ DistanceController::DistanceController(int scene_number) : Node{"distance_contro
   const auto odom_topic = declare_parameter<std::string>("odom_topic", "/odometry/filtered");
   const auto cmd_topic = declare_parameter<std::string>("cmd_vel_topic", "/cmd_vel");
   RCLCPP_INFO(
-    get_logger(), "Scene %d: %zu segments, use_sim_time=%s, max_speed=%.3f", scene_number,
-    segments_.size(), get_parameter("use_sim_time").as_bool() ? "true" : "false", max_speed_);
+    get_logger(), "Scene %d: %zu configured segments, use_sim_time=%s, max_speed=%.3f",
+    scene_number, segments_.size(), get_parameter("use_sim_time").as_bool() ? "true" : "false",
+    max_speed_);
 
   odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
     odom_topic, 10, std::bind(&DistanceController::on_odom, this, std::placeholders::_1));

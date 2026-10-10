@@ -23,6 +23,10 @@ ros2 run distance_controller action_session --start prepare
 ros2 run distance_controller action_session --start current
 ```
 
+Preparation logs report alignment and centering only. The paused controller does not print
+its default Task2 waypoint table. After handoff, `Origin fixed` and the action plan
+show the session targets, followed by `route>`.
+
 The interactive prompt accepts:
 
 | Command | Effect |

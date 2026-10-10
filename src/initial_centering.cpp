@@ -222,8 +222,10 @@ void DistanceController::record_route_origin()
     RCLCPP_INFO(
       get_logger(),
       "Centered A recorded=(%.6f, %.6f), yaw=%.6f rad (%.3f deg), "
-      "left=%.3f right=%.3f rear=%.3f; starting route; heading_reference=%.6f rad",
+      "left=%.3f right=%.3f rear=%.3f; %s; heading_reference=%.6f rad",
       route_x_, route_y_, yaw, yaw * 180.0 / 3.141592653589793, left_wall_, right_wall_, rear_wall_,
+      manual_mode_ && start_paused_ ? "preparation complete; waiting for handoff or command"
+                                    : "starting route",
       heading_reference_);
   planned_x_ = route_x_;
   planned_y_ = route_y_;
@@ -231,7 +233,7 @@ void DistanceController::record_route_origin()
   waiting_pose_ = current_recorded_pose();
   waiting_pose_valid_ = true;
   history_.initialize(waiting_pose_);
-  log_route_waypoints();
+  if (!manual_waiting_ && !segments_.empty()) log_route_waypoints();
 }
 
 void DistanceController::measure_wall_windows(
