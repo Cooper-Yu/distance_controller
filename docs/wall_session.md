@@ -697,7 +697,7 @@ fresh recovery gate rejects it; do not keep retrying to select a favorable scan.
 ### Four-centimeter preparation at a fresh P03
 
 Ordinary adjust_turn accepts 0.005 through 0.04 m; escape_turn remains exactly 0.03 m.
-After two successful next actions from P01, use djust_turn 0.04 before starting
+After two successful next actions from P01, use adjust_turn 0.04 before starting
 the P03 turn. This reserves the pending turn without rotating. The fixed 4 cm
 target survives checkpoint restoration; repeats do not add distance. Existing
 2 cm obstacle guards, 20 s budget, 6 cm travel cap, 3 mm endpoint tolerance and
