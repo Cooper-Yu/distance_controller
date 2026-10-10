@@ -20,7 +20,7 @@ class OdomPath(unittest.TestCase):
     def test_rotated_origin_and_downstream_edit(self):
         route = compile_path(Pose(10, 20, math.pi / 2), self.data)
         end = route[-1]['points'][-1]
-        self.assertAlmostEqual(end.x, 10.45)
+        self.assertAlmostEqual(end.x, 10.48)
         self.assertAlmostEqual(end.y, 21.403)
         self.data['segments'][0]['offsets'][0][0] += 0.1
         changed = compile_path(Pose(10, 20, math.pi / 2), self.data)[-1]['points'][-1]

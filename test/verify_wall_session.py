@@ -235,7 +235,7 @@ try:
             'odom_p01_p05', data, 'next\nnext\nnext\nnext\nnext\nstatus\nquit\n', stale=True
         )
         assert sum(e['event'] == 'completed' for e in events) == 5, log[-5000:]
-        assert abs(pose[0] - 1.403) < 0.02 and abs(pose[1] + 0.45) < 0.02, pose
+        assert abs(pose[0] - 1.403) < 0.02 and abs(pose[1] + 0.48) < 0.02, pose
         assert 'Next action=6, partial=False' in log, log[-2000:]
         os.environ['ODOM_TRIAL_STALE'] = '1'
         events, log = run('odom_stale', data, 'next\nquit\n')

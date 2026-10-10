@@ -10,7 +10,10 @@ each action; Ctrl+C stops. Keep teleop and other cmd_vel publishers stopped.
 | P02-P03 | forward .59 m, then forward .20 m + right .04 m |
 | P03 turn | clockwise 90 degrees |
 | P03-P04 | forward .41 m |
-| P04-P05 | right .287 m |
+| P04-P05 | forward .03 m + right .287 m |
+
+P05 includes a user-requested 3 cm forward correction, interpolated together with
+the right translation; its heading stays unchanged. Physical validation is pending.
 
 The .41 m candidate combines observed .382 m approach and .028 m adjustment.
 Lengths use previous nominal/observed evidence, rounded deliberately. Accumulated
