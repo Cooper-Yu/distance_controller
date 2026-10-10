@@ -10,6 +10,9 @@ from wall_policy import clamp
 
 def adjust_session(session, distance, escape=False):
     """Move right once at a fixed target; explicit escape also permits a partial turn."""
+    if not math.isfinite(distance) or not 0.005 <= distance <= 0.04:
+        raise ValueError('Right adjustment must be within [.005,.04] m')
+    claim_pending_turn(session, escape)
     record = session.partial
     if (
         record is None
@@ -19,8 +22,6 @@ def adjust_session(session, distance, escape=False):
         or record.get('resume_unavailable')
     ):
         raise ValueError('adjust_turn requires an incomplete outward turn')
-    if not math.isfinite(distance) or not 0.005 <= distance <= 0.03:
-        raise ValueError('Right adjustment must be within [.005,.03] m')
     if escape and abs(distance - 0.03) > 1e-9:
         raise ValueError('escape_turn requires exactly 0.03 m right')
     if record.get('turn_rewind') and not record['turn_rewind']['done']:
@@ -233,3 +234,19 @@ def run_rewind(runner, target):
         runner.turn_guard = False
         runner.stop_owned()
         runner.child = None
+
+
+def claim_pending_turn(session, escape):
+    """Reserve a pending turn for explicit preparation without starting rotation."""
+    if not escape and session.partial is None and session.cursor < len(session.steps):
+        step = session.steps[session.cursor]
+        if step.kind == 'turn':
+            actual = session.check_location()
+            session.partial = {
+                'index': session.cursor,
+                'revision': session.revision,
+                'step': asdict(step),
+                'start': asdict(actual),
+                'target': asdict(session.goals[session.cursor]),
+                'reference_before': session.backend.reference,
+            }

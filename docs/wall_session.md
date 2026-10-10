@@ -558,7 +558,7 @@ proves the current robot is aligned. No obstacle points or safety margins are re
 
 ## Explicit clearance adjustment before a blocked turn
 
-For a stopped, incomplete outward turn that has not yet changed heading:
+For a stopped pending turn, or an incomplete outward turn that has not yet changed heading:
 
 ```text
 adjust_turn 0.02
@@ -693,3 +693,14 @@ clearance evidence. The supplied P03 stationary scan replay had 26/40 reverse-sw
 samples below 2 cm and none reaching 2.5 cm (assumed pre-turn yaw -0.011425 rad).
 Those old scans do not authorize motion: inspect persistent near returns if the
 fresh recovery gate rejects it; do not keep retrying to select a favorable scan.
+
+### Four-centimeter preparation at a fresh P03
+
+Ordinary adjust_turn accepts 0.005 through 0.04 m; escape_turn remains exactly 0.03 m.
+After two successful next actions from P01, use djust_turn 0.04 before starting
+the P03 turn. This reserves the pending turn without rotating. The fixed 4 cm
+target survives checkpoint restoration; repeats do not add distance. Existing
+2 cm obstacle guards, 20 s budget, 6 cm travel cap, 3 mm endpoint tolerance and
+0.01 m/s speed cap remain. Only use resume after the adjustment and sweep check
+succeed. Existing adjustments remain fixed: do not replace a saved 2 cm target
+with 4 cm. This is a candidate placement, not verified real P03 clearance.

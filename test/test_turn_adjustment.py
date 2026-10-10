@@ -99,7 +99,7 @@ class Adjustment(unittest.TestCase):
 
     def test_bounds_and_started_turn(self):
         s = self.setup_session()
-        for value in (0, 0.031, float('nan')):
+        for value in (0, 0.041, float('nan')):
             with self.assertRaises(ValueError):
                 s.adjust_turn(value)
         self.pose = Pose(0, 0, 0.04)
@@ -115,3 +115,30 @@ class Adjustment(unittest.TestCase):
         velocity, _ = adjustment_command(Pose(0, 0, 0), Pose(0.02, -0.02, 0.1))
         self.assertEqual(velocity, (0, 0, 0.08))
         self.assertTrue(adjustment_command(Pose(0, -0.019, 0), Pose(0, -0.02, 0))[1])
+
+    def test_four_cm_before_pending_turn_and_repeat_after_restore(self):
+        s = self.setup_session()
+        s.partial = None
+        s.backend.reference = 0.10
+
+        def move(backend, state):
+            self.pose = Pose(**state['target'])
+            state.update(done=True, path_m=0.04)
+
+        with patch('turn_adjustment.run_adjustment', side_effect=move) as motion:
+            s.adjust_turn(0.04)
+            # JSON round-trip mirrors persistence of the fixed target.
+            s.partial = json.loads(json.dumps(s.partial))
+            s.adjust_turn(0.04)
+            self.assertEqual(motion.call_count, 1)
+        self.assertEqual(self.pose, Pose(0, -0.04, 0))
+        self.assertEqual(s.cursor, 0)
+        self.assertAlmostEqual(s.partial['target']['yaw'], -math.pi / 2)
+        validate_records({'active': [], 'partial': s.partial}, s.steps)
+        with self.assertRaises(ValueError):
+            s.adjust_turn(0.02)
+
+    def test_escape_limit_remains_three_cm(self):
+        s = self.setup_session()
+        with self.assertRaisesRegex(ValueError, 'exactly 0.03'):
+            s.escape_turn(0.04)

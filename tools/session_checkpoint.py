@@ -94,11 +94,11 @@ def validate_adjustment(record, key='turn_adjustment'):
     if (
         record['step']['kind'] != 'turn'
         or not math.isfinite(distance)
-        or not 0.005 <= distance <= 0.03
+        or not 0.005 <= distance <= 0.04
         or type(state['done']) is not bool
         or not math.isfinite(state['path_m'])
         or state['path_m'] < 0
-        or errors(origin, target)[0] > 0.031
+        or errors(origin, target)[0] > 0.041
         or abs(target.yaw - origin.yaw) > 1e-6
     ):
         raise ValueError('Invalid turn adjustment checkpoint')

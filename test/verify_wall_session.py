@@ -220,6 +220,26 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'turn_adjust_four':
+        events, log = run(
+            'four_cm', [row('turn', 'turn', -90)], 'adjust_turn 0.04\nadjust_turn 0.04\nquit\n'
+        )
+        assert 'TURN_CHECK passed on fresh scan' in log, log[-4000:]
+        assert -0.043 < pose[1] < -0.036 and abs(pose[2]) < 0.01, pose
+        assert not any(e['event'] == 'completed' for e in events)
+        assert all(math.hypot(v[0], v[1]) <= 0.010001 for _, v in command_samples)
+        saved = next((OUT / 'four_cm').glob('*.checkpoint.json'))
+        old_pose = pose[:]
+        run(
+            'four_cm_restored',
+            [row('turn', 'turn', -90)],
+            'SAME_ODOM\nadjust_turn 0.04\nquit\n',
+            resume=saved,
+        )
+        assert pose == old_pose, (pose, old_pose)
+        assert max(abs(v) for v in velocity) < 1e-6
+        print('PASS fixed 4cm with restart', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'turn_rewind':
         rows = [row('turn', 'turn', -90)]
         run('rewind_seed', rows, 'quit\n')
