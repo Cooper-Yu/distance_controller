@@ -118,5 +118,9 @@ class FrontAdjustment(unittest.TestCase):
             run_adjustment(backend, self.session.steps[0], state)
         self.assertAlmostEqual(state['path_m'], 0.035)
         self.assertEqual(backend.max_speed, 0.06)
+        self.assertEqual(backend.resume_path, 0.0)
+        # A subsequent translation adds measured travel in the same process.
+        backend.resume_path += 0.001
+        self.assertAlmostEqual(backend.resume_path, 0.001)
         self.assertIsNone(backend.resume_origin)
         self.assertIsNone(backend.endpoint_adjustment_origin)

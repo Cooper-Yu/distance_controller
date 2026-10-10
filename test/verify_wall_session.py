@@ -222,6 +222,19 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'front_same_process':
+        rows = [
+            row('p04', 'forward', 0.2, follow='left', stop='front'),
+            row('p05', 'right', 0.2, stop='right'),
+        ]
+        rows[0]['wall']['stop_clearance'] = 0.12
+        rows[1]['wall']['right_front_window'] = True
+        events, log = run('front_same_process', rows, 'next\nadjust_front 0.08\nnext\nquit\n')
+        assert 'FRONT_ADJUSTMENT completed' in log, log[-6000:]
+        assert sum(e['event'] == 'completed' for e in events) == 2, log[-6000:]
+        assert abs(pose[0] - 0.30) < 0.015 and abs(pose[1] + 0.20) < 0.015, pose
+        print('PASS same-process adjustment then next translation', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'front_adjust_fault':
         rows = [
             row('p04', 'forward', 0.2, follow='left', stop='front'),

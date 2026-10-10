@@ -37,3 +37,17 @@ obstacle stop x=.276617575, pending/next blocked, checkpoint retry x=.290552858.
 Unit cases additionally reject biased/rough/too-close windows, too few valid
 fits, duplicate stamps, moving feedback, stale feedback and raw guard failures.
 Final full unittest discovery: 162 tests pass. No real hardware run.
+
+
+## 2026-10-10 same-process next crash repair
+Cloud action5 crashed before its first velocity command: path += float received
+None because front_adjustment restored an absent resume_path as None. Restore the
+numeric default 0.0 instead. Previous restart-before-next fixture masked this
+same-process state leak; it was not a wall-fit or obstacle rejection.
+
+WSL Ubuntu-22.04/Humble: Ruff, 162 unittest tests, colcon build pass.
+WALL_CASE=front_same_process WALL_SCAN_PERIOD=.1 ROS_DOMAIN_ID=181
+ROS_LOCALHOST_ONLY=1 timeout 60 python3 test/verify_wall_session.py: pass.
+Single process next -> adjust_front .08 -> next completed both route actions.
+Final pose (.290098949,-.192176883,0); zero final command asserted by fixture.
+Log /tmp/wall_session_test/1791631595122161099. Real passage remains unverified.

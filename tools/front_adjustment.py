@@ -74,7 +74,7 @@ def run_adjustment(runner, step, state):
     target = Pose(**state['original_target'])
     origin = Pose(**state['origin'])
     old = {
-        key: getattr(runner, key, None)
+        key: getattr(runner, key, 0.0 if key == 'resume_path' else None)
         for key in ('max_speed', 'resume_origin', 'resume_path', 'endpoint_adjustment_origin')
     }
     runner.max_speed = min(runner.max_speed, 0.02)
