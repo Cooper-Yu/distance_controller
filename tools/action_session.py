@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive one-origin route editor/executor; current-process history only."""
+"""Interactive one-origin route editor/executor with verified stopped checkpoints."""
 
 import argparse
 import json
@@ -10,7 +10,8 @@ import shlex
 import signal
 import time
 
-from action_plan import Pose, Session, load_steps, reverse_steps, targets
+from action_plan import Pose, Session, Step, load_steps, reverse_steps, targets
+from session_checkpoint import read_checkpoint, write_checkpoint, restore_checkpoint
 
 
 def read_route(path):
@@ -99,6 +100,13 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
     verb = words[0]
     if verb == 'next' and len(words) == 1:
         print('Reached:', session.next())
+    elif verb == 'resume' and len(words) == 1:
+        if input('Inspect stopped pose and path. Type RESUME: ').strip() == 'RESUME':
+            print('Reached:', session.resume())
+    elif verb == 'checkpoint' and len(words) == 2:
+        session.check_location()
+        write_checkpoint(words[1], session)
+        print('Stopped checkpoint saved:', words[1])
     elif verb == 'run' and len(words) == 1:
         if any(s.wall for s in session.steps):
             raise ValueError('Wall route is under commissioning: use next one action at a time')
@@ -135,12 +143,37 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
         session.emit('measurement', {})
     else:
         print(
-            'next | run | back | set INDEX METERS_OR_DEGREES | load FILE | save FILE | '
+            'next | resume | checkpoint FILE | run | back | set INDEX METERS_OR_DEGREES | load FILE | save FILE | '
             'policy INDEX follow_clearance|stop_clearance METERS_OR_auto | policy INDEX follow_offset|offset|max_travel VALUE | plan | status | history | measure | quit'
         )
 
 
-def run_session(steps, prepare, wall_speed=0.06, alignment_wall='right'):
+def session_loop(session, backend, checkpoint_path):
+    """Persist stopped boundaries; invalidate autosave before each operator action."""
+    while True:
+        try:
+            words = shlex.split(input('route> '))
+            if not words:
+                continue
+            if words == ['quit']:
+                break
+            write_checkpoint(checkpoint_path, session, usable=False)
+            command(session, words)
+        except (ValueError, RuntimeError, OSError, KeyError) as error:
+            print(f'STOPPED/REJECTED: {error}', flush=True)
+        except KeyboardInterrupt:
+            backend.cancel_requested = False
+            print(
+                'Stopped. Inspect status/history; back recovers an incomplete action.',
+                flush=True,
+            )
+        except EOFError:
+            break
+        finally:
+            write_checkpoint(checkpoint_path, session)
+
+
+def run_session(steps, prepare, wall_speed=0.06, alignment_wall='right', recovery=None):
     """Capture one origin after optional wall preparation and retain it until exit."""
     import fcntl
     from action_runtime import PlannedRunner
@@ -159,10 +192,19 @@ def run_session(steps, prepare, wall_speed=0.06, alignment_wall='right'):
         previous_handler = signal.signal(signal.SIGINT, lambda *_: backend.request_cancel())
         try:
             backend.exclusive()
+            if recovery is not None:
+                if recovery.get('legacy_audit'):
+                    print('Legacy audit: no saved odom epoch; partial actions allow back only.')
+                print('Recovery requires unchanged odom and no manual relocation; no motion yet.')
+                if input('Confirm continuity: type SAME_ODOM: ').strip() != 'SAME_ODOM':
+                    raise RuntimeError('Recovery continuity not confirmed')
             if prepare:
                 backend.prepare_start()
             origin = backend.pose()
-            if wall_mode:
+            if recovery is not None:
+                session = restore_checkpoint(recovery, backend, journal.emit)
+                origin = session.origin
+            elif wall_mode:
                 backend.capture_reference('left', origin.yaw)
                 session = WallSession(origin, steps, backend, journal.emit)
                 journal.emit(
@@ -172,26 +214,12 @@ def run_session(steps, prepare, wall_speed=0.06, alignment_wall='right'):
             else:
                 session = Session(origin, steps, backend, journal.emit)
             print(f'Origin fixed: {origin}; audit: {journal.path.resolve()}', flush=True)
-            show(steps, session.goals)
+            show(steps, session.goals, session.cursor)
+            checkpoint_path = journal.path.with_suffix('.checkpoint.json')
+            write_checkpoint(checkpoint_path, session)
+            print(f'Auto-checkpoint: {checkpoint_path.resolve()}', flush=True)
             print('WAITING. next executes one action; help lists commands.', flush=True)
-            while True:
-                try:
-                    words = shlex.split(input('route> '))
-                    if not words:
-                        continue
-                    if words == ['quit']:
-                        break
-                    command(session, words)
-                except (ValueError, RuntimeError, OSError, KeyError) as error:
-                    print(f'STOPPED/REJECTED: {error}', flush=True)
-                except KeyboardInterrupt:
-                    backend.cancel_requested = False
-                    print(
-                        'Stopped. Inspect status/history; back recovers an incomplete action.',
-                        flush=True,
-                    )
-                except EOFError:
-                    break
+            session_loop(session, backend, checkpoint_path)
         finally:
             backend.stop_owned()
             backend.close(False)
@@ -217,6 +245,9 @@ def main():
         default=None,
         help='Heading wall for wall-guided preparation only; default right. Following walls stay per-action.',
     )
+    parser.add_argument(
+        '--resume', type=Path, help='Restore a stopped checkpoint without preparation'
+    )
     parser.add_argument('--route', type=Path, help='JSON action definitions')
     parser.add_argument(
         '--start',
@@ -227,6 +258,21 @@ def main():
         '--reverse', action='store_true', help='Inverse actions from the final pose'
     )
     args = parser.parse_args()
+    if args.resume is not None:
+        if (
+            args.start
+            or args.route
+            or args.reverse
+            or args.alignment_wall
+            or args.wall_speed is not None
+        ):
+            parser.error(
+                '--resume uses saved route/settings; do not combine with start/route overrides'
+            )
+        data = read_checkpoint(args.resume)
+        return run_session(
+            [Step(**row) for row in data['steps']], False, data['wall_speed'], recovery=data
+        )
     if args.reverse and args.start == 'prepare':
         parser.error('Reverse starts at the final pose; do not run A preparation')
     if args.route is None:

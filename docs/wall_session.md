@@ -296,3 +296,48 @@ A zero-command check occurs during recovery/settling and does not subtract
 measured speed allowances. Measured speeds are recorded only as context for this
 branch. Full transformed returns are retained in the failure audit. No points
 are discarded and the 2 cm threshold is unchanged.
+
+### Resume at a stopped waypoint after updating code
+
+The CLI prints an `Auto-checkpoint: ...checkpoint.json` path and atomically updates
+it after each operator command. `checkpoint FILE` explicitly saves a stopped
+snapshot (distinct from `save FILE`, which still exports route definitions only).
+Before a command the automatic file is marked unusable; an abrupt crash during
+motion therefore cannot silently restore an earlier completed state.
+
+Exit the old session before starting another controller:
+
+```bash
+ros2 run distance_controller action_session --resume /absolute/path/session.checkpoint.json
+```
+
+Confirm `SAME_ODOM` only if the odometry system was not reset and the robot was not
+manually relocated. Fresh stopped feedback, unchanged frame, nondecreasing stamp,
+position within 3 cm and heading within 0.05 rad are required. These checks cannot
+prove continuity after every possible odom reset. A reset requires establishing a
+new reference; there is no force/automatic coordinate rebase. Recovery skips P01
+preparation and wall-reference recapture and enters WAITING without motion.
+Continuous yaw turns are restored across the +/-pi boundary.
+
+- Completed action: `next` executes the saved next action.
+- Interrupted outward action: `resume`, then `RESUME`, preserves the original
+  target, translation origin and cumulative path limit. Wall-stop actions retain
+  their wall policies; they still require valid live scans.
+- `back`, then `BACK`, returns to the recorded actual start. A failed return must
+  finish returning before outward work resumes. Inspect the path before motion.
+- Completed history, route edits, clearance policies and carried reference survive
+  restart. Invalid/unknown-stop snapshots refuse recovery.
+
+For existing pre-checkpoint sessions, `--resume` also accepts a stopped `.jsonl`
+audit. It replays the recorded route/history/reference and checks the latest stop
+against current pose. Legacy audits lack frame/stamp epoch evidence, so operator
+continuity confirmation is essential. Legacy interrupted actions allow `back`
+only; their missing cumulative travel budget is never guessed. Truncated/in-flight
+or unknown-stop audits are rejected. Do not restart the entire route at the current
+position using `--start current` as a substitute for recovery.
+
+Local verification: `test/test_session_checkpoint.py` and
+`WALL_CASE=checkpoint python3 test/verify_wall_session.py` cover checkpoint
+round-trips, mismatched pose/frame/time, busy files, yaw wrapping, legacy migration,
+and real ROS process restart for completed and interrupted translations in the
+synthetic scan/odometry fixture. This does not certify the real maze or hardware.

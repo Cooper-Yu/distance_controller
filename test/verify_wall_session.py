@@ -119,8 +119,13 @@ def row(name, kind, value, follow='none', stop='distance', offset=0.0, bound=0.7
     )
 
 
-def run(name, rows, commands, prepare=False, stale=False, front=0.55):
-    pose[:] = [float(os.getenv('WALL_START_X', '0')), 0.0, float(os.getenv('WALL_START_YAW', '0'))]
+def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=None):
+    if resume is None:
+        pose[:] = [
+            float(os.getenv('WALL_START_X', '0')),
+            0.0,
+            float(os.getenv('WALL_START_YAW', '0')),
+        ]
     velocity[:] = [0.0, 0.0, 0.0]
     directory = OUT / name
     directory.mkdir()
@@ -131,10 +136,11 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55):
             [
                 'python3',
                 str(ROOT / 'tools/action_session.py'),
-                '--route',
-                str(config),
-                '--start',
-                'prepare' if prepare else 'current',
+                *(
+                    ['--resume', str(resume)]
+                    if resume
+                    else ['--route', str(config), '--start', 'prepare' if prepare else 'current']
+                ),
             ],
             stdin=subprocess.PIPE,
             stdout=log,
@@ -165,6 +171,26 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55):
 
 
 try:
+    if os.getenv('WALL_CASE') == 'checkpoint':
+        rows = [row('one', 'forward', 0.08, 'left'), row('two', 'forward', 0.06, 'left')]
+        run('completed_save', rows, 'next\nquit\n')
+        saved = next((OUT / 'completed_save').glob('*.checkpoint.json'))
+        events, log = run('completed_restore', rows, 'SAME_ODOM\nnext\nquit\n', resume=saved)
+        assert any(e['event'] == 'checkpoint_restored' for e in events), log
+        assert sum(e['event'] == 'completed' for e in events) == 1, log
+        assert 0.115 < pose[0] < 0.15, pose
+        rows = [row('partial', 'forward', 0.12, 'left')]
+        run('partial_save', rows, 'next\nquit\n', stale=True)
+        saved = next((OUT / 'partial_save').glob('*.checkpoint.json'))
+        data = json.loads(saved.read_text())
+        assert data['partial'] and data['partial']['path_m'] > 0, data
+        events, log = run(
+            'partial_restore', rows, 'SAME_ODOM\nresume\nRESUME\nquit\n', resume=saved
+        )
+        assert sum(e['event'] == 'completed' for e in events) == 1, log
+        assert 0.10 < pose[0] < 0.13, pose
+        print('PASS checkpoint', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'recovery':
         os.environ['WALL_LOSS_MODE'] = 'transient'
         events, log = run('transient_fit_loss', [row('f', 'forward', 0.08, 'left')], 'next\nquit\n')

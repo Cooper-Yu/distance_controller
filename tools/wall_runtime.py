@@ -348,7 +348,8 @@ class WallRunner(PlannedRunner):
 
     def translation(self, step, target, policy):
         """Closed-loop distance/wall arrival with heading hold, travel bound and stable endpoint."""
-        start = self.pose()
+        observed_start = self.pose()
+        start = getattr(self, 'resume_origin', None) or observed_start
         follow_goal, stop_goal = policy.clearances(self.reference)
         print(
             f'WALL_ACTION {step.name}: follow={policy.follow} reference={self.reference:.4f} m follow_target={follow_goal}; '
@@ -364,17 +365,18 @@ class WallRunner(PlannedRunner):
         ]
         self.velocity_pub = self.node.create_publisher(self.twist, '/cmd_vel', 10)
         deadline = time.monotonic() + policy.max_travel / 0.03 * 3 + 20
-        previous = start
+        self.path_last_pose = observed_start
         prior_gaps = {}
         self.recovery_seconds = 0.0
-        path = 0.0
+        path = getattr(self, 'resume_path', 0.0)
         hold = None
         last_log = 0.0
         while time.monotonic() < deadline:
             self.pump()
             actual = self.moving_pose()
-            path += math.hypot(actual.x - previous.x, actual.y - previous.y)
-            previous = actual
+            path += errors(actual, self.path_last_pose)[0]
+            self.path_last_pose = actual
+            self.last_report = {'path_m': path}
             if path > policy.max_travel:
                 raise RuntimeError(
                     'MAX_TRAVEL: wall target not reached within configured path limit'
@@ -474,6 +476,7 @@ class WallRunner(PlannedRunner):
     def execute(self, step, target):
         """Run exactly one controller; backward recovery disables wall policies but retains scans."""
         self.child = None
+        self.path_last_pose = None
         try:
             self.exclusive()
             self.pose()

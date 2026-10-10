@@ -36,6 +36,13 @@ class WallSession(Session):
         self.emit('wall_result', self.active[-1])
         return actual
 
+    def resume(self):
+        actual = super().resume()
+        self.active[-1]['reference_after'] = self.backend.reference
+        self.active[-1]['wall_result'] = self.backend.last_report
+        self.emit('wall_result', self.active[-1])
+        return actual
+
     def back(self):
         record = self.partial or (self.active[-1] if self.active else None)
         before = (

@@ -603,3 +603,5 @@ Task6 preparation now defaults to the right wall for heading. Use `--alignment-w
 or `--alignment-wall left` with `--wall-guided --start prepare`. Centering/rear positioning
 remain unchanged; the initial left-side reference is measured with the constrained
 side-distance estimator after alignment. This does not change per-action following walls.
+
+Stopped action sessions can now restart with `action_session --resume FILE` without P01 preparation. See [checkpoint recovery](docs/wall_session.md#resume-at-a-stopped-waypoint-after-updating-code) for odom continuity checks, partial-action resume, and legacy audit migration.

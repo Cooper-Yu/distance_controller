@@ -118,7 +118,7 @@ class Session:
 
     Backend supplies fresh stopped pose and execute(step, target). emit writes a
     durable event before/after work. Failed/partial steps cannot advance the cursor.
-    Histories cannot be restored across controller sessions or odom resets.
+    Validated checkpoints can restore a stopped session; odom resets remain unsupported.
     """
 
     def __init__(self, origin, steps, backend, emit):
@@ -179,6 +179,7 @@ class Session:
     def perform(self, step, target, record):
         """Attempt motion with a saved start; retain incomplete records and best stopped pose."""
         self.partial = record
+        self.backend.last_report = {}
         self.emit('started', record)
         try:
             resolved = self.backend.execute(step, target)
@@ -195,8 +196,13 @@ class Session:
             self.last_actual = actual
             return actual
         except (Exception, KeyboardInterrupt):
+            if step.wall and step.kind != 'turn':
+                record['path_m'] = self.backend.last_report.get('path_m', record.get('path_m', 0.0))
             try:
                 self.last_actual = self.backend.pose()
+                tail = getattr(self.backend, 'path_last_pose', None)
+                if step.wall and step.kind != 'turn' and tail is not None:
+                    record['path_m'] += errors(self.last_actual, tail)[0]
             except (Exception, KeyboardInterrupt):
                 self.last_actual = None
             self.emit(
@@ -232,6 +238,29 @@ class Session:
         self.partial = None
         return actual
 
+    def resume(self):
+        """Continue an interrupted outward action toward its original target and anchor."""
+        record = self.partial
+        if record is None or record.get('return_started') or record.get('resume_unavailable'):
+            raise RuntimeError('No resumable outward action; use next or back')
+        if record['index'] != self.cursor:
+            raise RuntimeError('Partial cursor mismatch')
+        self.check_location()
+        step = Step(**record['step']).validate()
+        self.backend.resume_origin = Pose(**record['start'])
+        self.backend.resume_path = record.get('path_m', 0.0)
+        try:
+            actual = self.perform(step, Pose(**record['target']), record)
+        finally:
+            self.backend.resume_origin = None
+            self.backend.resume_path = 0.0
+        completed = {**record, 'end': asdict(actual)}
+        self.active.append(completed)
+        self.cursor += 1
+        self.partial = None
+        self.emit('completed', completed)
+        return actual
+
     def back(self):
         """Return one actual start, including a partial action; caller confirms clear return path."""
         self.check_location()
@@ -244,6 +273,7 @@ class Session:
         step = Step(
             'return_' + str(record['index']), record['step']['kind'], record['step']['value']
         )
+        record['return_started'] = True
         self.emit('return_requested', {'source': record, 'target': asdict(goal)})
         actual = self.perform(step, goal, record)
         self.emit('returned', {'index': record['index'], 'actual': asdict(actual)})
