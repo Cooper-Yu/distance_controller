@@ -238,7 +238,25 @@ try:
         )
         assert pose == old_pose, (pose, old_pose)
         assert max(abs(v) for v in velocity) < 1e-6
-        print('PASS fixed 4cm with restart', OUT, flush=True)
+        data = json.loads(saved.read_text())
+        adjustment = data['partial']['turn_adjustment']
+        adjustment.update(done=False, path_m=0.066304)
+        target = adjustment['target']
+        # Seed the observed cloud failure geometry; test recovery of the same target.
+        pose[:] = [target['x'] + 0.0035, target['y'] + 0.0011, target['yaw'] - 0.0157]
+        data['last_actual'] = dict(zip(('x', 'y', 'yaw'), pose))
+        saved.write_text(json.dumps(data))
+        events, log = run(
+            'over_budget_retry',
+            [row('turn', 'turn', -90)],
+            'SAME_ODOM\nadjust_turn 0.04\nquit\n',
+            resume=saved,
+        )
+        assert 'turn_adjustment_completed' in [e['event'] for e in events], log[-4000:]
+        assert math.hypot(pose[0] - target['x'], pose[1] - target['y']) <= 0.0031, pose
+        assert abs(pose[2] - target['yaw']) <= 0.01, pose
+        assert not any(e['event'] == 'completed' for e in events)
+        print('PASS fixed 4cm with restart and over-budget recovery', OUT, flush=True)
         raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'turn_rewind':
         rows = [row('turn', 'turn', -90)]

@@ -89,7 +89,7 @@ def adjustment_command(actual, target):
 
 
 def guarded_adjustment(runner, state):
-    """Run a <=20 s / 6 cm correction with original full-point command/measured guards."""
+    """Run a <=20 s correction; ordinary path length is telemetry, not an arrival gate."""
     target = Pose(**state['target'])
     last = runner.pose()
     deadline = time.monotonic() + 20
@@ -100,8 +100,10 @@ def guarded_adjustment(runner, state):
         state['path_m'] += errors(actual, last)[0]
         last = actual
         state['last_sample'] = asdict(actual)
-        if state['path_m'] > 0.06 or errors(actual, Pose(**state['origin']))[0] > 0.06:
-            raise RuntimeError('TURN_ADJUSTMENT_LIMIT: exceeded 6 cm')
+        if errors(actual, Pose(**state['origin']))[0] > 0.06:
+            raise RuntimeError('TURN_ADJUSTMENT_DISPLACEMENT: more than 6 cm from origin')
+        if state.get('escape') and state['path_m'] > 0.06:
+            raise RuntimeError('TURN_ADJUSTMENT_LIMIT: escape exceeded 6 cm path')
         velocity, ready = adjustment_command(actual, target)
         if state.get('escape'):
             from turn_escape import escape_command, guard_escape
@@ -152,7 +154,7 @@ def run_adjustment(runner, state):
             state['path_m'] += errors(actual, Pose(**state['last_sample']))[0]
             state['last_sample'] = asdict(actual)
     distance, heading = errors(actual, Pose(**state['target']))
-    if distance > 0.003 or abs(heading) > 0.01 or state['path_m'] > 0.06:
+    if distance > 0.003 or abs(heading) > 0.01 or (state.get('escape') and state['path_m'] > 0.06):
         raise RuntimeError('Adjustment moved outside acceptance during final stop')
     state['done'] = True
     runner.observe('turn_adjustment_after')

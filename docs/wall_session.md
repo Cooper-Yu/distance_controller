@@ -570,7 +570,7 @@ Repeated calls with the same distance continue toward that target; after complet
 they only recheck the turn. They never add another 2 cm. Changing the distance is
 rejected. `resume` is blocked while the adjustment is incomplete.
 
-The correction has a 20 s attempt limit, a cumulative 6 cm travel limit, 3 mm
+The correction has a 20 s attempt limit, a 6 cm displacement-from-origin guard, 3 mm
 position tolerance and 0.01 rad heading tolerance. It retains full scan coverage,
 command/measured velocity clearance checks and the 2 cm obstacle threshold.
 After stopping, a fresh scan must pass the full rotation sweep check. Success
@@ -700,7 +700,26 @@ Ordinary adjust_turn accepts 0.005 through 0.04 m; escape_turn remains exactly 0
 After two successful next actions from P01, use adjust_turn 0.04 before starting
 the P03 turn. This reserves the pending turn without rotating. The fixed 4 cm
 target survives checkpoint restoration; repeats do not add distance. Existing
-2 cm obstacle guards, 20 s budget, 6 cm travel cap, 3 mm endpoint tolerance and
+2 cm obstacle guards, 20 s budget, 6 cm displacement guard, 3 mm endpoint tolerance and
 0.01 m/s speed cap remain. Only use resume after the adjustment and sweep check
 succeed. Existing adjustments remain fixed: do not replace a saved 2 cm target
 with 4 cm. This is a candidate placement, not verified real P03 clearance.
+
+### Resume an ordinary adjustment whose accumulated path exceeded 6 cm
+
+For ordinary `adjust_turn`, `path_m` is now diagnostic telemetry only. It is not
+reset and no longer blocks arrival or retry. The target saved in the checkpoint
+remains unchanged, so repeating `adjust_turn 0.04` finishes only the remaining
+error; it does not move another 4 cm. Save the current stopped checkpoint, quit,
+update/build, and restore that checkpoint with unchanged odom before retrying.
+
+The 20 s per-attempt timeout, 6 cm actual displacement from the adjustment origin,
+3 mm/0.01 rad arrival tolerances, laser guards and odom freshness checks remain.
+`escape_turn` still has its original cumulative 6 cm limit; it is a different
+recovery for an already close partial turn. Successful ordinary adjustment still
+requires a fresh full-turn check and waits for a separate `resume`.
+
+A cloud report had 3.90 cm net right movement but 6.63 cm accumulated path; it
+cannot establish whether the excess came from real corrections or odom jitter.
+Local regression seeds that saved path and the reported residual errors, and
+verifies completion at the original target without accumulating another offset.

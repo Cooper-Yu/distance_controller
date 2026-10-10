@@ -142,3 +142,48 @@ class Adjustment(unittest.TestCase):
         s = self.setup_session()
         with self.assertRaisesRegex(ValueError, 'exactly 0.03'):
             s.escape_turn(0.04)
+
+    def test_existing_over_budget_path_can_settle_but_escape_cannot(self):
+        from turn_adjustment import guarded_adjustment
+        from unittest.mock import Mock
+        import copy
+
+        state = dict(
+            origin=asdict(Pose(0, 0, 0)),
+            target=asdict(Pose(0, -0.04, 0)),
+            path_m=0.066304,
+            done=False,
+        )
+        runner = Mock()
+        runner.pose.return_value = runner.moving_pose.return_value = Pose(0, -0.04, 0)
+        runner.latest = (None, None, 0, 0)
+        stamps = iter(range(50))
+        runner.pump.side_effect = lambda: setattr(runner, 'cached_stamp', next(stamps))
+        clock = iter(i * 0.1 for i in range(100))
+        with (
+            patch('turn_adjustment.time.monotonic', side_effect=lambda: next(clock)),
+            patch('turn_adjustment.guard_normal'),
+        ):
+            guarded_adjustment(runner, state)
+        self.assertGreater(state['path_m'], 0.06)
+        escape = copy.deepcopy(state)
+        escape['escape'] = True
+        with self.assertRaisesRegex(RuntimeError, 'escape exceeded'):
+            guarded_adjustment(runner, escape)
+
+    def test_over_budget_path_does_not_fail_final_endpoint_check(self):
+        from turn_adjustment import run_adjustment
+        from unittest.mock import Mock
+
+        state = dict(
+            origin=asdict(Pose(0, 0, 0)),
+            target=asdict(Pose(0, -0.04, 0)),
+            path_m=0.066304,
+            done=False,
+        )
+        runner = Mock()
+        runner.pose.return_value = Pose(0, -0.04, 0)
+        with patch('turn_adjustment.guarded_adjustment'):
+            run_adjustment(runner, state)
+        self.assertTrue(state['done'])
+        self.assertEqual(state['path_m'], 0.066304)
