@@ -15,6 +15,10 @@ from wall_geometry import DIRECTIONS, fit_wall, scan_points, swept_clearance
 from wall_policy import Policy, command
 
 
+class WallFitError(RuntimeError):
+    """A fresh scan has no acceptable wall fit; distinct from missing/stale feedback or TF."""
+
+
 class WallRunner(PlannedRunner):
     """Own one wall-action lifetime and carry a verified scalar body-gap reference."""
 
@@ -69,7 +73,7 @@ class WallRunner(PlannedRunner):
         try:
             return {side: fit_wall(points, counts, side) for side in sides}
         except ValueError as error:
-            raise RuntimeError(f'WALL_LOST: {error}') from error
+            raise WallFitError(f'WALL_LOST: {error}') from error
 
     def moving_pose(self):
         """Read fresh odometry without the stopped-speed qualification used at endpoints."""
@@ -98,13 +102,22 @@ class WallRunner(PlannedRunner):
         deadline = time.monotonic() + 4
         values = []
         stamp = None
+        last_rejection = None
         while time.monotonic() < deadline:
             self.pump()
             self.moving_pose()
             if self.latest[2] > 0.01 or self.latest[3] > 0.02:
                 values = []
                 continue
-            wall = self.walls([side])[side]
+            try:
+                wall = self.walls([side])[side]
+            except WallFitError as error:
+                # Only stopped reference acquisition retries fit failures, within the original budget.
+                # Do not swallow stale scan, invalid odom, TF failure or cancellation.
+                values = []
+                stamp = self.cached_stamp
+                last_rejection = str(error)
+                continue
             if self.cached_stamp == stamp:
                 continue
             stamp = self.cached_stamp
@@ -120,7 +133,9 @@ class WallRunner(PlannedRunner):
                     f'REFERENCE {side}: body_clearance={value:.4f} m (5 stable scans)', flush=True
                 )
                 return value
-        raise RuntimeError('Reference wall did not stabilize')
+        raise RuntimeError(
+            f'Reference wall did not stabilize within 4 s; last_fit_error={last_rejection}'
+        )
 
     def send(self, velocity):
         msg = self.twist()

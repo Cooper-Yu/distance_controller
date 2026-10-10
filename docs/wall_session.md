@@ -198,3 +198,9 @@ The recorded single scan `test/left_wall_returns.json` reproduces sparse distant
 it does not certify continuous hardware operation or identify the physical reflector.
 All original valid scan points remain available to clearance/swept-obstacle guards.
 This estimator never declares discarded wall-fit points to be free space.
+
+Stopped reference capture tolerates individual fresh-scan fit rejections within its
+original four-second deadline. Each rejected fit clears the five-frame sequence;
+only five distinct stable accepted scans commit a new reference. Stale/missing
+feedback, TF failures and cancellation still abort immediately. Movement-time wall
+loss remains an immediate stop. Permanent bad fits time out with the last fit reason.
