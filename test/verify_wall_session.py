@@ -189,7 +189,7 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
             [
                 'python3',
                 str(ROOT / ('tools/odom_trial.py' if odom_trial else 'tools/action_session.py')),
-                *(['--laser-log-only'] if odom_trial else []),
+                *(['--laser-log-only', '--alignment-wall', 'right'] if odom_trial else []),
                 *(['--until', until] if until else []),
                 *(
                     ['--resume', str(resume)]
@@ -230,6 +230,14 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'odom_trial_prepare':
+        data = json.loads((ROOT / 'config/task6_odom_p01_p05.json').read_text())
+        events, log = run('odom_right_prepare', data, 'quit\n', prepare=True)
+        assert 'right-wall alignment' in log, log[-4000:]
+        assert any(e['event'] == 'origin' for e in events), log[-4000:]
+        assert not any(e['event'] == 'started' for e in events)
+        print('PASS odom right preparation handoff', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'odom_trial':
         data = json.loads((ROOT / 'config/task6_odom_p01_p05.json').read_text())
         events, log = run(

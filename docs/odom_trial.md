@@ -39,8 +39,10 @@ Physically place the robot at P01's start area and stop existing controllers:
 
     ros2 run distance_controller odom_trial --start prepare --laser-log-only
 
-Preparation reuses existing laser left-wall alignment/centering once, then
-captures P01. It cannot return an arbitrary P05 position to P01.
+Preparation reuses existing laser alignment/centering once, then
+captures P01. Alignment defaults to left; --alignment-wall right selects the
+right wall for heading only. Centering and rear-distance preparation stay the same.
+It cannot return an arbitrary P05 position to P01.
 --start current adopts the current stopped pose as P01 without preparation.
 Omitting --start only previews the route.
 
@@ -84,3 +86,11 @@ Real P01-P05 acceptance is pending; no Task6 tag or independent learner PASS.
 
 After physical validation, teleop recording of remaining key points in one
 uninterrupted odom epoch is the next slice; a recorder is not implemented here.
+
+
+For the P01 scan with unstable left-wall fitting, use:
+
+    ros2 run distance_controller odom_trial --start prepare --alignment-wall right --laser-log-only --until P04
+
+This explicitly chooses the heading reference; it does not relax fitting thresholds.
+After initialization the route still uses odom, with laser logging only.

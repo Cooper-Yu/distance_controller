@@ -35,3 +35,14 @@ final pose (1.412998204,-.479999466,-1.560800378).
 Odom-stale batch stops on action one with no completed action (x=.049967966).
 Logs: /tmp/wall_session_test/1791633603829436020.
 This is a synthetic ROS fixture, not real maze clearance validation.
+
+
+## Explicit preparation wall — 2026-10-10
+Added --alignment-wall right (default remains left). User stationary scan contains
+37 frames over 3.898 s; matching dominant-line/TLS replay with known laser transform
+passes left heading in 3 frames, right heading in all 37 at the default 30-degree
+half-window. Physical cause of non-line returns remains unknown.
+Ruff, 168 unit tests, colcon and diff checks pass. WALL_CASE=odom_trial_prepare
+with WALL_SCAN_PERIOD=.1 in isolated domain181 passes C++ right alignment and
+handoff into odom_trial, without executing a route. Logs:
+/tmp/wall_session_test/1791637696289867694. Real robot verification pending.

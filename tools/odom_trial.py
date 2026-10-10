@@ -165,6 +165,7 @@ def main():
     parser.add_argument('--route', type=Path)
     parser.add_argument('--until', help='After initialization execute in order to this waypoint')
     parser.add_argument('--start', choices=['prepare', 'current'])
+    parser.add_argument('--alignment-wall', choices=['left', 'right'], default='left')
     parser.add_argument('--laser-log-only', action='store_true')
     parser.add_argument('--speed', type=float, default=0.06)
     args = parser.parse_args()
@@ -192,7 +193,7 @@ def main():
     print('ODOM TRIAL: laser does NOT stop motion; watch robot. Ctrl+C stops. No restart resume.')
     with open('/tmp/distance_controller_survey_return.lock', 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        r = WallRunner(args.speed, 'left')
+        r = WallRunner(args.speed, args.alignment_wall)
         old = signal.signal(signal.SIGINT, lambda *_: r.request_cancel())
         path = Path(f'odom_trial_{time.time_ns()}.jsonl')
         try:
