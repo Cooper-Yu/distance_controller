@@ -135,3 +135,24 @@ the inventory. This is a first inventory, not timing or navigation certification
 The report includes robot_description for footprint/mount review, topic endpoints,
 TF probes and package locations. Ubuntu-22.04 bash syntax checked; cloud execution
 is pending. Existing PID Task6 acceptance remains separate from Nav2 exploration.
+
+
+## RViz scan-time display gate
+If RViz reports future extrapolation for laser -> odom, tools/scan_display_gate.py
+provides a display-only /scan_rviz topic. Run it with sourced Humble and Python3,
+while SLAM is running. It queues at most 30 scans for at most one monotonic second,
+requires map and odom TF at both scan endpoints, then allows 100 ms for other TF
+subscribers before forwarding the unchanged LaserScan. Missing TF expires scans;
+periodic counts expose drops. This is not a correction to sensor timing or EKF,
+and cannot guarantee another process has identical TF reception. Do not use the
+output for SLAM, obstacle avoidance or navigation: these retain /scan_filtered.
+In RViz use Fixed Frame=map and LaserScan Topic=/scan_rviz. Ctrl+C stops only this
+helper; no velocity commands are published. No colcon build is needed.
+
+2026-10-10 validation: supplied ~18.6 s bag, isolated ROS_DOMAIN_ID=185 on local
+Ubuntu-22.04, 183 output scans all matched original message fields and all had
+map/odom start/end TF available at an independent observer; 3 expired at replay
+boundaries. Missing-frame scan expires without output. Ruff and diff checks pass.
+Raw serialized byte comparison was replaced by decoded field comparison because
+serialization padding is not a stable message-content comparison. No RViz GUI or
+cloud success is claimed; cloud visual confirmation is pending.
