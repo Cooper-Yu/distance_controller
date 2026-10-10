@@ -96,7 +96,8 @@ class PlannedRunner(Runner):
                 return pose
         raise RuntimeError('Fresh stopped odom unavailable')
 
-    def wait_idle(self, timeout, label=None):
+    def wait_idle(self, timeout, label=None, preparation=False):
+        """Preparation may retain its paused default route; completed actions require an empty queue."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             self.pump()
@@ -107,7 +108,14 @@ class PlannedRunner(Runner):
             message = self.call('status')
             if parse_status(message).get('state') == 'FAULT':
                 raise RuntimeError(message)
-            if idle(message, label):
+            fields = parse_status(message)
+            prepared = (
+                preparation
+                and fields.get('state') == 'WAITING'
+                and fields.get('waypoint') == 'A'
+                and fields.get('return_remaining') == '0'
+            )
+            if prepared or idle(message, label):
                 return message
         raise RuntimeError('Timed out waiting for endpoint')
 
@@ -237,7 +245,7 @@ class PlannedRunner(Runner):
                     'start_paused:=true',
                 ]
             )
-            print(self.wait_idle(90), flush=True)
+            print(self.wait_idle(90, preparation=True), flush=True)
             self.call('finish')
             self.wait_exit(10)
         except (Exception, KeyboardInterrupt):
