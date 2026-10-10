@@ -1,0 +1,35 @@
+{
+  "environment": "WSL Ubuntu-22.04 / ROS2 Humble / Gazebo; local model only",
+  "source_commit": "013c119",
+  "raw_log_root": "/tmp/turn_physics_audit_1791626238",
+  "scan_topic": "/scan (raw, differs from hardware /scan_filtered)",
+  "cases": [
+    {
+      "wall_plane_y_m": 0.3,
+      "result": "completed",
+      "contact_packets": 10439,
+      "wall_contacts": 0,
+      "warnings": 105,
+      "min_gap": -0.016291945607880304,
+      "final_yaw": -1.5665960692318186
+    },
+    {
+      "wall_plane_y_m": 0.23,
+      "result": "completed",
+      "contact_packets": 10447,
+      "wall_contacts": 0,
+      "warnings": 105,
+      "min_gap": -0.015478940566097776,
+      "final_yaw": -1.564709081506557
+    },
+    {
+      "wall_plane_y_m": 0.185,
+      "result": "contact_stop",
+      "contact_packets": 2239,
+      "wall_contacts": 10,
+      "warnings": 22,
+      "min_gap": -0.015511892205770539,
+      "final_yaw": -0.192876371702094
+    }
+  ]
+}

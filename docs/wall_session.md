@@ -640,3 +640,8 @@ JSONL import is not a substitute for the checkpoint.
 
 Local verification uses a raycast ROS fixture and the uploaded P03 scan for
 read-only geometry replay; real robot execution remains pending.
+
+### Local simulation audit of ignored turn warnings
+
+See [the isolated Gazebo comparison](turn_audit.md). It includes an independent
+wall-contact positive control and does not expose a real-robot bypass option.
