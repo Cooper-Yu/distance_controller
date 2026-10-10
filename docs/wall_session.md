@@ -446,3 +446,21 @@ The ROS_DOMAIN181 narrow-patch fixture completed at x=.112187 m and stopped:
 `/tmp/wall_session_test/1791616140146098746`, `WALL_CASE=side_limit`.
 This is sampled-model and synthetic-process evidence; the real corridor is still
 awaiting single-action cloud verification.
+
+## Front fit and braking-distance continuity
+
+The front +/-12 degree fit uses an 18 mm inlier band, independently of the side
+wall estimators. The 80% consensus, 60% scheduled-ray coverage, 12 mm final TLS
+RMS, 8 cm span and 12 degree normal limit still apply. This was replayed against
+16 failed front scans from session 1791616736137976195; their final RMS is below
+12 mm. Raw points remain available to the unchanged 2 cm obstacle guard.
+
+Continuity compares measured gaps against the last trusted wall transported by
+odom translation and rotation, including the change in body support along its
+normal. The allowed residual remains 3 cm. The snapshot is fixed through a
+recovery and duplicate scans cannot re-anchor it. Scan/odom skew over 0.15 s,
+translation over 8 cm or rotation over 0.15 rad from that snapshot rejects the
+compensation. This uses nearby odometry samples, not exact scan-time interpolation.
+The three stopped scans, 2 s retry and 4 s cumulative limits remain unchanged.
+`WALL_RECOVERY_CHECK` includes `expected_gaps` to distinguish braking travel from
+a change of surface. These are bounded local checks, not proof of physical safety.

@@ -85,8 +85,8 @@ class Wall:
     raw_count: int
 
 
-def dominant_wall(points, minimum_baseline):
-    """Select >=80% consensus within 12 mm; bounded candidates, all returns scored.
+def dominant_wall(points, minimum_baseline, tolerance=0.012):
+    """Select >=80% consensus within the supplied residual band (default 12 mm).
 
     This selection is for wall estimation only. Raw obstacle points remain unchanged.
     """
@@ -101,7 +101,7 @@ def dominant_wall(points, minimum_baseline):
             inliers = [
                 (x, y)
                 for x, y in points
-                if abs(-dy * (x - points[i][0]) + dx * (y - points[i][1])) / length <= 0.012
+                if abs(-dy * (x - points[i][0]) + dx * (y - points[i][1])) / length <= tolerance
             ]
             if len(inliers) > len(best):
                 best = inliers
@@ -110,7 +110,7 @@ def dominant_wall(points, minimum_baseline):
     return best
 
 
-def fit_wall(points, counts, side):
+def fit_wall(points, counts, side, *, tolerance=0.012):
     """TLS line fit in a +/-20 degree window; reject sparse, short, rough or angled surfaces."""
     center = DIRECTIONS[side]
     pts = [
@@ -121,7 +121,7 @@ def fit_wall(points, counts, side):
     if len(pts) < 8 or len(pts) < 0.6 * counts[side]:
         raise ValueError(f'{side}: insufficient wall returns')
     raw_count = len(pts)
-    pts = dominant_wall(pts, 0.08)
+    pts = dominant_wall(pts, 0.08, tolerance)
     if len(pts) < 0.6 * counts[side]:
         raise ValueError(f'{side}: insufficient inlier coverage')
     mx = sum(x for x, y in pts) / len(pts)
@@ -195,12 +195,13 @@ def side_distance(points, counts, side, heading_error):
 def front_distance(points, counts):
     """Fit the stopping wall in +/-12 degrees, with actual scheduled-ray coverage.
 
+    Front inliers allow 18 mm residual, but TLS RMS still must be <=12 mm.
     Only the estimator input is narrowed. Travel/swept-obstacle guards retain all
     original scan points and their wider coverage checks. Near-wall short spans
     are rejected by the unchanged 8 cm minimum rather than guessed from one ray.
     """
     selected = [p for p in points if abs(p[2]) <= math.radians(12)]
-    return fit_wall(selected, {'front': counts['front_narrow']}, 'front')
+    return fit_wall(selected, {'front': counts['front_narrow']}, 'front', tolerance=0.018)
 
 
 def bounded_follow_velocity(points, planned, rotation):
@@ -231,3 +232,28 @@ def bounded_follow_velocity(points, planned, rotation):
         if swept_clearance(points, *candidate) >= goal:
             return candidate, scale
     return original, 1.0
+
+
+def transported_gaps(walls, previous, current):
+    """Predict fixed-wall gaps after bounded odom motion, including body support rotation.
+
+    This does not re-anchor a lost wall. Missing/time-misaligned odometry must be
+    rejected by the caller; large motion cannot be excused as a recovery adjustment.
+    """
+    dx, dy = current.x - previous.x, current.y - previous.y
+    turn = math.remainder(current.yaw - previous.yaw, 2 * math.pi)
+    if math.hypot(dx, dy) > 0.08 or abs(turn) > 0.15:
+        raise RuntimeError('WALL_REFERENCE: motion too large for continuity compensation')
+    expected = {}
+    for side, wall in walls.items():
+        angle = DIRECTIONS[side] + wall.angle
+        world_angle = previous.yaw + angle
+        new_angle = angle - turn
+        expected[side] = (
+            wall.gap
+            - math.cos(world_angle) * dx
+            - math.sin(world_angle) * dy
+            + support(math.cos(angle), math.sin(angle))
+            - support(math.cos(new_angle), math.sin(new_angle))
+        )
+    return expected

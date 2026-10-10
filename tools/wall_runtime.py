@@ -14,6 +14,7 @@ from action_plan import Pose, errors
 from action_runtime import PlannedRunner
 from wall_geometry import (
     DIRECTIONS,
+    transported_gaps,
     bounded_follow_velocity,
     fit_wall,
     scan_points,
@@ -160,16 +161,37 @@ class WallRunner(PlannedRunner):
         summary = {k: v for k, v in detail.items() if k != 'points_base_xy_bearing'}
         print('WALL_FIT_DIAGNOSTIC ' + json.dumps(summary), flush=True)
 
+    def expected_gaps(self, prior):
+        """Transport the last trusted wall instead of treating braking travel as a jump."""
+        snapshot = getattr(self, 'wall_snapshot', None)
+        if not prior or snapshot is None:
+            return prior
+        if abs(self.cached_stamp - self.stamp) > 150_000_000:
+            raise RuntimeError('WALL_REFERENCE: scan/odom skew exceeds 0.15 s')
+        walls, pose = snapshot
+        return transported_gaps(walls, pose, self.moving_pose())
+
+    def remember_walls(self, walls):
+        """Pair a trusted scan with fresh odometry; reject excessive timestamp skew."""
+        if abs(self.cached_stamp - self.stamp) > 150_000_000:
+            raise RuntimeError('WALL_REFERENCE: scan/odom skew exceeds 0.15 s')
+        if getattr(self, 'wall_snapshot_stamp', None) != self.cached_stamp:
+            self.wall_snapshot = (walls, self.moving_pose())
+            self.wall_snapshot_stamp = self.cached_stamp
+
     def record_recovery_check(self, gaps, prior, samples):
         """Expose non-fit reasons for waiting without changing the recovery decision."""
         detail = {
             'scan_stamp_ns': self.cached_stamp,
             'gaps': gaps,
             'prior_gaps': prior,
+            'expected_gaps': self.expected_gaps(prior),
             'measured_speed_m_s': self.latest[2],
             'measured_abs_wz_rad_s': self.latest[3],
             'stopped': self.latest[2] < 0.01 and self.latest[3] < 0.02,
-            'distance_continuous': all(abs(gaps[k] - v) <= 0.03 for k, v in prior.items()),
+            'distance_continuous': all(
+                abs(gaps[k] - v) <= 0.03 for k, v in self.expected_gaps(prior).items()
+            ),
             'previous_stable_samples': len(samples),
             'used_recovery_seconds': self.recovery_seconds,
         }
@@ -179,7 +201,7 @@ class WallRunner(PlannedRunner):
     def recover_walls(self, sides, heading, movement, prior):
         """Hold zero for at most two seconds; require three distinct stable stopped scans.
 
-        Feedback/TF/obstacle failures propagate immediately. A previous wall cannot
+        Feedback/TF/obstacle failures propagate immediately. Braking motion is compensated from the last trusted fitted wall/pose. A previous wall cannot
         be silently replaced by a surface over 3 cm away during this stationary retry.
         """
         started = time.monotonic()
@@ -205,7 +227,7 @@ class WallRunner(PlannedRunner):
             if (
                 self.latest[2] >= 0.01
                 or self.latest[3] >= 0.02
-                or any(abs(gaps[k] - v) > 0.03 for k, v in prior.items())
+                or any(abs(gaps[k] - v) > 0.03 for k, v in self.expected_gaps(prior).items())
             ):
                 samples = []
                 continue
@@ -217,6 +239,7 @@ class WallRunner(PlannedRunner):
                 self.recovery_seconds += time.monotonic() - started
                 if self.recovery_seconds > 4.0:
                     raise RuntimeError('WALL_RECOVERY_BUDGET: 4 s cumulative limit')
+                self.remember_walls(walls)
                 print('WALL_RECOVERED: fresh stable wall distances; target retained', flush=True)
                 return
         if self.recovery_seconds + time.monotonic() - started >= 4.0:
@@ -427,10 +450,11 @@ class WallRunner(PlannedRunner):
         try:
             walls = self.motion_walls(sides, heading)
             gaps = {name: wall.gap for name, wall in walls.items()}
-            if any(abs(gaps[k] - v) > 0.03 for k, v in prior.items()):
+            if any(abs(gaps[k] - v) > 0.03 for k, v in self.expected_gaps(prior).items()):
                 raise WallFitError(
                     f'Wall distance jumped by more than 3 cm: prior={prior}, current={gaps}'
                 )
+            self.remember_walls(walls)
             return gaps
         except WallFitError as failure:
             self.send((0.0, 0.0, 0.0))
@@ -499,6 +523,8 @@ class WallRunner(PlannedRunner):
         deadline = time.monotonic() + policy.max_travel / 0.03 * 3 + 20
         self.path_last_pose = observed_start
         prior_gaps = {}
+        self.wall_snapshot = None
+        self.wall_snapshot_stamp = None
         self.recovery_seconds = 0.0
         path = getattr(self, 'resume_path', 0.0)
         hold = None

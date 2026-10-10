@@ -101,6 +101,13 @@ class RecoveryFixture:
     def record_recovery_check(self, *args):
         pass
 
+    def expected_gaps(self, prior):
+        # These legacy tests model a stationary robot; moving poses have separate tests.
+        return prior
+
+    def remember_walls(self, walls):
+        pass
+
     def run(self, prior=None):
         with patch('wall_runtime.time.monotonic', lambda: self.now):
             return WallRunner.recover_walls(self, {'left'}, 0, 'front', prior or {})
