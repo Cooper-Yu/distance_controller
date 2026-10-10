@@ -142,6 +142,19 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55):
 
 
 try:
+    if os.getenv('WALL_CASE') == 'independent':
+        rows = [row('independent', 'forward', 0.2, 'left', 'front')]
+        rows[0]['wall'].update(follow_clearance=0.12, stop_clearance=0.16)
+        events, log = run('independent_clearances', rows, 'next\nquit\n')
+        reports = [e['data']['wall_result'] for e in events if e['event'] == 'wall_result']
+        assert len(reports) == 1, log[-3500:]
+        report = reports[0]
+        assert abs(report['wall_clearances_m']['left'] - 0.12) <= 0.008
+        assert abs(report['wall_clearances_m']['front'] - 0.16) <= 0.008
+        assert report['follow_target_m'] == 0.12 and report['stop_target_m'] == 0.16
+        assert abs(report['reference_m'] - 0.14) < 0.001
+        print('PASS independent', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'prepare':
         events, log = run(
             'left_preparation', [row('f', 'forward', 0.03, 'left')], 'next\nquit\n', prepare=True

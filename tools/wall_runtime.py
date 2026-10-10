@@ -165,9 +165,10 @@ class WallRunner(PlannedRunner):
     def translation(self, step, target, policy):
         """Closed-loop distance/wall arrival with heading hold, travel bound and stable endpoint."""
         start = self.pose()
+        follow_goal, stop_goal = policy.clearances(self.reference)
         print(
-            f'WALL_ACTION {step.name}: follow={policy.follow} reference={self.reference:.4f} m; '
-            f'stop={policy.stop} target_clearance={self.reference + policy.offset:.4f} m; '
+            f'WALL_ACTION {step.name}: follow={policy.follow} reference={self.reference:.4f} m follow_target={follow_goal}; '
+            f'stop={policy.stop} target_clearance={stop_goal} m; '
             f'nominal_distance={step.value:.3f} m max_travel={policy.max_travel:.3f} m',
             flush=True,
         )
@@ -233,6 +234,8 @@ class WallRunner(PlannedRunner):
                     self.last_report = {
                         'completion': policy.stop,
                         'reference_m': self.reference,
+                        'follow_target_m': follow_goal,
+                        'stop_target_m': stop_goal,
                         'residual': residual,
                         'wall_clearances_m': gaps,
                         'path_m': path,

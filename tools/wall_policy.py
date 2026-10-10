@@ -17,6 +17,9 @@ class Policy:
     offset: float = 0.0
     max_travel: float = 1.0
     capture: str = 'none'
+    follow_clearance: float | None = None
+    stop_clearance: float | None = None
+    follow_offset: float = 0.0
 
     def validate(self, kind):
         if self.follow not in ('none', 'left', 'right') or self.capture not in (
@@ -40,7 +43,47 @@ class Policy:
             raise ValueError('Wall-follow correction is for forward actions only')
         if self.capture != 'none' and kind != 'turn':
             raise ValueError('Recapture is a stopped post-turn operation')
+        self.validate_clearances()
         return self
+
+    def validate_clearances(self):
+        """Reject unused or unsafe explicit targets; None retains carried-reference behavior."""
+        for name, enabled in (
+            ('follow_clearance', self.follow != 'none'),
+            ('stop_clearance', self.stop != 'distance'),
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                if not enabled or not math.isfinite(value) or not 0.04 <= value <= 0.35:
+                    raise ValueError(f'{name} requires an active wall and a finite [.04,.35] m gap')
+        if not math.isfinite(self.follow_offset) or not -0.03 <= self.follow_offset <= 0.10:
+            raise ValueError('Follow offset outside [-.03,.10] m')
+        if self.follow == 'none' and self.follow_offset != 0:
+            raise ValueError('Follow offset requires a follow wall')
+
+    def clearances(self, reference):
+        """Resolve targets independently. Absolute values override offsets without changing d."""
+        if not math.isfinite(reference) or not 0.04 <= reference <= 0.30:
+            raise ValueError('Reference clearance outside [.04,.30] m')
+        self.validate_clearances()
+        follow = (
+            (
+                self.follow_clearance
+                if self.follow_clearance is not None
+                else reference + self.follow_offset
+            )
+            if self.follow != 'none'
+            else None
+        )
+        stop = (
+            (self.stop_clearance if self.stop_clearance is not None else reference + self.offset)
+            if self.stop != 'distance'
+            else None
+        )
+        for value in (follow, stop):
+            if value is not None and not 0.04 <= value <= 0.35:
+                raise ValueError('Resolved clearance outside [.04,.35] m')
+        return follow, stop
 
 
 def command(step, policy, reference, progress, cross, yaw_error, gaps, max_speed=0.03):  # noqa: PLR0912
@@ -53,14 +96,10 @@ def command(step, policy, reference, progress, cross, yaw_error, gaps, max_speed
     if not math.isfinite(max_speed) or not 0.01 <= max_speed <= 0.08:
         raise ValueError('Wall speed must be finite and within [.01,.08] m/s')
     axis = {'forward': (1, 0), 'backward': (-1, 0), 'left': (0, 1), 'right': (0, -1)}[step.kind]
-    if not 0.04 <= reference <= 0.30:
-        raise ValueError('Reference clearance outside [.04,.30] m')
+    follow_goal, stop_goal = policy.clearances(reference)
     residual = step.value - progress
     if policy.stop != 'distance':
-        goal = reference + policy.offset
-        if not 0.04 <= goal <= 0.35:
-            raise ValueError('Stopping clearance outside [.04,.35] m')
-        residual = gaps[policy.stop] - goal
+        residual = gaps[policy.stop] - stop_goal
         if residual < -0.015:
             raise RuntimeError('Stopping wall already too close; inspect and back')
     ready = abs(residual) <= 0.008
@@ -68,7 +107,7 @@ def command(step, policy, reference, progress, cross, yaw_error, gaps, max_speed
     vx, vy = axis[0] * speed, axis[1] * speed
     side_error = cross
     if policy.follow != 'none':
-        side_error = gaps[policy.follow] - reference
+        side_error = gaps[policy.follow] - follow_goal
         if abs(side_error) > 0.08:
             raise RuntimeError('Reference wall changed by more than 8 cm; possible opening')
         vy = clamp(0.7 * side_error, 0.012) * (1 if policy.follow == 'left' else -1)

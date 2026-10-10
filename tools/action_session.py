@@ -112,12 +112,14 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
     elif verb in ('set', 'load', 'save'):
         edit_command(session, words)
     elif verb == 'policy' and len(words) == 4 and hasattr(session, 'set_policy'):
-        session.set_policy(int(words[1]) - 1, words[2], float(words[3]))
+        session.set_policy(
+            int(words[1]) - 1, words[2], None if words[3] == 'auto' else float(words[3])
+        )
         show(session.steps, session.goals, session.cursor)
     elif verb == 'plan':
         if any(s.wall for s in session.steps):
             print(
-                f'Current carried body clearance: {session.backend.reference:.4f} m; stop target = reference + offset'
+                f'Current carried body clearance: {session.backend.reference:.4f} m; absolute gaps override inherited reference + offsets'
             )
         show(session.steps, session.goals, session.cursor)
     elif verb == 'history':
@@ -134,7 +136,7 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
     else:
         print(
             'next | run | back | set INDEX METERS_OR_DEGREES | load FILE | save FILE | '
-            'policy INDEX offset|max_travel VALUE | plan | status | history | measure | quit'
+            'policy INDEX follow_clearance|stop_clearance METERS_OR_auto | policy INDEX follow_offset|offset|max_travel VALUE | plan | status | history | measure | quit'
         )
 
 

@@ -7,8 +7,10 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 import unittest
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+from action_session import export_route
 from action_plan import Pose, Step, load_steps, reverse_steps
 from wall_geometry import fit_wall, scan_points, support, swept_clearance
 from wall_policy import Policy, command
@@ -101,6 +103,28 @@ class Control(unittest.TestCase):
             with self.assertRaises(ValueError):
                 command(step, Policy(), 0.1, 0, 0, 0, {}, bad)
 
+    def test_independent_targets_and_inheritance(self):
+        policy = Policy(
+            follow='left', stop='front', offset=-0.01, follow_clearance=0.12, stop_clearance=0.18
+        )
+        self.assertEqual(policy.clearances(0.1), (0.12, 0.18))
+        self.assertEqual(policy.clearances(0.2), (0.12, 0.18))
+        velocity, ready, _ = command(
+            Step('f', 'forward', 0.8), policy, 0.1, 0.3, 0, 0, {'left': 0.12, 'front': 0.18}
+        )
+        self.assertTrue(ready)
+        self.assertEqual(velocity, (0, 0, 0))
+        inherited = Policy(follow='right', stop='front', follow_offset=0.02, offset=-0.01)
+        self.assertAlmostEqual(inherited.clearances(0.1)[0], 0.12)
+        self.assertAlmostEqual(inherited.clearances(0.1)[1], 0.09)
+        for invalid in (float('nan'), float('inf'), -0.1, 0.36):
+            with self.assertRaises(ValueError):
+                Policy(follow='left', follow_clearance=invalid).validate('forward')
+        with self.assertRaises(ValueError):
+            Policy(stop_clearance=0.1).validate('forward')
+        with self.assertRaises(ValueError):
+            Policy(follow='left', follow_offset=0.1).clearances(0.3)
+
     def test_config_complete_and_reverse_rejected(self):
         path = Path(__file__).resolve().parents[1] / 'config/task6_wall_actions.json'
         steps = load_steps(json.loads(path.read_text()))
@@ -111,6 +135,37 @@ class Control(unittest.TestCase):
 
 
 class History(unittest.TestCase):
+    def test_edit_save_reload_and_back(self):
+        class Backend:
+            reference = 0.1
+            actual = Pose(0, 0, 0)
+            last_report = {}
+
+            def pose(self):
+                return self.actual
+
+            def execute(self, step, target):
+                self.actual = target
+
+        steps = [Step('f', 'forward', 0.5, asdict(Policy(follow='left', stop='front')))]
+        backend = Backend()
+        session = WallSession(backend.actual, steps, backend, lambda *a: None)
+        session.set_policy(0, 'follow_clearance', 0.12)
+        session.set_policy(0, 'stop_clearance', 0.18)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'route.json'
+            export_route(path, session.steps)
+            session.reload(load_steps(json.loads(path.read_text())))
+        self.assertEqual(Policy(**session.steps[0].wall).clearances(0.1), (0.12, 0.18))
+        session.next()
+        with self.assertRaises(ValueError):
+            session.set_policy(0, 'stop_clearance', 0.2)
+        session.back()
+        self.assertEqual(backend.reference, 0.1)
+        self.assertEqual(Policy(**session.steps[0].wall).clearances(0.1), (0.12, 0.18))
+        session.set_policy(0, 'follow_clearance', None)
+        self.assertEqual(Policy(**session.steps[0].wall).clearances(0.1), (0.1, 0.18))
+
     def test_actual_rebase_reference_and_back(self):
         class Backend:
             reference = 0.1

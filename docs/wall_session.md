@@ -22,7 +22,7 @@ stopped pose; it does not resume old progress and still requires a left referenc
 
 ## Route policies
 
-All clearances below are fitted wall-to-body distances. Front targets are `d + offset`.
+All clearances below are fitted wall-to-body distances. The default route keeps inherited values. Targets resolve independently: explicit absolute clearances override inherited `d` plus offsets.
 The `value` of wall-stop actions is a nominal preview distance, not their stopping criterion.
 Every action has an independent accumulated maximum-travel limit. All translations
 hold planned odom heading. Straight wall-following adds at most 0.012 m/s lateral
@@ -154,3 +154,35 @@ Pure tests cover geometry, sign conventions, range/coverage rejection, footprint
 front and lateral arrival, reference rollback and actual-anchor propagation. The ROS
 fixture raycasts a virtual rectangular room; it is not a complete CyberWorld run.
 Physical P01-P15 acceptance and the Task6 tag remain pending.
+
+## Independent clearance per action
+
+Each wall policy supports `follow_clearance` and `stop_clearance` in meters (0.04-0.35).
+`null` inherits the current carried reference: follow uses `d + follow_offset`, while
+stop uses `d + offset`. An absolute value takes precedence over that offset. It does
+not change the shared reference or the next action. Only explicit post-turn capture
+updates `d`. Fields for disabled follow/stop walls are rejected.
+
+At WAITING, for example before action 2 (P02-P03):
+
+```text
+policy 2 follow_clearance 0.12
+policy 2 stop_clearance 0.15
+plan
+save task6_trial.json
+next
+```
+
+These example values are body clearances, not sensor ranges or site-validated recommendations.
+Use `policy 2 follow_clearance auto` to restore inheritance; `follow_offset` can then
+adjust the inherited follow gap. `offset` adjusts an inherited stop gap. Edits only
+apply to unexecuted actions; `back` must complete before editing a finished/partial
+action. Returning restores the recorded reference but retains the action's independent
+configuration. Saved JSON includes all values; `--route task6_trial.json` reloads them.
+Existing `--start` semantics still apply: saved routes do not restore progress or odom.
+
+Execution prints resolved follow/stop targets and records them in `wall_result`.
+`plan` shows configured fields and the current reference; targets after future captures
+remain provisional. Distance-only actions have no stop-wall target. Turns do not
+translate or automatically search for space: insufficient clearance still stops the
+action. Inspect and return before changing the preceding translation target.

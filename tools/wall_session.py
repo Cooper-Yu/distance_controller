@@ -49,11 +49,17 @@ class WallSession(Session):
         return actual
 
     def set_policy(self, index, field, value):
-        """Change future wall target offset or path bound without changing nominal survey length."""
+        """Edit independent future gaps or bounds; None restores inherited absolute targets."""
         if self.partial is not None or not self.cursor <= index < len(self.steps):
             raise ValueError('Only future policies may be edited')
-        if field not in ('offset', 'max_travel') or not self.steps[index].wall:
-            raise ValueError('Use offset or max_travel on a wall-route step')
+        if (
+            field
+            not in ('offset', 'max_travel', 'follow_offset', 'follow_clearance', 'stop_clearance')
+            or not self.steps[index].wall
+        ):
+            raise ValueError('Unknown wall policy field')
+        if value is None and field not in ('follow_clearance', 'stop_clearance'):
+            raise ValueError('auto is only valid for absolute clearance fields')
         data = dict(self.steps[index].wall)
         data[field] = value
         candidate = replace(self.steps[index], wall=data).validate()
