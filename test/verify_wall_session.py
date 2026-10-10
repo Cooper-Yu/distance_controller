@@ -181,14 +181,15 @@ try:
         raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'independent':
         rows = [row('independent', 'forward', 0.2, 'left', 'front')]
-        rows[0]['wall'].update(follow_clearance=0.12, stop_clearance=0.16)
+        stop_gap = float(os.getenv('WALL_STOP_GAP', '0.16'))
+        rows[0]['wall'].update(follow_clearance=0.12, stop_clearance=stop_gap)
         events, log = run('independent_clearances', rows, 'next\nquit\n')
         reports = [e['data']['wall_result'] for e in events if e['event'] == 'wall_result']
         assert len(reports) == 1, log[-3500:]
         report = reports[0]
         assert abs(report['wall_clearances_m']['left'] - 0.12) <= 0.008
-        assert abs(report['wall_clearances_m']['front'] - 0.16) <= 0.008
-        assert report['follow_target_m'] == 0.12 and report['stop_target_m'] == 0.16
+        assert abs(report['wall_clearances_m']['front'] - stop_gap) <= 0.008
+        assert report['follow_target_m'] == 0.12 and report['stop_target_m'] == stop_gap
         assert abs(report['reference_m'] - 0.14) < 0.001
         print('PASS independent', OUT, flush=True)
         raise SystemExit(0)

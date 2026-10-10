@@ -47,7 +47,7 @@ def scan_points(scan, transform):
         raise ValueError('Nonfinite laser geometry')
     if scan.angle_increment == 0 or not 0 < scan.range_min < scan.range_max:
         raise ValueError('Invalid scan bounds')
-    points, counts = [], dict.fromkeys((*DIRECTIONS, 'left_wide', 'right_wide'), 0)
+    points, counts = [], dict.fromkeys((*DIRECTIONS, 'left_wide', 'right_wide', 'front_narrow'), 0)
     for i, distance in enumerate(scan.ranges):
         angle = scan.angle_min + i * scan.angle_increment
         c, s = math.cos(angle), math.sin(angle)
@@ -59,6 +59,8 @@ def scan_points(scan, transform):
                 math.atan2(math.sin(bearing - center), math.cos(bearing - center))
             ) <= math.radians(20):
                 counts[name] += 1
+        if abs(bearing) <= math.radians(12):
+            counts['front_narrow'] += 1
         for side in ('left', 'right'):
             if abs(
                 math.atan2(
@@ -188,3 +190,14 @@ def side_distance(points, counts, side, heading_error):
     if rms > 0.012 or span < 0.08:
         raise ValueError(f'{side}: constrained distance rough or short')
     return Wall(offset - support(nx, ny), heading_error, rms, span, len(inliers), len(selected))
+
+
+def front_distance(points, counts):
+    """Fit the stopping wall in +/-12 degrees, with actual scheduled-ray coverage.
+
+    Only the estimator input is narrowed. Travel/swept-obstacle guards retain all
+    original scan points and their wider coverage checks. Near-wall short spans
+    are rejected by the unchanged 8 cm minimum rather than guessed from one ray.
+    """
+    selected = [p for p in points if abs(p[2]) <= math.radians(12)]
+    return fit_wall(selected, {'front': counts['front_narrow']}, 'front')

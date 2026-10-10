@@ -593,7 +593,7 @@ Read and save four-direction laser ranges without moving: `ros2 run distance_con
 
 Wall-guided translations now use a held-heading side-distance estimate over +/-30 degrees.
 Brief fit loss stops motion and allows bounded stationary recovery; persistent loss leaves
-an incomplete action. Preparation and front-wall arrival keep their existing estimators.
+an incomplete action. Heading preparation keeps its existing estimator; front-wall arrival uses an independent +/-12 degree TLS window.
 See [wall session details](docs/wall_session.md#side-distance-tracking-and-bounded-recovery).
 Manual BODY_CLEARANCE output still reports the original independent line fits; motion logs
 identify the constrained side estimator separately. Cloud step-by-step validation is pending.

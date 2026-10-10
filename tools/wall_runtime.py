@@ -11,7 +11,14 @@ import time
 
 from action_plan import Pose, errors
 from action_runtime import PlannedRunner
-from wall_geometry import DIRECTIONS, fit_wall, scan_points, swept_clearance, side_distance
+from wall_geometry import (
+    DIRECTIONS,
+    fit_wall,
+    scan_points,
+    swept_clearance,
+    side_distance,
+    front_distance,
+)
 from wall_policy import Policy, command
 
 
@@ -78,12 +85,17 @@ class WallRunner(PlannedRunner):
     def walls(self, sides):
         points, counts = self.geometry()
         try:
-            return {side: fit_wall(points, counts, side) for side in sides}
+            return {
+                side: front_distance(points, counts)
+                if side == 'front'
+                else fit_wall(points, counts, side)
+                for side in sides
+            }
         except ValueError as error:
             raise WallFitError(f'WALL_LOST: {error}') from error
 
     def motion_walls(self, sides, heading):
-        """Use held-heading side distances; front arrival retains the original TLS estimator."""
+        """Use held-heading side distances; front arrival uses its independent +/-12 degree TLS window."""
         points, counts = self.geometry()
         error = math.atan2(
             math.sin(heading - self.moving_pose().yaw), math.cos(heading - self.moving_pose().yaw)
@@ -92,7 +104,7 @@ class WallRunner(PlannedRunner):
             return {
                 side: side_distance(points, counts, side, error)
                 if side in ('left', 'right')
-                else fit_wall(points, counts, side)
+                else front_distance(points, counts)
                 for side in sides
             }
         except ValueError as error:
@@ -351,7 +363,7 @@ class WallRunner(PlannedRunner):
             if time.monotonic() - last_log >= 1:
                 print(
                     f'WALL_PROGRESS {step.name} progress={progress:.3f} path={path:.3f} '
-                    f'gaps={gaps} residual={residual} side_estimator=held_heading_30deg',
+                    f'gaps={gaps} residual={residual} side_estimator=held_heading_30deg front_estimator=tls_12deg',
                     flush=True,
                 )
                 last_log = time.monotonic()

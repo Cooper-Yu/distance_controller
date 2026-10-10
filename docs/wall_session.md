@@ -220,7 +220,7 @@ During translation, side distances use a +/-30 degree window (previously +/-20).
 The held odom heading supplies the wall normal in the current body frame; the median
 projected distance estimates offset without treating noisy fitted angles as new headings.
 At least 80% of valid returns must lie within 20 mm of the median, with 60% ray coverage,
-12 mm RMS and 8 cm span. Front arrival and heading initialization retain their existing fit.
+12 mm RMS and 8 cm span. Front arrival uses an independent +/-12 degree TLS window; heading initialization retains its existing fit.
 Stopped side-reference capture uses this same constrained side-distance estimator.
 Raw obstacle points are never discarded by this estimator. The three user scan replays
 in `test/side_distance_scans.json` cover initial, centered and interrupted placements;
@@ -259,3 +259,18 @@ First confirm `right-wall alignment`, `preparation complete`,
 `REFERENCE left ... held_heading_30deg`, then `WAITING`. Execute one `next`.
 Right-wall heading and subsequent left-wall following assume the selected walls are
 parallel at the start; local tests do not establish that at every real placement.
+
+
+## Front stopping window
+
+Front arrival and manual front BODY_CLEARANCE now use +/-12 degrees. Expected-ray
+coverage is counted in that same window, including invalid returns. The original
+80% consensus, 60% inlier coverage, 12 mm RMS, 8 cm span and angle limits remain.
+The real P02 replay has 38/43 inliers (88.4%), about 0.9805 m body clearance.
+Narrowing applies only to wall estimation; full scan points and wider travel coverage
+still protect motion. A missing or short front surface is never treated as clear space.
+
+An already-running Python session does not load this code update. To keep route meaning,
+return to P01 with the existing session's back command while the return path is clear,
+then quit, update/build and prepare again. Do not start the full route with --start current
+at P02: that would adopt P02 as a new origin and repeat P01-P02.
