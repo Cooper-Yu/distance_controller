@@ -27,6 +27,10 @@ class WallFitError(RuntimeError):
     """A fresh scan has no acceptable wall fit; distinct from missing/stale feedback or TF."""
 
 
+class ReturnClearanceError(RuntimeError):
+    """Recoverable return obstacle; feedback and turn failures remain immediate failures."""
+
+
 class WallRunner(PlannedRunner):
     """Own one wall-action lifetime and carry a verified scalar body-gap reference."""
 
@@ -232,7 +236,8 @@ class WallRunner(PlannedRunner):
         summary = {k: v for k, v in detail.items() if k != 'points_base_xy_bearing'}
         print('CLEARANCE_DIAGNOSTIC ' + json.dumps(summary), flush=True)
         code = 'RETURN_CLEARANCE' if returning else 'TURN_CLEARANCE'
-        raise RuntimeError(f'{code}: protected clearance below 2 cm; see diagnostic')
+        error = ReturnClearanceError if returning else RuntimeError
+        raise error(f'{code}: protected clearance below 2 cm; see diagnostic')
 
     def capture_reference(self, side, heading=None):
         """Capture side offset at a fixed heading from five distinct stable stopped scans.
@@ -520,15 +525,106 @@ class WallRunner(PlannedRunner):
             self.child = None
             self.cancel_requested = False
 
-    def return_position(self, step, target):
-        """Return to an actual history pose under short-horizon laser protection."""
-        # Retain existing absolute-target controller and guard its motion from fresh scans.
-        self.turn_sign = 0
-        self.guarded_command = None
-        self.turn_guard = True
+    def return_probe(self, target, previous):
+        """Test retained motion plus a conservative restart toward the unchanged target."""
+        pose = self.moving_pose()
+        dx, dy = target.x - pose.x, target.y - pose.y
+        length = math.hypot(dx, dy)
+        scale = 0.03 / max(length, 0.001)
+        c, s = math.cos(pose.yaw), math.sin(pose.yaw)
+        vx, vy = scale * (c * dx + s * dy), scale * (-s * dx + c * dy)
+        # The child can correct heading before translating. Check both separately and together.
+        error = errors(pose, target)[1]
+        wz = math.copysign(0.25, error) if abs(error) > 0.01 else 0.0
+        return [
+            (0.0, 0.0, 0.0),
+            *previous,
+            *self.return_scenarios(),
+            (vx, vy, 0.0),
+            (0.0, 0.0, wz),
+            (vx, vy, wz),
+        ]
+
+    @staticmethod
+    def return_coverage(points, counts, required):
+        """Missing rays are unknown space, never evidence that an obstacle disappeared."""
+        for side in required:
+            center = DIRECTIONS[side]
+            valid = sum(
+                abs(math.remainder(p[2] - center, 2 * math.pi)) < math.radians(20) for p in points
+            )
+            if valid < 8 or valid < 0.5 * counts.get(side, 0):
+                return False
+        return True
+
+    def recover_return(self, target, previous):
+        """After child shutdown, hold zero for <=2 s and require three new stopped scans.
+
+        All raw points and the 2 cm boundary are retained. Repeated stamps cannot
+        count as confirmation; stale feedback, TF failure and cancellation abort.
+        Check the intended restart, not merely the zero command seen while stopped.
+        """
+        started = time.monotonic()
+        stamp, odom_stamp, count = self.cached_stamp, self.stamp, 0
+        first = None
+        self.velocity_pub = self.node.create_publisher(self.twist, '/cmd_vel', 10)
+        print('RETURN_RECOVERING: stopped child; 2 s budget, three fresh stopped scans', flush=True)
         try:
-            self.translate_target(target)
+            while time.monotonic() - started < 2.0:
+                self.send((0.0, 0.0, 0.0))
+                self.pump()
+                scenarios = self.return_probe(target, previous)
+                points, coverage = self.geometry()
+                if self.cached_stamp == stamp or self.stamp == odom_stamp:
+                    continue
+                stamp, odom_stamp = self.cached_stamp, self.stamp
+                required = set()
+                for vx, vy, _ in scenarios:
+                    if abs(vx) > 0.001:
+                        required.add('front' if vx > 0 else 'rear')
+                    if abs(vy) > 0.001:
+                        required.add('left' if vy > 0 else 'right')
+                clear = self.return_coverage(points, coverage, required) and all(
+                    swept_clearance(points, *velocity) >= 0.02 for velocity in scenarios
+                )
+                stopped = self.latest[2] < 0.01 and self.latest[3] < 0.02
+                if not clear or not stopped:
+                    count, first = 0, None
+                    continue
+                count += 1
+                first = time.monotonic() if first is None else first
+                if count >= 3 and time.monotonic() - first >= 0.20:
+                    self.observations.append(
+                        {'return_recovery': {'result': 'clear', 'scans': count}}
+                    )
+                    print(
+                        'RETURN_RECOVERED: clearance confirmed; original target retained',
+                        flush=True,
+                    )
+                    return
+            raise RuntimeError('RETURN_RECOVERY_TIMEOUT: clearance not confirmed within 2 s')
         finally:
-            self.turn_guard = False
-        self.last_report = {'completion': 'recorded_pose_return'}
-        return None
+            self.send((0.0, 0.0, 0.0))
+            self.node.destroy_publisher(self.velocity_pub)
+            self.velocity_pub = None
+
+    def return_position(self, step, target):
+        """Retry the same absolute history target at most twice after bounded stopped checks."""
+        self.turn_sign = 0
+        for attempt in range(3):
+            self.guarded_command = None
+            self.turn_guard = True
+            try:
+                self.translate_target(target)
+                self.last_report = {'completion': 'recorded_pose_return', 'recoveries': attempt}
+                return None
+            except ReturnClearanceError:
+                previous = self.return_scenarios()
+                self.turn_guard = False
+                self.stop_owned()
+                self.child = None
+                if attempt == 2:
+                    raise RuntimeError('RETURN_RECOVERY_BUDGET: two retries exhausted') from None
+                self.recover_return(target, previous)
+            finally:
+                self.turn_guard = False

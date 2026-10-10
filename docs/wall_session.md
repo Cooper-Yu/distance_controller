@@ -360,3 +360,38 @@ not a proof about unseen obstacles or future acceleration beyond the horizon.
 The captured nearest point from the cloud failure is covered by backward,
 approaching, rotational and static-overlap tests. Full triggering scan replay
 still requires the cloud JSONL, not just its nearest-point console summary.
+
+
+### Bounded stopped recheck during return
+
+A `RETURN_CLEARANCE` event still stops motion immediately. The owned C++ child
+is interrupted and reaped using the existing zero-command shutdown. Only then
+`RETURN_RECOVERING` holds zero commands for a maximum of 2 seconds. It requires
+at least three distinct fresh scan/odom pairs spanning 0.20 seconds, linear speed
+below 0.01 m/s and absolute yaw rate below 0.02 rad/s. All original scan points
+must clear the unchanged 2 cm boundary at rest and over the 0.5-second prediction.
+Recheck includes the triggering velocities, current measured motion, and a
+0.03 m/s target-directed restart with conservative heading correction up to the
+child's default 0.25 rad/s. Missing travel-direction returns cannot count as clear.
+
+`RETURN_RECOVERED` restarts the controller toward the **same absolute history
+pose**; it does not repeat the original full distance or reinitialize P01. There
+are at most two recovery attempts per return command. Persistent blockage reports
+`RETURN_RECOVERY_TIMEOUT`; repeated interruptions report `RETURN_RECOVERY_BUDGET`.
+Both preserve incomplete history/checkpoint state. Stale feedback, invalid TF,
+odom discontinuity, cancellation and turn-clearance errors are not automatically
+retried. The 2-second window starts after child shutdown, so total visible pause
+also includes stopping and subsequent controller startup.
+
+Verification: `test/test_return_recovery.py` covers confirmation, duplicate scans,
+non-stopped feedback, missing coverage, predicted collisions, cancellation and
+retry limits. `WALL_CASE=return_recovery python3 test/verify_wall_session.py`
+executes transient and persistent rear-obstacle scenarios with real local ROS
+processes in isolated domain 181. These synthetic checks are not hardware acceptance.
+
+2026-10-10 local evidence: 74 relevant pure tests passed (including 9 new return
+recovery tests), Ruff format/check, `git diff --check` and Humble `colcon build`
+passed. Final ROS fixture: `/tmp/wall_session_test/1791614903979554593`.
+Transient rear returns recovered to x=0.009557 m near the original x=0 target;
+persistent returns timed out at x=0.070595 m, remained incomplete and stopped.
+No real-robot or full-route acceptance is claimed by these results.

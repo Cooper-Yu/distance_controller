@@ -44,6 +44,20 @@ sub = node.create_subscription(Twist, '/cmd_vel', receive, 10)
 last_scan = 0.0
 scan_number = 0
 bad_scan_start = None
+return_scan_start = None
+
+
+def inject_return_obstacle(values, now):
+    """Inject a rear obstacle only once reverse motion starts, across zero-command pauses."""
+    global return_scan_start
+    return_mode = os.getenv('RETURN_LOSS_MODE', '')
+    if return_mode and velocity[0] < -0.005 and return_scan_start is None:
+        return_scan_start = now
+    if return_scan_start is not None and (
+        return_mode == 'permanent' or now - return_scan_start < 0.5
+    ):
+        # Rear pair at 1 cm body gap: always stop; transient disappears while stationary.
+        values[360:362] = [0.20, 0.20]
 
 
 def tick(previous, scan_enabled=True, front=0.55):
@@ -103,6 +117,7 @@ def tick(previous, scan_enabled=True, front=0.55):
                 delta = math.atan2(math.sin(bearing - math.pi / 2), math.cos(bearing - math.pi / 2))
                 if abs(delta) < math.radians(35):
                     values[i] += 0.018 * ((i % 11) / 5 - 1) / abs(math.sin(bearing))
+        inject_return_obstacle(values, now)
         scan.ranges = values
         scan_pub.publish(scan)
         last_scan = now
@@ -171,6 +186,24 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'return_recovery':
+        for mode in ('transient', 'permanent'):
+            return_scan_start = None
+            os.environ['RETURN_LOSS_MODE'] = mode
+            events, log = run(
+                'return_' + mode, [row('f', 'forward', 0.08, 'left')], 'next\nback\nBACK\nquit\n'
+            )
+            assert 'RETURN_RECOVERING' in log, log
+            if mode == 'transient':
+                assert 'RETURN_RECOVERED' in log, log
+                assert sum(e['event'] == 'returned' for e in events) == 1, log
+                assert math.hypot(pose[0], pose[1]) < 0.03, pose
+            else:
+                assert 'RETURN_RECOVERY_TIMEOUT' in log, log
+                assert not any(e['event'] == 'returned' for e in events), log
+                assert any(e['event'] == 'incomplete' for e in events), log
+        print('PASS return recovery', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'directional_return':
         events, log = run(
             'directional_return', [row('f', 'forward', 0.08, 'left')], 'next\nback\nBACK\nquit\n'
