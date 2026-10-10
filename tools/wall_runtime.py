@@ -11,7 +11,7 @@ import time
 
 from action_plan import Pose, errors
 from action_runtime import PlannedRunner
-from wall_geometry import DIRECTIONS, fit_wall, scan_points, swept_clearance
+from wall_geometry import DIRECTIONS, fit_wall, scan_points, swept_clearance, side_distance
 from wall_policy import Policy, command
 
 
@@ -74,6 +74,67 @@ class WallRunner(PlannedRunner):
             return {side: fit_wall(points, counts, side) for side in sides}
         except ValueError as error:
             raise WallFitError(f'WALL_LOST: {error}') from error
+
+    def motion_walls(self, sides, heading):
+        """Use held-heading side distances; front arrival retains the original TLS estimator."""
+        points, counts = self.geometry()
+        error = math.atan2(
+            math.sin(heading - self.moving_pose().yaw), math.cos(heading - self.moving_pose().yaw)
+        )
+        try:
+            return {
+                side: side_distance(points, counts, side, error)
+                if side in ('left', 'right')
+                else fit_wall(points, counts, side)
+                for side in sides
+            }
+        except ValueError as error:
+            raise WallFitError(f'WALL_LOST: {error}') from error
+
+    def recover_walls(self, sides, heading, movement, prior):
+        """Hold zero for at most two seconds; require three distinct stable stopped scans.
+
+        Feedback/TF/obstacle failures propagate immediately. A previous wall cannot
+        be silently replaced by a surface over 3 cm away during this stationary retry.
+        """
+        started = time.monotonic()
+        stamp, samples = None, []
+        print('WALL_RECOVERING: zero commands; 2 s budget, three stopped scans', flush=True)
+        while time.monotonic() - started < min(2.0, 4.0 - self.recovery_seconds):
+            self.send((0.0, 0.0, 0.0))
+            self.pump()
+            self.moving_pose()
+            self.guard_translation((0.0, 0.0, 0.0), movement)
+            try:
+                walls = self.motion_walls(sides, heading)
+            except WallFitError:
+                samples = []
+                stamp = self.cached_stamp
+                continue
+            if self.cached_stamp == stamp:
+                continue
+            stamp = self.cached_stamp
+            gaps = {side: wall.gap for side, wall in walls.items()}
+            if (
+                self.latest[2] >= 0.01
+                or self.latest[3] >= 0.02
+                or any(abs(gaps[k] - v) > 0.03 for k, v in prior.items())
+            ):
+                samples = []
+                continue
+            samples = (samples + [gaps])[-3:]
+            if len(samples) == 3 and all(
+                max(row[k] for row in samples) - min(row[k] for row in samples) < 0.015
+                for k in gaps
+            ):
+                self.recovery_seconds += time.monotonic() - started
+                if self.recovery_seconds > 4.0:
+                    raise RuntimeError('WALL_RECOVERY_BUDGET: 4 s cumulative limit')
+                print('WALL_RECOVERED: fresh stable wall distances; target retained', flush=True)
+                return
+        if self.recovery_seconds + time.monotonic() - started >= 4.0:
+            raise RuntimeError('WALL_RECOVERY_BUDGET: 4 s cumulative limit')
+        raise RuntimeError('WALL_RECOVERY_TIMEOUT: wall did not stabilize within 2 s')
 
     def moving_pose(self):
         """Read fresh odometry without the stopped-speed qualification used at endpoints."""
@@ -177,6 +238,19 @@ class WallRunner(PlannedRunner):
         if swept_clearance(points, *velocity) < 0.02:
             raise RuntimeError('OBSTACLE: predicted body clearance below 2 cm')
 
+    def checked_motion_gaps(self, sides, heading, movement, prior):
+        """Recover only fit loss/jumps; critical feedback errors leave through the stop handler."""
+        try:
+            walls = self.motion_walls(sides, heading)
+            gaps = {name: wall.gap for name, wall in walls.items()}
+            if any(abs(gaps[k] - v) > 0.03 for k, v in prior.items()):
+                raise WallFitError('Wall distance jumped by more than 3 cm')
+            return gaps
+        except WallFitError:
+            self.send((0.0, 0.0, 0.0))
+            self.recover_walls(sides, heading, movement, prior)
+            return None
+
     def translation(self, step, target, policy):
         """Closed-loop distance/wall arrival with heading hold, travel bound and stable endpoint."""
         start = self.pose()
@@ -189,18 +263,15 @@ class WallRunner(PlannedRunner):
         )
         heading = target.yaw
         c, s = math.cos(heading), math.sin(heading)
-        sides = set()
-        if policy.follow != 'none':
-            sides.add(policy.follow)
-        if policy.stop != 'distance':
-            sides.add(policy.stop)
+        sides = {side for side in (policy.follow, policy.stop) if side in DIRECTIONS}
         movement = {'forward': 'front', 'backward': 'rear', 'left': 'left', 'right': 'right'}[
             step.kind
         ]
-        self.walls(sides)
         self.velocity_pub = self.node.create_publisher(self.twist, '/cmd_vel', 10)
         deadline = time.monotonic() + policy.max_travel / 0.03 * 3 + 20
         previous = start
+        prior_gaps = {}
+        self.recovery_seconds = 0.0
         path = 0.0
         hold = None
         last_log = 0.0
@@ -221,8 +292,11 @@ class WallRunner(PlannedRunner):
                 'left': (left, forward),
                 'right': (-left, forward),
             }[step.kind]
-            walls = self.walls(sides)
-            gaps = {name: w.gap for name, w in walls.items()}
+            gaps = self.checked_motion_gaps(sides, heading, movement, prior_gaps)
+            if gaps is None:
+                hold = None
+                continue
+            prior_gaps = gaps
             velocity, ready, residual = command(
                 step,
                 policy,
@@ -264,7 +338,7 @@ class WallRunner(PlannedRunner):
             if time.monotonic() - last_log >= 1:
                 print(
                     f'WALL_PROGRESS {step.name} progress={progress:.3f} path={path:.3f} '
-                    f'gaps={gaps} residual={residual}',
+                    f'gaps={gaps} residual={residual} side_estimator=held_heading_30deg',
                     flush=True,
                 )
                 last_log = time.monotonic()

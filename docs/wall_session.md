@@ -190,7 +190,7 @@ action. Inspect and return before changing the preceding translation target.
 ## Dominant wall fitting
 
 Wall sessions enable `robust_wall_heading` for preparation (legacy default remains false).
-Both heading and body-clearance fits select a dominant line using bounded candidate
+Heading, stopped-reference and front-arrival fits select a dominant line using bounded candidate
 pairs and a 12 mm perpendicular inlier threshold. At least 80% of valid window points
 must agree; original minimum return coverage, fitted span, angle and RMS checks still
 apply. Preparation retains the continuous stability gate. No dominant line means stop.
@@ -203,7 +203,7 @@ Stopped reference capture tolerates individual fresh-scan fit rejections within 
 original four-second deadline. Each rejected fit clears the five-frame sequence;
 only five distinct stable accepted scans commit a new reference. Stale/missing
 feedback, TF failures and cancellation still abort immediately. Movement-time wall
-loss remains an immediate stop. Permanent bad fits time out with the last fit reason.
+loss immediately commands zero, with the bounded stationary recovery described below. Permanent bad fits time out with the last fit reason.
 
 Wall-guided heading preparation collects at least eight accepted stopped scans spanning
 0.5 seconds in a recent 1.5-second window. Directions are expressed in odom and
@@ -212,3 +212,24 @@ yaw target is frozen during odom-controlled rotation. After settling, a fresh wi
 verifies alignment against the unchanged heading tolerance. At most two refinements
 are allowed; existing preparation/scan/odom guards remain active. Legacy non-robust
 alignment is unchanged. Logs distinguish frozen odom target and wall verification.
+
+
+## Side-distance tracking and bounded recovery
+
+During translation, side distances use a +/-30 degree window (previously +/-20).
+The held odom heading supplies the wall normal in the current body frame; the median
+projected distance estimates offset without treating noisy fitted angles as new headings.
+At least 80% of valid returns must lie within 20 mm of the median, with 60% ray coverage,
+12 mm RMS and 8 cm span. Front arrival and initialization retain their existing fit.
+Raw obstacle points are never discarded by this estimator. The three user scan replays
+in `test/side_distance_scans.json` cover initial, centered and interrupted placements;
+they are base-link points under the user-provided mounting TF, not ground truth.
+
+A fit failure or a distance jump over 3 cm commands zero immediately. The action keeps
+its original target and waits at most two seconds for three distinct stopped scans
+with less than 15 mm gap spread. A recovered wall must stay within 3 cm of the last
+accepted distance. Total recovery time is limited to four seconds per action. Odom,
+scan/TF and obstacle failures still abort immediately. Timeout retains a partial action;
+`back` returns to its recorded start before retrying. Logs identify `WALL_RECOVERING`,
+`WALL_RECOVERED` and the constrained side estimator. This is local validation, pending
+cloud single-step acceptance; it does not certify gaps or the entire hardware route.

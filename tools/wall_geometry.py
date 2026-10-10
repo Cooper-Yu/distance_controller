@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import math
+from statistics import median
 
 DIRECTIONS = {'front': 0.0, 'left': math.pi / 2, 'right': -math.pi / 2, 'rear': math.pi}
 # Union of chassis and wheel rectangles from the local ROSbot XL model.
@@ -46,7 +47,7 @@ def scan_points(scan, transform):
         raise ValueError('Nonfinite laser geometry')
     if scan.angle_increment == 0 or not 0 < scan.range_min < scan.range_max:
         raise ValueError('Invalid scan bounds')
-    points, counts = [], dict.fromkeys(DIRECTIONS, 0)
+    points, counts = [], dict.fromkeys((*DIRECTIONS, 'left_wide', 'right_wide'), 0)
     for i, distance in enumerate(scan.ranges):
         angle = scan.angle_min + i * scan.angle_increment
         c, s = math.cos(angle), math.sin(angle)
@@ -58,6 +59,13 @@ def scan_points(scan, transform):
                 math.atan2(math.sin(bearing - center), math.cos(bearing - center))
             ) <= math.radians(20):
                 counts[name] += 1
+        for side in ('left', 'right'):
+            if abs(
+                math.atan2(
+                    math.sin(bearing - DIRECTIONS[side]), math.cos(bearing - DIRECTIONS[side])
+                )
+            ) <= math.radians(30):
+                counts[side + '_wide'] += 1
         if math.isfinite(distance) and scan.range_min <= distance <= scan.range_max:
             points.append((t.x + distance * dx, t.y + distance * dy, bearing))
     return points, counts
@@ -147,3 +155,36 @@ def swept_clearance(points, vx=0.0, vy=0.0, wz=0.0, duration=0.5):
             px, py = x - vx * dt, y - vy * dt
             best = min(best, point_clearance(c * px + s * py, -s * px + c * py))
     return best
+
+
+def side_distance(points, counts, side, heading_error):
+    """Estimate side offset in a +/-30 degree window using the held odom direction.
+
+    Require 80% within 20 mm of the median projection, 60% scan coverage,
+    12 mm RMS and 8 cm longitudinal span. This is a distance estimator, not
+    a new heading observation. All original returns remain available to guards.
+    """
+    if side not in ('left', 'right') or not math.isfinite(heading_error):
+        raise ValueError('Invalid constrained side direction')
+    center = DIRECTIONS[side]
+    nx, ny = math.cos(center + heading_error), math.sin(center + heading_error)
+    selected = [
+        (x, y)
+        for x, y, bearing in points
+        if abs(math.atan2(math.sin(bearing - center), math.cos(bearing - center)))
+        <= math.radians(30)
+    ]
+    expected = counts.get(side + '_wide', counts[side])
+    if len(selected) < 8 or len(selected) < 0.6 * expected:
+        raise ValueError(f'{side}: insufficient wide-window returns')
+    offset = median(nx * x + ny * y for x, y in selected)
+    inliers = [(x, y) for x, y in selected if abs(nx * x + ny * y - offset) <= 0.020]
+    if len(inliers) * 5 < len(selected) * 4 or len(inliers) < 0.6 * expected:
+        raise ValueError(f'{side}: constrained distance lacks 80 percent consensus')
+    offset = median(nx * x + ny * y for x, y in inliers)
+    rms = math.sqrt(sum((nx * x + ny * y - offset) ** 2 for x, y in inliers) / len(inliers))
+    along = [ny * x - nx * y for x, y in inliers]
+    span = max(along) - min(along)
+    if rms > 0.012 or span < 0.08:
+        raise ValueError(f'{side}: constrained distance rough or short')
+    return Wall(offset - support(nx, ny), heading_error, rms, span, len(inliers), len(selected))

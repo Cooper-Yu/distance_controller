@@ -587,3 +587,13 @@ xmllint timeout remain; the repository uses Ruff/clang-format conventions.
 See [Supervised reverse survey](docs/survey_return.md) for the provisional Task6 return route. Preview with `ros2 run distance_controller survey_return`; execution requires one explicit step and physical verification. No automatic full-route replay or old-odom restoration is provided.
 
 Read and save four-direction laser ranges without moving: `ros2 run distance_controller survey_return --measure`. Executed return actions save before/after observations in their JSON audits; unavailable scans are explicit. See the supervised reverse survey guide for range definitions.
+
+
+### Task6 side-wall tracking update
+
+Wall-guided translations now use a held-heading side-distance estimate over +/-30 degrees.
+Brief fit loss stops motion and allows bounded stationary recovery; persistent loss leaves
+an incomplete action. Preparation and front-wall arrival keep their existing estimators.
+See [wall session details](docs/wall_session.md#side-distance-tracking-and-bounded-recovery).
+Manual BODY_CLEARANCE output still reports the original independent line fits; motion logs
+identify the constrained side estimator separately. Cloud step-by-step validation is pending.

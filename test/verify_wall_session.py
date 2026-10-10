@@ -43,10 +43,11 @@ def receive(msg):
 sub = node.create_subscription(Twist, '/cmd_vel', receive, 10)
 last_scan = 0.0
 scan_number = 0
+bad_scan_start = None
 
 
 def tick(previous, scan_enabled=True, front=0.55):
-    global last_scan, scan_number
+    global last_scan, scan_number, bad_scan_start
     rclpy.spin_once(node, timeout_sec=0.008)
     now = time.monotonic()
     dt = min(now - previous, 0.03)
@@ -83,6 +84,19 @@ def tick(previous, scan_enabled=True, front=0.55):
                 candidates.append(((0.3 if dy > 0 else -0.5) - y) / dy)
             distance = min(v for v in candidates if v > 0)
             values.append(distance if distance >= 0.15 else float('inf'))
+        mode = os.getenv('WALL_LOSS_MODE', '')
+        if mode and pose[0] > 0.025 and bad_scan_start is None:
+            bad_scan_start = now
+        if (
+            mode
+            and bad_scan_start is not None
+            and (mode == 'permanent' or now - bad_scan_start < 0.6)
+        ):
+            for i in range(len(values)):
+                bearing = scan.angle_min + i * scan.angle_increment + math.pi
+                delta = math.atan2(math.sin(bearing - math.pi / 2), math.cos(bearing - math.pi / 2))
+                if abs(delta) < math.radians(32) and i % 2 == 0:
+                    values[i] += 0.15
         scan.ranges = values
         scan_pub.publish(scan)
         last_scan = now
@@ -145,6 +159,20 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55):
 
 
 try:
+    if os.getenv('WALL_CASE') == 'recovery':
+        os.environ['WALL_LOSS_MODE'] = 'transient'
+        events, log = run('transient_fit_loss', [row('f', 'forward', 0.08, 'left')], 'next\nquit\n')
+        assert sum(e['event'] == 'completed' for e in events) == 1, log[-4000:]
+        assert 'WALL_RECOVERED' in log, log[-4000:]
+        bad_scan_start = None
+        os.environ['WALL_LOSS_MODE'] = 'permanent'
+        events, log = run(
+            'persistent_fit_loss', [row('f', 'forward', 0.08, 'left')], 'next\nquit\n'
+        )
+        assert any(e['event'] == 'incomplete' for e in events), log[-4000:]
+        assert 'WALL_RECOVERY_TIMEOUT' in log, log[-4000:]
+        print('PASS recovery', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'independent':
         rows = [row('independent', 'forward', 0.2, 'left', 'front')]
         rows[0]['wall'].update(follow_clearance=0.12, stop_clearance=0.16)
