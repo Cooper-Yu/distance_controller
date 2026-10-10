@@ -1061,11 +1061,13 @@ private:
    * @param[in] current_time ROS time from on_timer(), used for continuous stopped qualification.
    * @return True while startup is consuming this tick; false after adoption or when disabled.
    * @note Reads validated odom; writes heading_reference_ and a fresh local history origin A.
-   * Clears pending routes and enters WAITING. Never restores old history or commands motion.
+   * Clears pending routes and enters WAITING. Never restores old history. Optional planned yaw
+   * is subsequently held by handle_manual_wait(); differences over 0.10 rad latch a fault.
    */
   bool handle_current_pose_start(const rclcpp::Time & current_time);
-  bool adopt_current_pose_{false}; ///< Startup-only opt-in for scene-2 manual intermediate stops.
-
+  bool adopt_planned_heading_{false};  ///< Opt-in: hold the route session's planned odom yaw.
+  double planned_heading_{};  ///< Planned odom yaw (rad); adoption rejects errors above 0.10 rad.
+  bool adopt_current_pose_{false};  ///< Startup-only opt-in for scene-2 manual intermediate stops.
 };
 
 #endif

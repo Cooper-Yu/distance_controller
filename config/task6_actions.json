@@ -1,0 +1,131 @@
+{
+  "status": "provisional_merged_survey_not_full_route_verified",
+  "actions": [
+    {
+      "name": "01_P01_P02_forward",
+      "kind": "forward",
+      "value": 0.9,
+      "unit": "m"
+    },
+    {
+      "name": "02_P02_P03_forward",
+      "kind": "forward",
+      "value": 0.82,
+      "unit": "m"
+    },
+    {
+      "name": "03_P03_turn",
+      "kind": "turn",
+      "value": -90.0,
+      "unit": "deg"
+    },
+    {
+      "name": "04_P03_P04_forward",
+      "kind": "forward",
+      "value": 0.45,
+      "unit": "m"
+    },
+    {
+      "name": "05_P04_P05_right",
+      "kind": "right",
+      "value": 0.27,
+      "unit": "m"
+    },
+    {
+      "name": "06_P05_P06_forward",
+      "kind": "forward",
+      "value": 0.52,
+      "unit": "m"
+    },
+    {
+      "name": "07_P06_P07_left",
+      "kind": "left",
+      "value": 0.4,
+      "unit": "m"
+    },
+    {
+      "name": "08_P07_P08_forward",
+      "kind": "forward",
+      "value": 0.5,
+      "unit": "m"
+    },
+    {
+      "name": "09_P08_P09_right",
+      "kind": "right",
+      "value": 0.5,
+      "unit": "m"
+    },
+    {
+      "name": "10_P09_P10_forward",
+      "kind": "forward",
+      "value": 0.4,
+      "unit": "m"
+    },
+    {
+      "name": "11_P10_turn",
+      "kind": "turn",
+      "value": -90.0,
+      "unit": "deg"
+    },
+    {
+      "name": "12_P10_P11_forward",
+      "kind": "forward",
+      "value": 0.4,
+      "unit": "m"
+    },
+    {
+      "name": "13_P11_turn",
+      "kind": "turn",
+      "value": -90.0,
+      "unit": "deg"
+    },
+    {
+      "name": "14_P11_P12_forward",
+      "kind": "forward",
+      "value": 0.8,
+      "unit": "m"
+    },
+    {
+      "name": "15_P12_turn",
+      "kind": "turn",
+      "value": 90.0,
+      "unit": "deg"
+    },
+    {
+      "name": "16_P12_P13_forward",
+      "kind": "forward",
+      "value": 0.55,
+      "unit": "m"
+    },
+    {
+      "name": "17_P13_turn",
+      "kind": "turn",
+      "value": -90.0,
+      "unit": "deg"
+    },
+    {
+      "name": "18_P13_P14_forward",
+      "kind": "forward",
+      "value": 0.48,
+      "unit": "m"
+    },
+    {
+      "name": "19_P14_turn",
+      "kind": "turn",
+      "value": 90.0,
+      "unit": "deg"
+    },
+    {
+      "name": "20_P14_P15_forward",
+      "kind": "forward",
+      "value": 0.4,
+      "unit": "m"
+    },
+    {
+      "name": "21_P15_turn",
+      "kind": "turn",
+      "value": 180.0,
+      "unit": "deg"
+    }
+  ]
+}

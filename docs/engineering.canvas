@@ -35,6 +35,33 @@
       "y": 560,
       "width": 440,
       "height": 420
+    },
+    {
+      "id": "action-session-guide",
+      "type": "file",
+      "file": "docs/action_session.md",
+      "x": 1100,
+      "y": 900,
+      "width": 360,
+      "height": 180
+    },
+    {
+      "id": "action-plan",
+      "type": "file",
+      "file": "tools/action_plan.py",
+      "x": 1500,
+      "y": 900,
+      "width": 360,
+      "height": 180
+    },
+    {
+      "id": "action-runtime",
+      "type": "file",
+      "file": "tools/action_runtime.py",
+      "x": 1500,
+      "y": 1150,
+      "width": 360,
+      "height": 180
     }
   ],
   "edges": [
@@ -61,6 +88,20 @@
       "toNode": "package-api",
       "toSide": "top",
       "label": "Package to interface"
+    },
+    {
+      "id": "guide-plan",
+      "fromNode": "action-session-guide",
+      "fromSide": "right",
+      "toNode": "action-plan",
+      "toSide": "left"
+    },
+    {
+      "id": "guide-runtime",
+      "fromNode": "action-session-guide",
+      "fromSide": "right",
+      "toNode": "action-runtime",
+      "toSide": "left"
     }
   ]
 }

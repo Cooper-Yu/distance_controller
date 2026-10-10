@@ -49,6 +49,10 @@ target_link_libraries(distance_controller_node "${step_typesupport}")
 ament_export_dependencies(rosidl_default_runtime)
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS tools/step.py DESTINATION lib/${PROJECT_NAME} RENAME step)
+install(PROGRAMS tools/survey_return.py DESTINATION lib/${PROJECT_NAME} RENAME survey_return)
+install(FILES tools/survey_distances.py tools/survey_return.py tools/action_plan.py
+  tools/action_runtime.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS tools/action_session.py DESTINATION lib/${PROJECT_NAME} RENAME action_session)
 
 install(
   TARGETS distance_controller_node

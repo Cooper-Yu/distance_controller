@@ -267,6 +267,13 @@ def run_case(name, fn, extra=None):
         (OUT / 'results.json').write_text(json.dumps(RESULTS, indent=2))
 
 
+def planned_heading_mismatch(p):
+    """A large planned yaw mismatch must latch a stop, never turn during adoption."""
+    initial = (p.x, p.y, p.yaw)
+    p.fault('PLANNED_HEADING_MISMATCH')
+    assert max(abs(a - b) for a, b in zip(initial, (p.x, p.y, p.yaw))) < 1e-6
+
+
 def adopt_pose(p):
     p.scan_enabled = False
     p.yaw = -1.7
@@ -732,6 +739,11 @@ try:
             'segments.BD.speed': '.1',
             'segments.BD.dwell': '.02',
         },
+    )
+    run_case(
+        'planned_heading_mismatch',
+        planned_heading_mismatch,
+        {'adopt_current_pose': 'true', 'adopt_planned_heading': 'true', 'planned_heading': '1.2'},
     )
     run_case('adopt_pose', adopt_pose, {'adopt_current_pose': 'true'})
     run_case('sequence', sequence)

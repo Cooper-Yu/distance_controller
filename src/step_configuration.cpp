@@ -28,6 +28,11 @@ void DistanceController::configure_route_steps(double forward_distance, double l
   if (adopt_current_pose_ && !manual_mode_)
     throw std::invalid_argument("adopt_current_pose requires manual_mode");
   if (adopt_current_pose_) start_paused_ = true;
+  adopt_planned_heading_ = declare_parameter<bool>("adopt_planned_heading", false);
+  planned_heading_ = declare_parameter<double>("planned_heading", 0.0);
+  if (!std::isfinite(planned_heading_) || (adopt_planned_heading_ && !adopt_current_pose_))
+    throw std::invalid_argument(
+      "planned_heading must be finite; enable only with adopt_current_pose");
   front_body_extent_ = declare_parameter<double>("front_body_extent", -1.0);
   if (
     (start_paused_ && !manual_mode_) || !std::isfinite(front_body_extent_) ||

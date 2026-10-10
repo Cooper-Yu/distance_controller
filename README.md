@@ -1,5 +1,9 @@
 # distance_controller
 
+## Editable action sessions
+
+For Task6 route exploration, use [one-origin action sessions](docs/action_session.md): separate translation/turn actions, regenerate future targets, execute one step, return to actual stops, edit and retry. Start with `ros2 run distance_controller action_session` for a motion-free preview. The supplied route remains provisional; Task1/2 tags are unchanged.
+
 A ROS2 Humble planar distance controller for ROSBot XL. It uses odometry feedback, planar PID, speed and acceleration limits, and odom-to-body velocity conversion. Each segment ends with verified standstill and an extra dwell; the node stops and exits after the final segment unless manual continuation is enabled.
 
 The Task1 acceptance snapshot is Git tag `task1` (`e1a26a6`), which remains unchanged. Scene 2 supports independently configured segments, manual continuation, completed-step history and sequential return. Current history/return features have local test coverage; their cloud/hardware acceptance remains pending.
@@ -574,3 +578,9 @@ is nonzero, remains stopped, captures a rotated pose, moves forward along its he
 then stops/exits. Existing manual sequence regression also passed. Build and GTest passed.
 The general colcon suite is not fully green: flake8/uncrustify style failures and
 xmllint timeout remain; the repository uses Ruff/clang-format conventions.
+
+## Supervised reverse survey
+
+See [Supervised reverse survey](docs/survey_return.md) for the provisional Task6 return route. Preview with `ros2 run distance_controller survey_return`; execution requires one explicit step and physical verification. No automatic full-route replay or old-odom restoration is provided.
+
+Read and save four-direction laser ranges without moving: `ros2 run distance_controller survey_return --measure`. Executed return actions save before/after observations in their JSON audits; unavailable scans are explicit. See the supervised reverse survey guide for range definitions.

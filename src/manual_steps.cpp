@@ -214,7 +214,15 @@ bool DistanceController::handle_current_pose_start(const rclcpp::Time & current_
     alignment_settle_start_ = current_time;
   }
   if ((current_time - alignment_settle_start_).seconds() < alignment_settle_duration_) return true;
-  heading_reference_ = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+  const double observed_heading = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+  if (
+    adopt_planned_heading_ && std::abs(std::atan2(
+                                std::sin(planned_heading_ - observed_heading),
+                                std::cos(planned_heading_ - observed_heading))) > 0.10) {
+    fail_step("PLANNED_HEADING_MISMATCH: execute a separate turn first");
+    return true;
+  }
+  heading_reference_ = adopt_planned_heading_ ? planned_heading_ : observed_heading;
   initial_alignment_complete_ = true;
   segments_.clear();
   record_route_origin();

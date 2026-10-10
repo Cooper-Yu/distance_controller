@@ -11,3 +11,8 @@ htmlcov/
 coverage/
 docs/doxygen_warnings.log
 node_modules/
+
+# Local supervised-session evidence (authoritative copies go in training notes).
+/action_session_*.jsonl
+/return_step_*.json
+/laser_observation_*.json
