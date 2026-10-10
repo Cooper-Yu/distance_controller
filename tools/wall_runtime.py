@@ -39,6 +39,10 @@ class ReturnClearanceError(RuntimeError):
     """Recoverable return obstacle; feedback and turn failures remain immediate failures."""
 
 
+class TurnClearanceError(RuntimeError):
+    """Stop the delegated turn before bounded stationary clearance verification."""
+
+
 class WallRunner(PlannedRunner):
     """Own one wall-action lifetime and carry a verified scalar body-gap reference."""
 
@@ -354,11 +358,16 @@ class WallRunner(PlannedRunner):
             scenarios = (
                 self.return_scenarios()
                 if self.turn_sign == 0
-                else [(0.0, 0.0, self.turn_sign * 0.20)]
+                else [
+                    *self.return_scenarios(),
+                    (0.0, 0.0, self.turn_sign * getattr(self, 'turn_speed', 0.20)),
+                ]
             )
             gap = min(swept_clearance(pts, *velocity) for velocity in scenarios)
             if gap < 0.02:
                 self.reject_sweep(pts, gap, scenarios)
+            if self.turn_sign and getattr(self, 'turn_speed', 0.20) > 0.08 and gap < 0.035:
+                raise TurnClearanceError('TURN_SLOWDOWN: predicted clearance below 3.5 cm')
 
     def reject_sweep(self, points, protected_gap, scenarios):
         """Record the limiting directional prediction, retaining all raw obstacle returns."""
@@ -392,7 +401,7 @@ class WallRunner(PlannedRunner):
         summary = {k: v for k, v in detail.items() if k != 'points_base_xy_bearing'}
         print('CLEARANCE_DIAGNOSTIC ' + json.dumps(summary), flush=True)
         code = 'RETURN_CLEARANCE' if returning else 'TURN_CLEARANCE'
-        error = ReturnClearanceError if returning else RuntimeError
+        error = ReturnClearanceError if returning else TurnClearanceError
         raise error(f'{code}: protected clearance below 2 cm; see diagnostic')
 
     def capture_reference(self, side, heading=None):
@@ -691,30 +700,18 @@ class WallRunner(PlannedRunner):
         actual = self.pose()
         delta = target.yaw - actual.yaw
         points, counts = self.geometry()
-        # Require scan coverage in every quadrant for a rotation; missing returns are not free space.
-        for side, center in DIRECTIONS.items():
-            n = sum(
-                abs(math.atan2(math.sin(p[2] - center), math.cos(p[2] - center))) < math.radians(20)
-                for p in points
-            )
-            if n < 8 or n < 0.5 * counts[side]:
-                raise RuntimeError(f'Turn scan coverage unavailable: {side}')
-        for i in range(1, max(2, int(abs(delta) / 0.04) + 1)):
-            angle = delta * i / max(2, int(abs(delta) / 0.04))
-            if swept_clearance(points, wz=angle, duration=1) < 0.02:
-                raise RuntimeError('Turn would sweep within 2 cm of observed obstacle')
+        from turn_recovery import remaining_clearance
+
+        if remaining_clearance(points, counts, delta) < 0.02:
+            raise RuntimeError('Turn would sweep within 2 cm of observed obstacle')
         print(f'TURN_CHECK: full observed sweep passed, delta={delta:.6f} rad', flush=True)
 
     def turn(self, step, target, policy):
         """Recheck at execution time even if a previous stopped check passed."""
         self.check_turn(target)
-        delta = target.yaw - self.pose().yaw
-        self.turn_sign = 1 if delta > 0 else -1
-        self.turn_guard = True
-        try:
-            self.rotate_target(target)
-        finally:
-            self.turn_guard = False
+        from turn_recovery import supervised_turn
+
+        supervised_turn(self, target)
         if policy.capture != 'none':
             self.capture_reference(policy.capture, target.yaw)
         self.last_report = {

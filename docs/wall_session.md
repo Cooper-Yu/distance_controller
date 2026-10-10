@@ -584,3 +584,27 @@ the recorded original XY using guarded small translation.
 
 This is an explicit local correction, not a new default wall-follow clearance.
 The P03 scan suggested 2 cm right as a candidate; live checks may still refuse it.
+## Bounded turn slowdown and stopped recovery
+
+Turns retain a 2 cm hard clearance threshold and 0.5 s prediction horizon.
+During execution the guard checks measured body velocity (including translation),
+the recent controller command and the configured turn-speed envelope. Below
+3.5 cm predicted clearance at normal speed, the coordinator stops and reaps the
+turn controller before starting a zero-command verification window. A prediction
+below 2 cm also stops immediately; suspect returns are not discarded.
+
+Within 2 seconds, three distinct fresh scan/odom pairs over at least 0.2 seconds
+must report stopped motion and at least 2.5 cm clearance throughout the remaining
+rotation. Successful verification restarts toward the **same absolute yaw** with
+maximum speed 0.08 rad/s. There are at most two recovery attempts per execution.
+Persistent obstruction, missing coverage or stale feedback leaves an incomplete
+checkpoint. No arrival is recorded until the actual turn completes.
+
+The slowdown uses a deliberate stop/restart because the child owns `/cmd_vel`;
+there is no competing publisher trying to override its angular command. The
+prediction horizon has not been shortened without measured braking evidence.
+A resumed half-turn still undergoes the full remaining-sweep precheck. Updating
+this version therefore does not guarantee that the current P03 pose can turn.
+
+Local ROS fixtures cover a close-wall slowdown, transient obstacle recovery and
+persistent-obstacle rejection. Real robot verification remains pending.

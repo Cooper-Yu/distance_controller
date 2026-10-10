@@ -77,7 +77,16 @@ def inject_narrow_patch(values, scan, now):
     inject_return_obstacle(values, now)
 
 
-def tick(previous, scan_enabled=True, front=0.55):
+def inject_turn_obstacle(values, now):
+    """Latch a near-front return after rotation starts, including while stopped."""
+    if os.getenv('TURN_LOSS_MODE') and pose[2] < -0.2:
+        if not hasattr(node, 'turn_loss_start'):
+            node.turn_loss_start = now
+        if os.getenv('TURN_LOSS_MODE') == 'permanent' or now - node.turn_loss_start < 0.6:
+            values[0:3] = [0.165] * 3
+
+
+def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0915 - one fixture sensor tick with explicit fault injections
     global last_scan, scan_number, bad_scan_start
     rclpy.spin_once(node, timeout_sec=0.008)
     now = time.monotonic()
@@ -137,6 +146,7 @@ def tick(previous, scan_enabled=True, front=0.55):
                 delta = math.atan2(math.sin(bearing - math.pi / 2), math.cos(bearing - math.pi / 2))
                 if abs(delta) < math.radians(35):
                     values[i] += 0.018 * ((i % 11) / 5 - 1) / abs(math.sin(bearing))
+        inject_turn_obstacle(values, now)
         inject_narrow_patch(values, scan, now)
         scan.ranges = values
         scan_pub.publish(scan)
@@ -206,6 +216,22 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'turn_recovery':
+        mode = os.getenv('TURN_LOSS_MODE', '')
+        if not mode:
+            os.environ['WALL_LEFT_Y'] = '0.247'
+        events, log = run('turn_recovery', [row('turn', 'turn', -90)], 'next\nquit\n')
+        if mode == 'permanent':
+            assert any(e['event'] == 'incomplete' for e in events), log[-5000:]
+            assert 'TURN_RECOVERY_TIMEOUT' in log, log[-5000:]
+            assert not any(e['event'] == 'completed' for e in events)
+        else:
+            assert sum(e['event'] == 'completed' for e in events) == 1, log[-5000:]
+            assert 'TURN_RECOVERED' in log and 'max_wz=0.080' in log, log[-5000:]
+            assert abs(pose[2] + math.pi / 2) < 0.015, pose
+        assert max(abs(v) for v in velocity) < 1e-6, velocity
+        print('PASS turn recovery', mode or 'slowdown', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'turn_adjust':
         os.environ['WALL_LEFT_Y'] = '0.224'
         rows = [row('turn', 'turn', -90)]

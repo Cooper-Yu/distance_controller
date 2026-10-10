@@ -204,7 +204,7 @@ class PlannedRunner(Runner):
                 '-p',
                 f'turn_angles:=[{delta}]',
                 '-p',
-                'max_angular_speed:=0.20',
+                f'max_angular_speed:={getattr(self, "turn_speed", 0.20)}',
                 '-p',
                 'segment_timeout:=60.0',
             ]

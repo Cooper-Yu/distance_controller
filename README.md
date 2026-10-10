@@ -616,3 +616,7 @@ Existing partial checkpoints require an explicit policy edit; see
 
 Task6 blocked-turn adjustment: `adjust_turn 0.02` performs a guarded, checkpointed
 2 cm right correction without starting the turn. See [wall-session limits and retries](docs/wall_session.md#explicit-clearance-adjustment-before-a-blocked-turn).
+
+Task6 turns now stop and verify near the clearance boundary, then resume at
+0.08 rad/s only after fresh stopped scans pass. Two retries maximum; the 2 cm
+protection and fixed yaw target remain. See [turn recovery](docs/wall_session.md#bounded-turn-slowdown-and-stopped-recovery).
