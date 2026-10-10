@@ -723,3 +723,47 @@ A cloud report had 3.90 cm net right movement but 6.63 cm accumulated path; it
 cannot establish whether the excess came from real corrections or odom jitter.
 Local regression seeds that saved path and the reported residual errors, and
 verifies completion at the original target without accumulating another offset.
+
+### One-shot visually monitored turn
+
+`manual_turn` explicitly makes clearance checks log-only for **one outward turn**.
+It accepts a pending turn or resumes the saved partial turn to the same target;
+it never repeats the original full relative angle. Speed is capped at 0.08 rad/s.
+The full-sweep entry gate and runtime 2 cm stop/3.5 cm slowdown are bypassed for
+this invocation only. Per-scan predicted clearance is retained in the JSONL audit.
+This mode cannot establish collision-free motion. The operator must watch the
+robot continuously, account for video latency, and use Ctrl+C to stop.
+
+Fresh odom, scan and TF requirements, controller timeout, endpoint checks,
+exclusive velocity ownership and interrupt/error cleanup remain active. Pending
+adjustment/escape/rewind must still finish first. Wall-reference capture after
+the turn can still fail. Translation and history return are not overridden.
+The override is cleared on success, failure or interrupt and is never restored
+from a checkpoint. `next` and `resume` keep their normal guards.
+
+For an already stopped partial turn, save an absolute-path checkpoint, quit,
+update/build, then restore it only with unchanged odom and no manual relocation:
+
+```text
+route> checkpoint /home/user/ros2_ws/task6_manual_turn.checkpoint.json
+route> quit
+```
+
+```bash
+cd ~/ros2_ws/src/distance_controller
+git pull --ff-only
+cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select distance_controller
+source install/setup.bash
+ros2 run distance_controller action_session --resume ~/ros2_ws/task6_manual_turn.checkpoint.json
+```
+
+After confirming SAME_ODOM and inspecting the scene, `manual_turn` starts the
+single turn immediately; it does not ask for another confirmation. Completion
+returns to WAITING before the next translation. No automatic route continuation.
+
+Local verification: 149 Python tests, Ruff and colcon build; ROS raycast fixture
+first blocks a normal turn, completes its original target under manual mode,
+then blocks the next normal turn with the same injected obstacle. Final command
+is zero. This is interface/state verification, not a real collision test.

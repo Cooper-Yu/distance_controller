@@ -364,6 +364,20 @@ class WallRunner(PlannedRunner):
                 ]
             )
             gap = min(swept_clearance(pts, *velocity) for velocity in scenarios)
+            if self.turn_sign and getattr(self, 'manual_turn_active', False):
+                if getattr(self, 'manual_report_stamp', None) != self.cached_stamp:
+                    self.manual_report_stamp = self.cached_stamp
+                    self.observations.append(
+                        {
+                            'manual_turn_clearance': {
+                                'scan_stamp_ns': self.cached_stamp,
+                                'protected_gap_m': gap,
+                                'pose': asdict(self.latest[0]),
+                                'enforced': False,
+                            }
+                        }
+                    )
+                return
             if gap < 0.02:
                 self.reject_sweep(pts, gap, scenarios)
             if self.turn_sign and getattr(self, 'turn_speed', 0.20) > 0.08 and gap < 0.035:
@@ -708,14 +722,20 @@ class WallRunner(PlannedRunner):
 
     def turn(self, step, target, policy):
         """Recheck at execution time even if a previous stopped check passed."""
-        self.check_turn(target)
+        manual = getattr(self, 'manual_turn_active', False)
+        if manual:
+            self.geometry()  # Still require fresh scan/TF; distance checks are log-only.
+            print('MANUAL_TURN: full-sweep gate bypassed; speed=0.08 rad/s', flush=True)
+        else:
+            self.check_turn(target)
         from turn_recovery import supervised_turn
 
-        supervised_turn(self, target)
+        supervised_turn(self, target, initial_speed=0.08 if manual else 0.20)
         if policy.capture != 'none':
             self.capture_reference(policy.capture, target.yaw)
         self.last_report = {
             'completion': 'turn',
+            'clearance_mode': 'manual_log_only' if manual else 'enforced',
             'reference_m': self.reference,
             'policy': asdict(policy),
         }

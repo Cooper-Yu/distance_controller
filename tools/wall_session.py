@@ -37,6 +37,30 @@ class WallSession(Session):
         self.emit('wall_result', self.active[-1])
         return actual
 
+    def manual_turn(self):
+        """Run one outward turn under visual supervision; never persist the override.
+
+        Existing resume checks retain the fixed yaw, pending adjustment checks,
+        odom continuity and endpoint acceptance. Translation/back are excluded.
+        """
+        if self.cursor >= len(self.steps) or self.steps[self.cursor].kind != 'turn':
+            raise ValueError('manual_turn requires a pending outward turn')
+        if self.partial and (
+            self.partial['step']['kind'] != 'turn' or self.partial.get('return_started')
+        ):
+            raise ValueError('manual_turn cannot override a translation or return')
+        self.check_location()
+        self.emit('manual_turn_requested', {'index': self.cursor, 'speed_rad_s': 0.08})
+        print(
+            'MANUAL_TURN: clearance is log-only for ONE turn; watch robot, Ctrl+C stops', flush=True
+        )
+        self.backend.manual_turn_active = True
+        try:
+            return self.resume() if self.partial else self.next()
+        finally:
+            self.backend.manual_turn_active = False
+            self.emit('manual_turn_ended', {'index': self.cursor})
+
     def adjust_turn(self, distance):
         """Explicit rightward preparation; never starts the pending rotation."""
         from turn_adjustment import adjust_session

@@ -220,6 +220,21 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'manual_turn':
+        os.environ['TURN_LOSS_MODE'] = 'permanent'
+        events, log = run(
+            'manual_once',
+            [row('t1', 'turn', -30), row('t2', 'turn', 30)],
+            'next\nmanual_turn\nnext\nquit\n',
+        )
+        assert sum(e['event'] == 'completed' for e in events) == 1, log[-5000:]
+        assert sum(e['event'] == 'manual_turn_requested' for e in events) == 1
+        assert 'full-sweep gate bypassed; speed=0.08' in log
+        assert 'Turn would sweep within 2 cm' in log, log[-5000:]
+        assert abs(pose[2] + math.pi / 6) < 0.02
+        assert any(abs(v[2]) > 0.01 for _, v in command_samples)
+        print('PASS manual turn one-shot', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'turn_adjust_four':
         events, log = run(
             'four_cm', [row('turn', 'turn', -90)], 'adjust_turn 0.04\nadjust_turn 0.04\nquit\n'

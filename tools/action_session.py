@@ -103,6 +103,8 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
     elif verb == 'resume' and len(words) == 1:
         if input('Inspect stopped pose and path. Type RESUME: ').strip() == 'RESUME':
             print('Reached:', session.resume())
+    elif verb == 'manual_turn' and len(words) == 1 and hasattr(session, 'manual_turn'):
+        print('Reached:', session.manual_turn())
     elif verb == 'rewind_turn' and len(words) == 1 and hasattr(session, 'rewind_turn'):
         print('Rewound:', session.rewind_turn())
     elif verb == 'adjust_turn' and len(words) == 2 and hasattr(session, 'adjust_turn'):
@@ -149,7 +151,7 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
         session.emit('measurement', {})
     else:
         print(
-            'next | resume | rewind_turn | escape_turn 0.03 | adjust_turn RIGHT_METERS | checkpoint FILE | run | back | set INDEX METERS_OR_DEGREES | load FILE | save FILE | '
+            'next | resume | manual_turn | rewind_turn | escape_turn 0.03 | adjust_turn RIGHT_METERS | checkpoint FILE | run | back | set INDEX METERS_OR_DEGREES | load FILE | save FILE | '
             'policy INDEX follow_clearance|stop_clearance METERS_OR_auto | policy INDEX follow_offset|offset|max_travel|stop_tolerance VALUE | plan | status | history | measure | quit'
         )
 
