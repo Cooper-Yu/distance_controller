@@ -257,3 +257,29 @@ def transported_gaps(walls, previous, current):
             - support(math.cos(new_angle), math.sin(new_angle))
         )
     return expected
+
+
+def pose_at_scan(history, stamp, limit_ns=150_000_000):
+    """Pair a scan to bounded odom history, interpolating continuous yaw when bracketed.
+
+    Returns pose and worst sample offset. Outside the history, a nearest sample
+    is allowed only within the same bound; no motion extrapolation is performed.
+    """
+    if not history:
+        raise ValueError('No odom history for scan')
+    before = next(((t, p) for t, p in reversed(history) if t <= stamp), None)
+    after = next(((t, p) for t, p in history if t >= stamp), None)
+    if before and after and before[0] != after[0]:
+        offset = max(stamp - before[0], after[0] - stamp)
+        if offset > limit_ns:
+            raise ValueError(f'Odom bracket too wide for scan: {offset / 1e9:.3f} s')
+        fraction = (stamp - before[0]) / (after[0] - before[0])
+        a, b = before[1], after[1]
+        return type(a)(
+            *(getattr(a, k) + fraction * (getattr(b, k) - getattr(a, k)) for k in ('x', 'y', 'yaw'))
+        ), offset
+    nearest = before or after
+    offset = abs(nearest[0] - stamp)
+    if offset > limit_ns:
+        raise ValueError(f'No nearby odom for scan: {offset / 1e9:.3f} s')
+    return nearest[1], offset

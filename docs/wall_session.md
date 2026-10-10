@@ -458,9 +458,9 @@ RMS, 8 cm span and 12 degree normal limit still apply. This was replayed against
 Continuity compares measured gaps against the last trusted wall transported by
 odom translation and rotation, including the change in body support along its
 normal. The allowed residual remains 3 cm. The snapshot is fixed through a
-recovery and duplicate scans cannot re-anchor it. Scan/odom skew over 0.15 s,
+recovery and duplicate scans cannot re-anchor it. A scan without a historical odom pair within 0.15 s,
 translation over 8 cm or rotation over 0.15 rad from that snapshot rejects the
-compensation. This uses nearby odometry samples, not exact scan-time interpolation.
+compensation. Odom history retains up to 200 validated samples. Bracketed samples interpolate position and continuous yaw at the scan timestamp; outside the history a nearest sample within 0.15 s is used without extrapolation. The pairing is frozen for that scan, so newer odom does not invalidate a retained scan. Missing pairs enter the bounded zero-command wall recovery; stale feedback still aborts.
 The three stopped scans, 2 s retry and 4 s cumulative limits remain unchanged.
-`WALL_RECOVERY_CHECK` includes `expected_gaps` to distinguish braking travel from
+`WALL_RECOVERY_CHECK` includes `expected_gaps`, `scan_pose` and `pair_offset_s` to distinguish braking travel from
 a change of surface. These are bounded local checks, not proof of physical safety.

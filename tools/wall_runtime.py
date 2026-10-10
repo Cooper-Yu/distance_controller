@@ -5,6 +5,7 @@ turn controller. These publishers never overlap. Missing required feedback stops
 an action and preserves its incomplete record. Geometry is the local model.
 """
 
+from collections import deque
 from dataclasses import asdict
 import json
 import math
@@ -15,6 +16,7 @@ from action_runtime import PlannedRunner
 from wall_geometry import (
     DIRECTIONS,
     transported_gaps,
+    pose_at_scan,
     bounded_follow_velocity,
     fit_wall,
     scan_points,
@@ -43,6 +45,8 @@ class WallRunner(PlannedRunner):
     def __init__(self, max_speed=0.06, alignment_wall='right'):
         if alignment_wall not in ('left', 'right'):
             raise ValueError('Alignment wall must be left or right')
+        self.odom_history = deque(maxlen=200)
+        self.scan_pair = None
         super().__init__()
         self.prepare_options = [
             '-p',
@@ -61,6 +65,36 @@ class WallRunner(PlannedRunner):
         self.guard_command_sub = self.node.create_subscription(
             self.twist, '/cmd_vel', self.receive_guard_command, 10
         )
+
+    def receive_pose(self, msg):
+        """Retain validated timestamped poses for matching scans, not just newest odom."""
+        super().receive_pose(msg)
+        if not self.invalid and self.latest is not None:
+            if self.odom_history and self.odom_history[-1][0] == self.stamp:
+                self.odom_history.pop()
+            self.odom_history.append((self.stamp, self.latest[0]))
+
+    def scan_pose(self):
+        """Freeze one bounded odom pairing per scan; recover while stopped if missing."""
+        self.moving_pose()
+        pair = getattr(self, 'scan_pair', None)
+        if pair is None or pair[0] != self.cached_stamp:
+            history = getattr(self, 'odom_history', [(self.stamp, self.latest[0])])
+            try:
+                pose, offset = pose_at_scan(history, self.cached_stamp)
+            except ValueError as error:
+                raise WallFitError(
+                    f'WALL_REFERENCE: {error}',
+                    {
+                        'side': 'time_pairing',
+                        'reason': str(error),
+                        'scan_stamp_ns': self.cached_stamp,
+                        'odom_stamp_ns': self.stamp,
+                        'pose': asdict(self.latest[0]),
+                    },
+                ) from error
+            self.scan_pair = (self.cached_stamp, pose, offset)
+        return self.scan_pair[1]
 
     def observe(self, phase):
         """Record raw ray ranges and separately labelled model-based fitted body gaps."""
@@ -113,7 +147,7 @@ class WallRunner(PlannedRunner):
         """Use held-heading side distances; front arrival uses its independent +/-12 degree TLS window."""
         points, counts = self.geometry()
         error = math.atan2(
-            math.sin(heading - self.moving_pose().yaw), math.cos(heading - self.moving_pose().yaw)
+            math.sin(heading - self.scan_pose().yaw), math.cos(heading - self.scan_pose().yaw)
         )
         walls = {}
         for side in sorted(sides):
@@ -166,17 +200,14 @@ class WallRunner(PlannedRunner):
         snapshot = getattr(self, 'wall_snapshot', None)
         if not prior or snapshot is None:
             return prior
-        if abs(self.cached_stamp - self.stamp) > 150_000_000:
-            raise RuntimeError('WALL_REFERENCE: scan/odom skew exceeds 0.15 s')
         walls, pose = snapshot
-        return transported_gaps(walls, pose, self.moving_pose())
+        return transported_gaps(walls, pose, self.scan_pose())
 
     def remember_walls(self, walls):
         """Pair a trusted scan with fresh odometry; reject excessive timestamp skew."""
-        if abs(self.cached_stamp - self.stamp) > 150_000_000:
-            raise RuntimeError('WALL_REFERENCE: scan/odom skew exceeds 0.15 s')
+        paired_pose = self.scan_pose()
         if getattr(self, 'wall_snapshot_stamp', None) != self.cached_stamp:
-            self.wall_snapshot = (walls, self.moving_pose())
+            self.wall_snapshot = (walls, paired_pose)
             self.wall_snapshot_stamp = self.cached_stamp
 
     def record_recovery_check(self, gaps, prior, samples):
@@ -186,6 +217,8 @@ class WallRunner(PlannedRunner):
             'gaps': gaps,
             'prior_gaps': prior,
             'expected_gaps': self.expected_gaps(prior),
+            'scan_pose': asdict(self.scan_pose()),
+            'pair_offset_s': self.scan_pair[2] / 1e9,
             'measured_speed_m_s': self.latest[2],
             'measured_abs_wz_rad_s': self.latest[3],
             'stopped': self.latest[2] < 0.01 and self.latest[3] < 0.02,

@@ -56,12 +56,14 @@ class WallTransport(unittest.TestCase):
 
     def test_stale_pair_cannot_change_reference(self):
         r = object.__new__(WallRunner)
+        r.latest = [Pose(0, 0, 0), 0, 0, 0]
+        r.moving_pose = lambda: r.latest[0]
         r.cached_stamp = 200_000_000
         r.stamp = 0
         r.wall_snapshot = ({'front': Wall(0.9, 0, 0, 0.4, 40, 40)}, Pose(0, 0, 0))
-        with self.assertRaisesRegex(RuntimeError, 'skew'):
+        with self.assertRaisesRegex(RuntimeError, 'nearby odom'):
             r.expected_gaps({'front': 0.9})
-        with self.assertRaisesRegex(RuntimeError, 'skew'):
+        with self.assertRaisesRegex(RuntimeError, 'nearby odom'):
             r.remember_walls({})
 
     def recovery_fixture(self, observed_gap):
