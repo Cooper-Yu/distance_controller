@@ -1,0 +1,324 @@
+{
+  "status": "Taught P01-P09 candidate; physical replay pending; stops before reported collision",
+  "spacing_m": 0.05,
+  "segments": [
+    {
+      "name": "P01_P02",
+      "kind": "translate",
+      "offsets": [
+        [
+          0.610237905,
+          0.021495682
+        ],
+        [
+          0.007708511,
+          -0.022528457
+        ],
+        [
+          0.024895093,
+          -0.010452016
+        ],
+        [
+          0.283952147,
+          0.011521758
+        ]
+      ],
+      "waypoint": "P02"
+    },
+    {
+      "name": "P02_P03",
+      "kind": "translate",
+      "offsets": [
+        [
+          0.294437712,
+          0.00422705
+        ],
+        [
+          0.007134936,
+          -0.024649572
+        ],
+        [
+          0.02215705,
+          -0.010235564
+        ],
+        [
+          0.48071013,
+          0.005029595
+        ]
+      ],
+      "waypoint": "P03"
+    },
+    {
+      "name": "P03_turn",
+      "kind": "turn",
+      "angle_deg": -90
+    },
+    {
+      "name": "P03_P04",
+      "kind": "translate",
+      "offsets": [
+        [
+          0.506350897,
+          0.027454358
+        ]
+      ],
+      "waypoint": "P04"
+    },
+    {
+      "name": "P04_P05",
+      "kind": "translate",
+      "offsets": [
+        [
+          0.022513911,
+          -0.184537597
+        ],
+        [
+          -0.008270813,
+          -0.040890657
+        ],
+        [
+          0.015590917,
+          -0.049526879
+        ],
+        [
+          -0.01023723,
+          -0.03381105
+        ],
+        [
+          0.010609338,
+          -0.046634877
+        ],
+        [
+          -0.008536327,
+          -0.046236488
+        ]
+      ],
+      "waypoint": "P05"
+    },
+    {
+      "name": "P05_P06",
+      "kind": "translate",
+      "offsets": [
+        [
+          0.183799819,
+          0.01383258
+        ],
+        [
+          0.012357364,
+          -0.061749527
+        ],
+        [
+          0.025948583,
+          -0.002908805
+        ],
+        [
+          0.243450652,
+          0.014229213
+        ]
+      ],
+      "waypoint": "P06"
+    },
+    {
+      "name": "P06_P07",
+      "kind": "translate",
+      "offsets": [
+        [
+          -0.02427834,
+          0.283897677
+        ],
+        [
+          0.032272934,
+          0.005326462
+        ],
+        [
+          -0.007315681,
+          0.124457833
+        ]
+      ],
+      "waypoint": "P07"
+    },
+    {
+      "name": "P07_P08",
+      "kind": "translate",
+      "offsets": [
+        [
+          0.510065438,
+          0.033271141
+        ]
+      ],
+      "waypoint": "P08"
+    },
+    {
+      "name": "P08_P09",
+      "kind": "translate",
+      "offsets": [
+        [
+          0.021009828,
+          -0.145616104
+        ],
+        [
+          -0.008734499,
+          -0.04245675
+        ],
+        [
+          0.010892513,
+          -0.092459821
+        ],
+        [
+          -0.00632123,
+          -0.161012791
+        ]
+      ],
+      "waypoint": "P09"
+    }
+  ],
+  "provenance": {
+    "source_file": "task6_teach_p01_p15.csv",
+    "source_origin": {
+      "name": "P01",
+      "index": 1,
+      "stamp": "1791639208.939507096",
+      "x": -0.3857615035,
+      "y": 0.2671828037,
+      "yaw": 89.98852798131438,
+      "match_m": 5.404127496291465e-07
+    },
+    "simplification_max_deviation_m": 0.008,
+    "selection": [
+      {
+        "segment": "P01_P02",
+        "source_start": 1,
+        "source_end": 61,
+        "kept_samples": [
+          1,
+          31,
+          34,
+          36,
+          61
+        ],
+        "vertices": 5,
+        "endpoint": [
+          -0.3856129033,
+          1.193976448
+        ]
+      },
+      {
+        "segment": "P02_P03",
+        "source_start": 61,
+        "source_end": 141,
+        "kept_samples": [
+          61,
+          96,
+          98,
+          99,
+          141
+        ],
+        "vertices": 5,
+        "endpoint": [
+          -0.3598233454,
+          1.998411127
+        ]
+      },
+      {
+        "segment": "P03_P04",
+        "source_start": 222,
+        "source_end": 362,
+        "kept_samples": [
+          222,
+          362
+        ],
+        "vertices": 2,
+        "endpoint": [
+          0.146533038,
+          2.025764101
+        ]
+      },
+      {
+        "segment": "P04_P05",
+        "source_start": 362,
+        "source_end": 395,
+        "kept_samples": [
+          362,
+          375,
+          376,
+          378,
+          379,
+          381,
+          395
+        ],
+        "vertices": 7,
+        "endpoint": [
+          0.168122415,
+          1.624122222
+        ]
+      },
+      {
+        "segment": "P05_P06",
+        "source_start": 395,
+        "source_end": 484,
+        "kept_samples": [
+          395,
+          434,
+          440,
+          443,
+          484
+        ],
+        "vertices": 5,
+        "endpoint": [
+          0.633671496,
+          1.587432468
+        ]
+      },
+      {
+        "segment": "P06_P07",
+        "source_start": 484,
+        "source_end": 526,
+        "kept_samples": [
+          484,
+          498,
+          506,
+          526
+        ],
+        "vertices": 4,
+        "endpoint": [
+          0.634433239,
+          2.001114295
+        ]
+      },
+      {
+        "segment": "P07_P08",
+        "source_start": 526,
+        "source_end": 602,
+        "kept_samples": [
+          526,
+          602
+        ],
+        "vertices": 2,
+        "endpoint": [
+          1.144505328,
+          2.034283308
+        ]
+      },
+      {
+        "segment": "P08_P09",
+        "source_start": 602,
+        "source_end": 637,
+        "kept_samples": [
+          602,
+          610,
+          611,
+          614,
+          637
+        ],
+        "vertices": 5,
+        "endpoint": [
+          1.161263531,
+          1.592734478
+        ]
+      }
+    ],
+    "heading": "P01 reference; fixed during translations; one separate clockwise 90 degree turn at P03",
+    "boundary": "P09-P10 collision and all later segments excluded. P14-P15 odom reset excluded.",
+    "turn_bridge": "P03 stays at pre-turn position; following sampled XY path connects from it without replaying rotation drift."
+  }
+}

@@ -94,3 +94,28 @@ For the P01 scan with unstable left-wall fitting, use:
 
 This explicitly chooses the heading reference; it does not relax fitting thresholds.
 After initialization the route still uses odom, with laser logging only.
+
+
+## Taught prefix P01-P09
+
+config/task6_taught_p01_p09.json is a separate candidate extracted from the user's
+continuous task6_teach_p01_p15.csv. It replaces the old nominal distances only when
+explicitly selected with --route. P09-P10 (reported collision) and all later
+segments are omitted. P14-P15 contains an odom origin discontinuity.
+
+Source positions are expressed relative to the taught P01 heading. Translation
+polylines retain endpoints and bends with 8 mm simplification tolerance relative
+to the supplied samples; this is not physical tracking accuracy. Execution inserts
+points at <=5 cm spacing. Sampled yaw drift is not replayed: translation holds the
+planned heading and P03 uses a separate -90 degree turn. The following translation
+connects from pre-turn P03 to the sampled path, without commanding turn drift.
+Because yaw is regularized, the robot's swept footprint differs from the teaching
+run; physical validation remains necessary. No laser stopping is enabled.
+
+After updating/building, with the robot at physical P01:
+
+    ros2 run distance_controller odom_trial --route ~/ros2_ws/src/distance_controller/config/task6_taught_p01_p09.json --start prepare --alignment-wall right --laser-log-only
+
+At odom>, use run_to P02, then next for each subsequent action; P03 arrival and
+P03 rotation are separate. run_to P09 executes the whole prefix if desired.
+There is no action after P09 in this configuration. Repeated next stays stopped.

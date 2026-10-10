@@ -46,3 +46,18 @@ Ruff, 168 unit tests, colcon and diff checks pass. WALL_CASE=odom_trial_prepare
 with WALL_SCAN_PERIOD=.1 in isolated domain181 passes C++ right alignment and
 handoff into odom_trial, without executing a route. Logs:
 /tmp/wall_session_test/1791637696289867694. Real robot verification pending.
+
+
+## Taught P01-P09 prefix — 2026-10-10
+Independent task6_taught_p01_p09.json: eight translations plus one P03 clockwise
+turn; 104 interpolated targets at <=5 cm. Source sample simplification deviation
+max 0.007893692 m; this measures polyline fit, not robot accuracy.
+Ubuntu-22.04: ruff format/check on affected Python tests passed; python3 -m unittest
+discover -s test -p 'test_*.py' passed 169 tests; colcon build --packages-select
+distance_controller passed. WALL_CASE=odom_trial_taught WALL_SCAN_PERIOD=.1
+ROS_DOMAIN_ID=181 ROS_LOCALHOST_ONLY=1 timeout 180 python3 test/verify_wall_session.py
+passed all nine actions, P09 boundary and no additional action after next.
+Final synthetic pose=(1.335843080,-1.547147808,-1.560825419), within 2 cm/.02 rad.
+Logs: /tmp/wall_session_test/1791640176154093915; laser absent after initial motion.
+This validates synthetic ROS execution, not maze clearance. P09-P10 collision and
+later uncertain/reset data excluded. Physical verification and Task6 remain pending.

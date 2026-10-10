@@ -230,6 +230,17 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'odom_trial_taught':
+        data = json.loads((ROOT / 'config/task6_taught_p01_p09.json').read_text())
+        events, log = run('taught_p01_p09', data, 'status\nnext\nquit\n', until='P09', stale=True)
+        completed = [e['data'] for e in events if e['event'] == 'completed']
+        assert [e['action'] for e in completed] == list(range(1, 10)), log[-4000:]
+        assert abs(pose[0] - 1.325861402) < 0.02 and abs(pose[1] + 1.546759598) < 0.02, pose
+        assert abs(pose[2] + math.pi / 2) < 0.02, pose
+        assert 'Next action=10, partial=False' in log
+        assert not any(e['event'] == 'stopped' for e in events), log[-4000:]
+        print('PASS taught prefix ends at P09, no further action', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'odom_trial_prepare':
         data = json.loads((ROOT / 'config/task6_odom_p01_p05.json').read_text())
         events, log = run('odom_right_prepare', data, 'quit\n', prepare=True)

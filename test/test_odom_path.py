@@ -101,3 +101,27 @@ class OdomPath(unittest.TestCase):
             trial.run_to('P04')
         self.assertEqual(trial.cursor, 0)
         self.assertTrue(trial.partial)
+
+    def test_taught_prefix_endpoints_and_boundary(self):
+        data = json.loads(
+            (Path(__file__).resolve().parents[1] / 'config/task6_taught_p01_p09.json').read_text()
+        )
+        origin = data['provenance']['source_origin']
+        route = compile_path(Pose(origin['x'], origin['y'], math.radians(origin['yaw'])), data)
+        self.assertEqual(len(route), 9)
+        previous = Pose(origin['x'], origin['y'], math.radians(origin['yaw']))
+        for segment in route:
+            if segment['kind'] == 'translate':
+                for point in segment['points']:
+                    self.assertLessEqual(
+                        math.hypot(point.x - previous.x, point.y - previous.y), 0.050001
+                    )
+                    previous = point
+        for segment, selected in zip(
+            [s for s in route if s['kind'] == 'translate'], data['provenance']['selection']
+        ):
+            self.assertAlmostEqual(segment['points'][-1].x, selected['endpoint'][0], places=7)
+            self.assertAlmostEqual(segment['points'][-1].y, selected['endpoint'][1], places=7)
+        self.assertEqual(waypoint_stop(route, 'P09'), 9)
+        with self.assertRaises(ValueError):
+            waypoint_stop(route, 'P10')
