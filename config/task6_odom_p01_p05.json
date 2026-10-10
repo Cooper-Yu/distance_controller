@@ -36,7 +36,7 @@
       "kind": "translate",
       "offsets": [
         [
-          0.41,
+          0.44,
           0
         ]
       ]
@@ -46,11 +46,11 @@
       "kind": "translate",
       "offsets": [
         [
-          0.03,
+          0,
           -0.287
         ]
       ]
     }
   ],
-  "provenance": "Nominal .9; measured approx .79 plus late right .04; .382+.028 front correction=.41; measured right .287. Not a continuous recorded trajectory. P05 forward .03 m added by user visual assessment; pending physical verification."
+  "provenance": "Nominal .9; measured approx .79 plus late right .04; P03-P04 .382+.028+.03 user correction=.44; P04-P05 right .287 only. Not a continuous recorded trajectory; pending physical verification."
 }

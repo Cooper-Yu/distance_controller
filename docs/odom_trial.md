@@ -9,13 +9,13 @@ each action; Ctrl+C stops. Keep teleop and other cmd_vel publishers stopped.
 | P01-P02 | forward .90 m |
 | P02-P03 | forward .59 m, then forward .20 m + right .04 m |
 | P03 turn | clockwise 90 degrees |
-| P03-P04 | forward .41 m |
-| P04-P05 | forward .03 m + right .287 m |
+| P03-P04 | forward .44 m |
+| P04-P05 | right .287 m |
 
-P05 includes a user-requested 3 cm forward correction, interpolated together with
-the right translation; its heading stays unchanged. Physical validation is pending.
-
-The .41 m candidate combines observed .382 m approach and .028 m adjustment.
+The .44 m candidate combines observed .382 m approach, .028 m adjustment,
+and the user-requested 3 cm forward correction at P04. P04-P05 is purely
+rightward in the planned heading; no extra forward correction at P05.
+P05 inherits the corrected P04 origin. Physical validation is pending.
 Lengths use previous nominal/observed evidence, rounded deliberately. Accumulated
 lateral odom drift is not interpreted as intentional geometry. No continuous
 teleop trace was supplied. Late 4 cm right offset is a proposed shape, not a
