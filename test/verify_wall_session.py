@@ -97,6 +97,12 @@ def tick(previous, scan_enabled=True, front=0.55):
                 delta = math.atan2(math.sin(bearing - math.pi / 2), math.cos(bearing - math.pi / 2))
                 if abs(delta) < math.radians(32) and i % 2 == 0:
                     values[i] += 0.15
+        if os.getenv('WALL_SIDE_NOISE'):
+            for i in range(len(values)):
+                bearing = scan.angle_min + i * scan.angle_increment + math.pi
+                delta = math.atan2(math.sin(bearing - math.pi / 2), math.cos(bearing - math.pi / 2))
+                if abs(delta) < math.radians(35):
+                    values[i] += 0.018 * ((i % 11) / 5 - 1) / abs(math.sin(bearing))
         scan.ranges = values
         scan_pub.publish(scan)
         last_scan = now
@@ -114,7 +120,7 @@ def row(name, kind, value, follow='none', stop='distance', offset=0.0, bound=0.7
 
 
 def run(name, rows, commands, prepare=False, stale=False, front=0.55):
-    pose[:] = [0.0, 0.0, float(os.getenv('WALL_START_YAW', '0'))]
+    pose[:] = [float(os.getenv('WALL_START_X', '0')), 0.0, float(os.getenv('WALL_START_YAW', '0'))]
     velocity[:] = [0.0, 0.0, 0.0]
     directory = OUT / name
     directory.mkdir()
@@ -188,9 +194,12 @@ try:
         raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'prepare':
         events, log = run(
-            'left_preparation', [row('f', 'forward', 0.03, 'left')], 'next\nquit\n', prepare=True
+            'right_heading_left_reference',
+            [row('f', 'forward', 0.03, 'left')],
+            'next\nquit\n',
+            prepare=True,
         )
-        assert 'left-wall alignment' in log
+        assert 'right-wall alignment' in log
         assert sum(e['event'] == 'completed' for e in events) == 1, log[-3500:]
         print('PASS preparation', OUT, flush=True)
         raise SystemExit(0)
@@ -218,9 +227,12 @@ try:
     )
     assert any(e['event'] == 'incomplete' for e in events) and 'MAX_TRAVEL' in log
     events, log = run(
-        'left_preparation', [row('f', 'forward', 0.03, 'left')], 'next\nquit\n', prepare=True
+        'right_heading_left_reference',
+        [row('f', 'forward', 0.03, 'left')],
+        'next\nquit\n',
+        prepare=True,
     )
-    assert 'left-wall alignment' in log
+    assert 'right-wall alignment' in log
     assert sum(e['event'] == 'completed' for e in events) == 1, log[-3500:]
     print('PASS', OUT, flush=True)
 finally:

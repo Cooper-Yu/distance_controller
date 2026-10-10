@@ -22,9 +22,16 @@ class WallFitError(RuntimeError):
 class WallRunner(PlannedRunner):
     """Own one wall-action lifetime and carry a verified scalar body-gap reference."""
 
-    def __init__(self, max_speed=0.06):
+    def __init__(self, max_speed=0.06, alignment_wall='right'):
+        if alignment_wall not in ('left', 'right'):
+            raise ValueError('Alignment wall must be left or right')
         super().__init__()
-        self.prepare_options = ['-p', 'alignment_wall:=left', '-p', 'robust_wall_heading:=true']
+        self.prepare_options = [
+            '-p',
+            f'alignment_wall:={alignment_wall}',
+            '-p',
+            'robust_wall_heading:=true',
+        ]
         self.max_speed = max_speed
         self.reference = None
         self.velocity_pub = None
@@ -158,8 +165,13 @@ class WallRunner(PlannedRunner):
             if gap < 0.02:
                 raise RuntimeError('TURN_CLEARANCE: observed body sweep below 2 cm')
 
-    def capture_reference(self, side):
-        """Require five distinct stable stopped scans; write carried body clearance only on success."""
+    def capture_reference(self, side, heading=None):
+        """Capture side offset at a fixed heading from five distinct stable stopped scans.
+
+        This reuses the motion estimator; it never requires a second free-angle
+        fit after preparation. Commit the carried gap only after all checks pass.
+        """
+        heading = self.pose().yaw if heading is None else heading
         deadline = time.monotonic() + 4
         values = []
         stamp = None
@@ -171,7 +183,7 @@ class WallRunner(PlannedRunner):
                 values = []
                 continue
             try:
-                wall = self.walls([side])[side]
+                wall = self.motion_walls([side], heading)[side]
             except WallFitError as error:
                 # Only stopped reference acquisition retries fit failures, within the original budget.
                 # Do not swallow stale scan, invalid odom, TF failure or cancellation.
@@ -191,7 +203,8 @@ class WallRunner(PlannedRunner):
                     )
                 self.reference = value
                 print(
-                    f'REFERENCE {side}: body_clearance={value:.4f} m (5 stable scans)', flush=True
+                    f'REFERENCE {side}: body_clearance={value:.4f} m (5 stable scans; held_heading_30deg)',
+                    flush=True,
                 )
                 return value
         raise RuntimeError(
@@ -368,7 +381,7 @@ class WallRunner(PlannedRunner):
         finally:
             self.turn_guard = False
         if policy.capture != 'none':
-            self.capture_reference(policy.capture)
+            self.capture_reference(policy.capture, target.yaw)
         self.last_report = {
             'completion': 'turn',
             'reference_m': self.reference,

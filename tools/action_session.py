@@ -140,7 +140,7 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
         )
 
 
-def run_session(steps, prepare, wall_speed=0.06):
+def run_session(steps, prepare, wall_speed=0.06, alignment_wall='right'):
     """Capture one origin after optional wall preparation and retain it until exit."""
     import fcntl
     from action_runtime import PlannedRunner
@@ -152,7 +152,7 @@ def run_session(steps, prepare, wall_speed=0.06):
             from wall_runtime import WallRunner
             from wall_session import WallSession
 
-            backend = WallRunner(wall_speed)
+            backend = WallRunner(wall_speed, alignment_wall)
         else:
             backend = PlannedRunner()
         journal = Journal(backend)
@@ -163,7 +163,7 @@ def run_session(steps, prepare, wall_speed=0.06):
                 backend.prepare_start()
             origin = backend.pose()
             if wall_mode:
-                backend.capture_reference('left')
+                backend.capture_reference('left', origin.yaw)
                 session = WallSession(origin, steps, backend, journal.emit)
                 journal.emit(
                     'initial_reference',
@@ -211,6 +211,12 @@ def main():
         default=None,
         help='Wall translation cap in m/s: .01-.08, default .06',
     )
+    parser.add_argument(
+        '--alignment-wall',
+        choices=['left', 'right'],
+        default=None,
+        help='Heading wall for wall-guided preparation only; default right. Following walls stay per-action.',
+    )
     parser.add_argument('--route', type=Path, help='JSON action definitions')
     parser.add_argument(
         '--start',
@@ -237,13 +243,19 @@ def main():
             parser.error('--wall-speed requires a wall-guided route')
         if not math.isfinite(args.wall_speed) or not 0.01 <= args.wall_speed <= 0.08:
             parser.error('--wall-speed must be within [.01,.08] m/s')
+    if args.alignment_wall is not None and (
+        args.start != 'prepare' or not any(s.wall for s in steps)
+    ):
+        parser.error('--alignment-wall requires a wall-guided route with --start prepare')
     if args.reverse:
         steps = reverse_steps(steps)
     if args.start is None:
         show(steps, targets(Pose(0, 0, 0), steps))
         print('Preview only. --start current adopts the stopped pose; --start prepare prepares A.')
         return 0
-    return run_session(steps, args.start == 'prepare', args.wall_speed or 0.06)
+    return run_session(
+        steps, args.start == 'prepare', args.wall_speed or 0.06, args.alignment_wall or 'right'
+    )
 
 
 if __name__ == '__main__':

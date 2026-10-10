@@ -28,14 +28,15 @@ class Fixture:
     def moving_pose(self):
         pass
 
-    def walls(self, sides):
+    def motion_walls(self, sides, heading):
+        self.heading_seen = heading
         if isinstance(self.frame[1], BaseException):
             raise self.frame[1]
         return {sides[0]: SimpleNamespace(gap=self.frame[1])}
 
     def run(self):
         with patch('wall_runtime.time.monotonic', lambda: self.now):
-            return WallRunner.capture_reference(self, 'left')
+            return WallRunner.capture_reference(self, 'left', 1.5)
 
 
 class Capture(unittest.TestCase):
@@ -47,6 +48,7 @@ class Capture(unittest.TestCase):
         )
         self.assertAlmostEqual(f.run(), 0.12)
         self.assertEqual(f.index, 9)
+        self.assertEqual(f.heading_seen, 1.5)
 
     def test_repeated_stamp_cannot_finish(self):
         f = Fixture([(1, 0.1)])

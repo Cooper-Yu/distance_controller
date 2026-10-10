@@ -597,3 +597,9 @@ an incomplete action. Preparation and front-wall arrival keep their existing est
 See [wall session details](docs/wall_session.md#side-distance-tracking-and-bounded-recovery).
 Manual BODY_CLEARANCE output still reports the original independent line fits; motion logs
 identify the constrained side estimator separately. Cloud step-by-step validation is pending.
+
+
+Task6 preparation now defaults to the right wall for heading. Use `--alignment-wall right`
+or `--alignment-wall left` with `--wall-guided --start prepare`. Centering/rear positioning
+remain unchanged; the initial left-side reference is measured with the constrained
+side-distance estimator after alignment. This does not change per-action following walls.

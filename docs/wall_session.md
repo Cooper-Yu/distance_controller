@@ -11,7 +11,7 @@ ros2 run distance_controller action_session --wall-guided
 ros2 run distance_controller action_session --wall-guided --start prepare
 ```
 
-Preview starts no ROS controllers. Preparation aligns with the **left wall**, centers
+Preview starts no ROS controllers. Preparation defaults to the **right wall** for heading, centers
 between both walls, and uses the existing rear wall-distance target of 0.280 m.
 That rear initialization setting is measured from the base_link origin, not the body edge.
 After preparation finishes and its controller exits, five distinct stable stopped
@@ -190,7 +190,7 @@ action. Inspect and return before changing the preceding translation target.
 ## Dominant wall fitting
 
 Wall sessions enable `robust_wall_heading` for preparation (legacy default remains false).
-Heading, stopped-reference and front-arrival fits select a dominant line using bounded candidate
+Heading and front-arrival fits select a dominant line using bounded candidate
 pairs and a 12 mm perpendicular inlier threshold. At least 80% of valid window points
 must agree; original minimum return coverage, fitted span, angle and RMS checks still
 apply. Preparation retains the continuous stability gate. No dominant line means stop.
@@ -220,7 +220,8 @@ During translation, side distances use a +/-30 degree window (previously +/-20).
 The held odom heading supplies the wall normal in the current body frame; the median
 projected distance estimates offset without treating noisy fitted angles as new headings.
 At least 80% of valid returns must lie within 20 mm of the median, with 60% ray coverage,
-12 mm RMS and 8 cm span. Front arrival and initialization retain their existing fit.
+12 mm RMS and 8 cm span. Front arrival and heading initialization retain their existing fit.
+Stopped side-reference capture uses this same constrained side-distance estimator.
 Raw obstacle points are never discarded by this estimator. The three user scan replays
 in `test/side_distance_scans.json` cover initial, centered and interrupted placements;
 they are base-link points under the user-provided mounting TF, not ground truth.
@@ -233,3 +234,28 @@ scan/TF and obstacle failures still abort immediately. Timeout retains a partial
 `back` returns to its recorded start before retrying. Logs identify `WALL_RECOVERING`,
 `WALL_RECOVERED` and the constrained side estimator. This is local validation, pending
 cloud single-step acceptance; it does not certify gaps or the entire hardware route.
+
+
+## Independent preparation heading wall
+
+`--alignment-wall right` (default) selects the preparation heading reference only.
+`--alignment-wall left` explicitly selects the other wall. This option requires a
+wall-guided route and `--start prepare`; it does not rewrite action follow/stop policies.
+A failed heading measurement stops preparation; there is no silent wall switching.
+The C++ controller still centers between both sides and adjusts rear distance to 0.28 m.
+
+After preparation, the stopped origin yaw is frozen for five-frame **left** side-distance
+capture with the +/-30 degree constrained estimator. Post-turn reference capture uses
+the planned turn heading instead. Neither capture requires the old free-angle left-wall
+fit, but fresh scans/odom/TF, stopped feedback, spread and the four-second deadline remain
+required. Normal manual `BODY_CLEARANCE` output still uses independent TLS diagnostics.
+
+```bash
+ros2 run distance_controller action_session --wall-guided --start prepare \
+  --alignment-wall right --wall-speed 0.06
+```
+
+First confirm `right-wall alignment`, `preparation complete`,
+`REFERENCE left ... held_heading_30deg`, then `WAITING`. Execute one `next`.
+Right-wall heading and subsequent left-wall following assume the selected walls are
+parallel at the start; local tests do not establish that at every real placement.
