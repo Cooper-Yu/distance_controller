@@ -144,6 +144,24 @@ class WallRunner(PlannedRunner):
             raise WallFitError(f'WALL_LOST: {error}') from error
 
     def motion_walls(self, sides, heading):
+        """Fit each scan/heading/side set once, including failures; freshness is never cached."""
+        self.geometry()
+        self.scan_pose()
+        key = (self.cached_stamp, heading, tuple(sorted(sides)))
+        cached = getattr(self, 'motion_fit_cache', None)
+        if cached is not None and cached[0] == key:
+            if isinstance(cached[1], WallFitError):
+                raise cached[1]
+            return dict(cached[1])
+        try:
+            result = self.fit_motion_walls(sides, heading)
+        except WallFitError as error:
+            self.motion_fit_cache = (key, error)
+            raise
+        self.motion_fit_cache = (key, result)
+        return dict(result)
+
+    def fit_motion_walls(self, sides, heading):
         """Use held-heading side distances; front arrival uses its independent +/-12 degree TLS window."""
         points, counts = self.geometry()
         error = math.atan2(
@@ -305,8 +323,31 @@ class WallRunner(PlannedRunner):
                 scenarios.append(velocity)
         return scenarios
 
+    def refresh_callbacks(self):
+        """Process ready callbacks without waiting, bounded by 32 calls and 5 ms.
+
+        One spin_once may consume a scan/command callback while odom is queued.
+        Refresh before matching sensors; never extend pairing/freshness limits.
+        """
+        deadline = time.monotonic() + 0.005
+        for _ in range(32):
+            if self.cancel_requested:
+                raise KeyboardInterrupt
+            if self.invalid:
+                raise RuntimeError(
+                    self.invalid + '; stop and establish a new session after inspection'
+                )
+            if time.monotonic() >= deadline:
+                break
+            self.ros.spin_once(self.node, timeout_sec=0.0)
+        if self.cancel_requested:
+            raise KeyboardInterrupt
+        if self.invalid:
+            raise RuntimeError(self.invalid + '; stop and establish a new session after inspection')
+
     def pump(self):
         super().pump()
+        self.refresh_callbacks()
         if self.turn_guard:
             self.moving_pose()
             pts, _ = self.geometry()

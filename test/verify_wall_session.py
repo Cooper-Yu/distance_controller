@@ -93,7 +93,8 @@ def tick(previous, scan_enabled=True, front=0.55):
         math.cos(pose[2] / 2),
     )
     msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.angular.z = velocity
-    odom_pub.publish(msg)
+    for _ in range(int(os.getenv('WALL_ODOM_BURST', '1'))):
+        odom_pub.publish(msg)
     if scan_enabled and now - last_scan > float(os.getenv('WALL_SCAN_PERIOD', '0.07')):
         scan = LaserScan()
         scan.header.frame_id, scan.header.stamp = 'laser', msg.header.stamp

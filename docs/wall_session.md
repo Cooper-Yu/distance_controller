@@ -464,3 +464,13 @@ compensation. Odom history retains up to 200 validated samples. Bracketed sample
 The three stopped scans, 2 s retry and 4 s cumulative limits remain unchanged.
 `WALL_RECOVERY_CHECK` includes `expected_gaps`, `scan_pose` and `pair_offset_s` to distinguish braking travel from
 a change of surface. These are bounded local checks, not proof of physical safety.
+Before wall processing, the executor refreshes ready callbacks with zero wait,
+up to 32 calls or a 5 ms budget (checked between callbacks). This prevents a single
+scan/command callback from indefinitely delaying queued odometry; it does not
+wait for missing feedback. Cancellation and latched odom errors are checked during
+and after refresh. A slow callback can itself exceed the time budget.
+
+Motion fits, including failed fits, are cached only for the exact scan timestamp,
+heading and requested wall set. Geometry and pose freshness checks still run on
+every use; new scans re-fit. The cache holds one result, not a history of surfaces.
+The 0.15 s pairing bound, 2/4 s recovery budgets and all-point obstacle guard remain.

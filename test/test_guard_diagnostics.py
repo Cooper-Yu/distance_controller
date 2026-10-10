@@ -18,6 +18,7 @@ from wall_runtime import WallRunner
 class GuardDiagnostics(unittest.TestCase):
     def fixture(self, speed=0.0, wz=0.0, sign=0):
         runner = object.__new__(WallRunner)
+        runner.refresh_callbacks = lambda: None  # No ROS executor in geometry-only tests.
         runner.latest = [Pose(0, 0, 0), 0, speed, wz]
         runner.moving_pose = lambda: runner.latest[0]
         runner.body_velocity = (0.0, 0.0, 0.0)
