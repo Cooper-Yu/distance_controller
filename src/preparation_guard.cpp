@@ -143,7 +143,8 @@ void DistanceController::log_preparation_progress()
     preparation_stage_name(), last_odom_.pose.pose.position.x, last_odom_.pose.pose.position.y, yaw,
     left_wall_, right_wall_, rear_wall_, rear_target_distance_, lateral_error, rear_error,
     centering_tolerance_, yaw_error, heading_tolerance_,
-    initial_alignment_complete_ ? "held_odom_heading" : "right_wall",
+    initial_alignment_complete_ ? "held_odom_heading"
+                                : (alignment_wall_ == "left" ? "left_wall" : "right_wall"),
     std::abs(lateral_error) <= centering_tolerance_ && std::abs(rear_error) <= centering_tolerance_
       ? "true"
       : "false",

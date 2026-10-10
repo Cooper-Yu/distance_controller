@@ -20,6 +20,7 @@ class Step:
     name: str
     kind: str
     value: float
+    wall: dict | None = None
 
     def validate(self):
         if not self.name or not isinstance(self.name, str) or len(self.name) > 40:
@@ -31,6 +32,17 @@ class Step:
                 raise ValueError('Turn must be nonzero and at most one full revolution')
         elif self.kind not in ('forward', 'backward', 'left', 'right') or not 0 < self.value <= 3:
             raise ValueError('Translation needs a supported direction and 0 < distance <= 3 m')
+        if self.wall is not None:
+            from wall_policy import Policy
+
+            if not isinstance(self.wall, dict) or not self.wall:
+                raise ValueError('Wall policy must be a nonempty object')
+            try:
+                policy = Policy(**self.wall).validate(self.kind)
+            except (TypeError, KeyError) as error:
+                raise ValueError(f'Invalid wall policy: {error}') from error
+            if self.kind != 'turn' and policy.max_travel < self.value:
+                raise ValueError('Maximum travel must cover nominal distance')
         return self
 
 
@@ -43,7 +55,9 @@ def load_steps(data):
             raise ValueError('Translation unit must be m; turn unit must be deg or rad')
         value = float(row['value'])
         steps.append(
-            Step(row['name'], kind, math.radians(value) if unit == 'deg' else value).validate()
+            Step(
+                row['name'], kind, math.radians(value) if unit == 'deg' else value, row.get('wall')
+            ).validate()
         )
     if not steps or len({s.name for s in steps}) != len(steps):
         raise ValueError('Route must be nonempty with unique action names')
@@ -76,6 +90,10 @@ def targets(origin, steps):
 
 def reverse_steps(steps):
     """Build inverse actions for a new endpoint session; use back() for actual current history."""
+    if any(s.wall for s in steps):
+        raise ValueError(
+            'Wall-arrival routes cannot be reversed from nominal distances; use live back'
+        )
     inverse = {'forward': 'backward', 'backward': 'forward', 'left': 'right', 'right': 'left'}
     return [
         Step(
@@ -163,7 +181,11 @@ class Session:
         self.partial = record
         self.emit('started', record)
         try:
-            self.backend.execute(step, target)
+            resolved = self.backend.execute(step, target)
+            if resolved is not None:
+                target = resolved
+                record['target'] = asdict(target)
+                record['target_resolved_from_feedback'] = True
             actual = self.backend.pose()
             distance, angle = errors(actual, target)
             if distance > 0.03 or abs(angle) > 0.02:
@@ -196,9 +218,14 @@ class Session:
             'step': asdict(step),
             'start': asdict(start),
             'target': asdict(goal),
+            **({'reference_before': self.backend.reference} if step.wall else {}),
         }
         actual = self.perform(step, goal, record)
-        record = {**record, 'end': asdict(actual), 'error': errors(actual, goal)}
+        record = {
+            **record,
+            'end': asdict(actual),
+            'error': errors(actual, Pose(**record['target'])),
+        }
         self.emit('completed', record)
         self.active.append(record)
         self.cursor += 1

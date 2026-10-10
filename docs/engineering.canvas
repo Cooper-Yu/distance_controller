@@ -62,6 +62,15 @@
       "y": 1150,
       "width": 360,
       "height": 180
+    },
+    {
+      "id": "task6-wall-policy",
+      "type": "file",
+      "file": "docs/wall_session.md",
+      "x": 1000,
+      "y": 1000,
+      "width": 400,
+      "height": 260
     }
   ],
   "edges": [

@@ -25,7 +25,7 @@
  * @details Targets use the fixed initial route frame. Feedback receipt uses a steady
  * clock; PID, settling, and dwell use the node clock (simulation time when enabled).
  * The single-threaded executor in main() serializes callbacks. No general obstacle avoidance
- * is implemented; selected steps can use a front-clearance goal. Scene 2 aligns to the initial right wall and holds its captured odom heading.
+ * is implemented; selected steps can use a front-clearance goal. Scene 2 aligns to the initial selected wall and holds its captured odom heading.
  */
 class DistanceController : public rclcpp::Node
 {
@@ -136,9 +136,9 @@ private:
   void configure_heading_control();
 
   /**
-   * @brief Hold translation until right-wall alignment and standstill remain accepted.
+   * @brief Hold translation until selected-wall alignment and standstill remain accepted.
    * @par Initial alignment
-   * Read the stable right-wall fit from on_scan(); rotate only outside heading_tolerance_, otherwise
+   * Read the stable selected-wall fit from on_scan(); rotate only outside heading_tolerance_, otherwise
    * stop and require low measured speeds for alignment_settle_duration_. Mark
    * initial_alignment_complete_ and capture heading_reference_ once; on_timer() begins laser centering on the following tick.
    * @param[in] current_time Node time supplied by on_timer(); read elapsed settling time
@@ -158,7 +158,7 @@ private:
    * @param[in] gain Positive gain (1/s), supplied from heading_gain_; scales error, unchanged.
    * @param[in] max_yaw_rate Positive cap (rad/s), supplied from max_yaw_rate_; bounds output, unchanged.
    * @return Angular command for the caller's cmd.angular.z; does not publish itself.
-   * @note Callers ensure finite inputs and positive limits. The target comes from the initial right wall.
+   * @note Callers ensure finite inputs and positive limits. The target comes from the initial selected wall.
    */
   static double compute_heading_command(double yaw, double gain, double max_yaw_rate);
 
@@ -202,7 +202,7 @@ private:
    * select side/rear windows and validate finite coverage and median absolute deviation.
    * @param[in] msg LaserScan supplied by the scan subscription; read ranges, angles,
    * frame and stamp, without modifying the message. Write estimates into left_wall_/right_wall_/rear_wall_.
-   * @note Invalid scans clear scan_valid_; guard logic stops motion. Initial right-wall direction is estimated separately. After initialization, scans update read-only observations and do not gate the route.
+   * @note Invalid scans clear scan_valid_; guard logic stops motion. Initial selected-wall direction is estimated separately. After initialization, scans update read-only observations and do not gate the route.
    */
   void on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg);
 
@@ -252,7 +252,7 @@ private:
   void log_route_wall_observation();
 
   /**
-   * @brief Fit a single right-wall line and require a stable odom-frame direction.
+   * @brief Fit a single selected-wall line and require a stable odom-frame direction.
    * @par Startup measurement
    * on_scan() supplies a wider right window than the distance windows. Reject poor
    * coverage, short span, excessive perpendicular residual or ambiguous orientation.
@@ -268,7 +268,7 @@ private:
     const std::vector<std::pair<double, double>> & points, std::size_t samples);
 
   /**
-   * @brief Express odom heading relative to the captured right-wall reference.
+   * @brief Express odom heading relative to the captured selected-wall reference.
    * @param[in] yaw Current odom yaw from the control or initialization caller;
    * read and subtract heading_reference_, without modifying caller feedback.
    * @return Wrapped current-minus-reference error in radians for acceptance/control.
@@ -278,7 +278,7 @@ private:
 
   /// Captured odom yaw (rad) after initial wall-parallel standstill; fixed for this run.
   double heading_reference_{0.0};
-  /// Right-wall forward tangent relative to body x (rad); valid only with right_heading_valid_.
+  /// Selected-wall forward tangent relative to body x (rad); valid only with right_heading_valid_.
   double right_wall_angle_{0.0};
   /// Latest perpendicular line-fit RMS (m), diagnostic even when rejected.
   double right_wall_rms_{0.0};
@@ -288,7 +288,7 @@ private:
   bool right_heading_valid_{false};
   /// Consecutive accepted fits have a consistent odom-frame direction for 0.5 steady seconds.
   bool right_heading_stable_{false};
-  /// True during an uninterrupted series of accepted right-wall fits.
+  /// True during an uninterrupted series of accepted selected-wall fits.
   bool right_heading_tracking_{false};
   /// Odom-frame wall direction (rad) at the start of the current consistency interval.
   double right_heading_anchor_{0.0};
@@ -296,7 +296,10 @@ private:
   std::chrono::steady_clock::time_point right_heading_since_{};
   /// Steady-clock throttle for initial wall-angle diagnostic logs.
   std::chrono::steady_clock::time_point heading_log_time_{};
-  /// Right fitting window half-width around body -pi/2 (rad), separate from distance windows.
+  /// Initial heading-fit side: right by default; wall-guided sessions select left.
+  std::string alignment_wall_{
+    "right"};  ///< Initial heading-fit side; left is used by wall sessions.
+  /// Selected-wall fitting half-width (rad) around body +pi/2 or -pi/2.
   double wall_heading_half_angle_{0.5235987755982988};
   /// Minimum observed tangent extent (m); prevents a short cluster defining heading.
   double wall_heading_min_span_{0.18};
@@ -350,7 +353,7 @@ private:
   PreparationStage preparation_stage_{PreparationStage::WaitingForWall};
   /// Steady-clock entry time of the current stage; valid after preparation_started_.
   std::chrono::steady_clock::time_point preparation_stage_start_{};
-  /// Maximum initial scan/TF/right-wall quality acquisition duration (steady seconds).
+  /// Maximum initial scan/TF/selected-wall quality acquisition duration (steady seconds).
   double wall_measurement_timeout_{20.0};
   /// Maximum rotation and aligned-standstill duration after measurement acceptance (steady seconds).
   double alignment_timeout_{30.0};
@@ -384,7 +387,7 @@ private:
    * @brief Latch a preparation fault, clear control histories and publish stop.
    * @param[in] reason Stable failure identifier from handle_centering_guard(); read for the log, unchanged.
    * @param[in] now Steady time from handle_centering_guard(); read elapsed stage/total durations, unchanged.
-   * @note Logs current stage, scan reason and right-wall quality; restart is required after failure.
+   * @note Logs current stage, scan reason and selected-wall quality; restart is required after failure.
    */
   void fail_preparation(const char * reason, const std::chrono::steady_clock::time_point & now);
 
@@ -652,7 +655,7 @@ private:
    * their handlers. Log meters, radians and configured thresholds without changing control.
    * @par Output
    * Progress is written to the ROS logger; this function has no return value.
-   * @note Settling flags describe the preceding tick; pre-alignment heading uses the right wall.
+   * @note Settling flags describe the preceding tick; pre-alignment heading uses the selected wall.
    */
   void log_preparation_progress();
 
@@ -878,7 +881,7 @@ private:
    * Separate side/rear initialization validity from front and side observations used by steps.
    * @param[in] scan Header/ranges validated by on_scan(); read ray geometry, unchanged.
    * @param[in] mounting Fixed transform validated by on_scan(); read to convert rays to base_frame.
-   * @note Updates distance/quality/receipt state; right-wall fitting is initial alignment only.
+   * @note Updates distance/quality/receipt state; selected-wall fitting is initial alignment only.
    */
   void measure_wall_windows(
     const sensor_msgs::msg::LaserScan & scan,

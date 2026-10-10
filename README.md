@@ -1,5 +1,8 @@
 # distance_controller
 
+For Task6 wall-referenced single-step trials, see [Wall-guided commissioning](docs/wall_session.md).
+Use `action_session --wall-guided --start prepare` only at physical P01.
+
 ## Editable action sessions
 
 For Task6 route exploration, use [one-origin action sessions](docs/action_session.md): separate translation/turn actions, regenerate future targets, execute one step, return to actual stops, edit and retry. Start with `ros2 run distance_controller action_session` for a motion-free preview. The supplied route remains provisional; Task1/2 tags are unchanged.

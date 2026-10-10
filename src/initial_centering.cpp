@@ -26,6 +26,9 @@ void DistanceController::configure_centering()
     }
     return value;
   };
+  alignment_wall_ = declare_parameter<std::string>("alignment_wall", "right");
+  if (alignment_wall_ != "left" && alignment_wall_ != "right")
+    throw std::invalid_argument("alignment_wall must be left or right");
   wall_heading_half_angle_ = positive("wall_heading_half_angle", wall_heading_half_angle_);
   wall_heading_min_span_ = positive("wall_heading_min_span", wall_heading_min_span_);
   wall_heading_max_rms_ = positive("wall_heading_max_rms", wall_heading_max_rms_);
@@ -257,11 +260,15 @@ void DistanceController::measure_wall_windows(
       std::isfinite(range) && range >= scan.range_min && range <= scan.range_max;
     if (
       !initial_alignment_complete_ &&
-      std::abs(body_angle + 1.5707963267948966) <= wall_heading_half_angle_) {
+      std::abs(
+        body_angle - (alignment_wall_ == "left" ? 1.5707963267948966 : -1.5707963267948966)) <=
+        wall_heading_half_angle_) {
       ++wall_samples;
       const double x = t.x + range * direction.x();
       const double y = t.y + range * direction.y();
-      if (valid_range && -y >= side_min_distance_ && -y <= side_max_distance_) {
+      const double side_distance = alignment_wall_ == "left" ? y : -y;
+      if (
+        valid_range && side_distance >= side_min_distance_ && side_distance <= side_max_distance_) {
         wall_points.emplace_back(x, y);
       }
     }

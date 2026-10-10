@@ -93,10 +93,10 @@ bool DistanceController::handle_initial_alignment(const rclcpp::Time & current_t
   if (std::chrono::duration<double>(steady_now - heading_log_time_).count() >= 1.0) {
     heading_log_time_ = steady_now;
     RCLCPP_INFO(
-      get_logger(),
-      "Right-wall alignment: valid=%s stable=%s angle=%.3f deg rms=%.4f m span=%.3f m",
-      right_heading_valid_ ? "true" : "false", right_heading_stable_ ? "true" : "false",
-      right_wall_angle_ * 180.0 / 3.141592653589793, right_wall_rms_, right_wall_span_);
+      get_logger(), "%s-wall alignment: valid=%s stable=%s angle=%.3f deg rms=%.4f m span=%.3f m",
+      alignment_wall_.c_str(), right_heading_valid_ ? "true" : "false",
+      right_heading_stable_ ? "true" : "false", right_wall_angle_ * 180.0 / 3.141592653589793,
+      right_wall_rms_, right_wall_span_);
   }
   if (!right_heading_valid_ || !right_heading_stable_) {
     alignment_settling_ = false;
@@ -126,7 +126,7 @@ bool DistanceController::handle_initial_alignment(const rclcpp::Time & current_t
     reset_pid();
     RCLCPP_INFO(
       get_logger(),
-      "Initial alignment complete: yaw=%.6f; right-wall reference captured; starting laser "
+      "Initial alignment complete: yaw=%.6f; wall reference captured; starting laser "
       "centering next tick",
       yaw);
   }

@@ -51,7 +51,8 @@ install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS tools/step.py DESTINATION lib/${PROJECT_NAME} RENAME step)
 install(PROGRAMS tools/survey_return.py DESTINATION lib/${PROJECT_NAME} RENAME survey_return)
 install(FILES tools/survey_distances.py tools/survey_return.py tools/action_plan.py
-  tools/action_runtime.py DESTINATION lib/${PROJECT_NAME})
+  tools/action_runtime.py tools/wall_geometry.py tools/wall_policy.py
+  tools/wall_runtime.py tools/wall_session.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS tools/action_session.py DESTINATION lib/${PROJECT_NAME} RENAME action_session)
 
 install(

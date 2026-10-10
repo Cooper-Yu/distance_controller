@@ -1,5 +1,5 @@
 /** @file
- * @brief Initial right-wall direction estimation in the robot body frame.
+ * @brief Initial selected-wall direction estimation (legacy right-heading member names) in the robot body frame.
  */
 #include <algorithm>
 #include <cmath>

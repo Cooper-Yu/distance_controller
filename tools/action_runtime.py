@@ -248,6 +248,7 @@ class PlannedRunner(Runner):
                     '-p',
                     'start_paused:=true',
                 ]
+                + getattr(self, 'prepare_options', [])
             )
             print(self.wait_idle(90, preparation=True), flush=True)
             self.call('finish')

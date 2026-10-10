@@ -7,6 +7,9 @@ target**, not the actual stopping error. Actual poses remain feedback and return
 anchors. The supplied route consolidates the manual survey; it is not yet a
 verified continuous CyberWorld route or the official Task6 solver entry point.
 
+For the distinct feedback-anchored wall route, use [wall-guided commissioning](wall_session.md).
+Its targets advance from measured stops; the fixed-origin rules below describe the legacy route.
+
 ## Start and operate
 
 Build both `distance_controller` and `turn_controller` in the ROS workspace.
