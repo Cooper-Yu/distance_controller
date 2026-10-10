@@ -414,3 +414,35 @@ consensus thresholds, 2 cm guard and 2/4-second recovery limits are unchanged.
 After updating a partial session, restore its latest checkpoint with unchanged
 odom; use `resume` / `RESUME` for outward continuation, not `next` or P01 preparation.
 Send the newly printed audit JSONL if another failure occurs.
+
+
+### Opposite-side clearance limits lateral correction
+
+For forward actions with a follow wall, `SIDE_CORRECTION_LIMITED` reports a reduced
+lateral correction when the requested correction consumes nearby clearance.
+The controller tests 75%, 50%, 25%, then zero of the **planned lateral component**;
+planned forward velocity and yaw correction are preserved before rotating to
+body axes. It seeks 2.5 cm predictive margin where feasible, otherwise the margin
+of the command without lateral correction, never below the existing 2 cm boundary.
+If removing correction is unsafe, the original full guard still decides to stop.
+Original requested-direction coverage is checked before limiting: missing side
+returns cannot enable this fallback. All scan points remain in the calculation.
+Measured body motion also remains guarded (`velocity_source=measured` in a failure),
+so reducing the requested velocity does not excuse momentum toward an obstacle.
+
+This does not change the carried wall reference or endpoint tolerance. If the
+side target remains infeasible at the endpoint, completion is withheld and the
+existing action timeout remains. Strafe and turn actions do not use this limiter.
+Independent `follow_clearance` / `follow_offset` policies remain available; this
+change deliberately leaves P02-P03's target unchanged for isolated cloud testing.
+A partial action cannot have its policy edited: return to its start before making
+a deliberate policy change, then re-run that action. Do not edit checkpoint JSON
+by hand to bypass this boundary.
+
+Local evidence (2026-10-10): 86 relevant pure tests, Ruff and colcon passed. Replay
+of the user's 641-point triggering scan with the actual heading rotation reduced
+the planned lateral term to zero: predicted clearance .01851275 -> .02192001 m.
+The ROS_DOMAIN181 narrow-patch fixture completed at x=.112187 m and stopped:
+`/tmp/wall_session_test/1791616140146098746`, `WALL_CASE=side_limit`.
+This is sampled-model and synthetic-process evidence; the real corridor is still
+awaiting single-action cloud verification.

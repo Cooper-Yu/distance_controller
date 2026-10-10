@@ -60,6 +60,21 @@ def inject_return_obstacle(values, now):
         values[360:362] = [0.20, 0.20]
 
 
+def inject_narrow_patch(values, scan, now):
+    """Synthetic narrow patch that requires reduced side correction while travelling forward."""
+    if os.getenv('WALL_CASE') == 'side_limit' and 0.025 < pose[0] < 0.055:
+        # A short narrow patch: left wall shifts inward, while right near points constrain correction.
+        for i in range(len(values)):
+            bearing = math.remainder(
+                scan.angle_min + i * scan.angle_increment + math.pi, 2 * math.pi
+            )
+            if abs(bearing - math.pi / 2) < math.radians(32):
+                values[i] -= 0.012 / math.sin(bearing)
+        values[523:525] = [0.184, 0.184]
+
+    inject_return_obstacle(values, now)
+
+
 def tick(previous, scan_enabled=True, front=0.55):
     global last_scan, scan_number, bad_scan_start
     rclpy.spin_once(node, timeout_sec=0.008)
@@ -117,7 +132,7 @@ def tick(previous, scan_enabled=True, front=0.55):
                 delta = math.atan2(math.sin(bearing - math.pi / 2), math.cos(bearing - math.pi / 2))
                 if abs(delta) < math.radians(35):
                     values[i] += 0.018 * ((i % 11) / 5 - 1) / abs(math.sin(bearing))
-        inject_return_obstacle(values, now)
+        inject_narrow_patch(values, scan, now)
         scan.ranges = values
         scan_pub.publish(scan)
         last_scan = now
@@ -186,6 +201,14 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'side_limit':
+        events, log = run('side_limit', [row('f', 'forward', 0.12, 'left')], 'next\nquit\n')
+        assert 'SIDE_CORRECTION_LIMITED' in log, log
+        assert sum(e['event'] == 'completed' for e in events) == 1, log
+        assert not any(e['event'] == 'incomplete' for e in events), log
+        assert 0.10 < pose[0] < 0.14, pose
+        print('PASS side limit', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'return_recovery':
         for mode in ('transient', 'permanent'):
             return_scan_start = None

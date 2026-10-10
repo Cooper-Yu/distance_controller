@@ -201,3 +201,33 @@ def front_distance(points, counts):
     """
     selected = [p for p in points if abs(p[2]) <= math.radians(12)]
     return fit_wall(selected, {'front': counts['front_narrow']}, 'front')
+
+
+def bounded_follow_velocity(points, planned, rotation):
+    """Reduce only planned lateral correction; preserve forward speed and heading control.
+
+    Keep 2.5 cm predictive margin where feasible, or the uncorrected command's
+    clearance when smaller. Never choose a reduced correction below 2 cm. All
+    scan points are retained; the caller must still check coverage and motion.
+    """
+    vx, vy, wz = planned
+    c, s = math.cos(rotation), math.sin(rotation)
+
+    def body(scale):
+        return (c * vx - s * vy * scale, s * vx + c * vy * scale, wz)
+
+    original = body(1.0)
+    if vy == 0 or swept_clearance(points, *original) >= 0.025:
+        return original, 1.0
+    base_gap = swept_clearance(points, *body(0.0))
+    if base_gap < 0.02:
+        # Removing correction cannot establish a safe fallback; let the full guard decide.
+        return original, 1.0
+    goal = min(0.025, base_gap)
+    if swept_clearance(points, *original) >= goal:
+        return original, 1.0
+    for scale in (0.75, 0.5, 0.25, 0.0):
+        candidate = body(scale)
+        if swept_clearance(points, *candidate) >= goal:
+            return candidate, scale
+    return original, 1.0

@@ -14,6 +14,7 @@ from action_plan import Pose, errors
 from action_runtime import PlannedRunner
 from wall_geometry import (
     DIRECTIONS,
+    bounded_follow_velocity,
     fit_wall,
     scan_points,
     swept_clearance,
@@ -362,9 +363,9 @@ class WallRunner(PlannedRunner):
             self.velocity_pub = None
             self.cancel_requested = False
 
-    def guard_translation(self, velocity, movement):
-        """Check coverage in commanded directions, then test predicted footprint clearance."""
-        points, counts = self.geometry()
+    @staticmethod
+    def translation_coverage(points, counts, velocity, movement):
+        """Check original requested directions even if correction will later be reduced."""
         required = {movement}
         if abs(velocity[0]) > 0.001:
             required.add('front' if velocity[0] > 0 else 'rear')
@@ -380,11 +381,16 @@ class WallRunner(PlannedRunner):
             ]
             if len(rays) < 8 or len(rays) < 0.5 * counts[direction]:
                 raise RuntimeError(f'Travel-direction scan unavailable: {direction}')
+
+    def guard_translation(self, velocity, movement):
+        """Check coverage in commanded directions, then test predicted footprint clearance."""
+        points, counts = self.geometry()
+        self.translation_coverage(points, counts, velocity, movement)
         gap = swept_clearance(points, *velocity)
         if gap < 0.02:
             self.reject_translation(points, velocity, movement, gap)
 
-    def reject_translation(self, points, velocity, movement, gap):
+    def reject_translation(self, points, velocity, movement, gap, source='command'):
         """Record the exact translation/recovery guard input without weakening rejection.
 
         A zero command identifies the stationary check used during wall recovery
@@ -394,6 +400,7 @@ class WallRunner(PlannedRunner):
         limiting = min(points, key=lambda p: swept_clearance([p], *velocity))
         detail = {
             'mode': 'translation',
+            'velocity_source': source,
             'movement': movement,
             'zero_command': all(v == 0.0 for v in velocity),
             'command_vx_vy_wz': velocity,
@@ -430,6 +437,46 @@ class WallRunner(PlannedRunner):
             self.record_wall_failure(failure, 'motion', heading)
             self.recover_walls(sides, heading, movement, prior)
             return None
+
+    def follow_velocity(self, planned, rotation, movement):
+        """Constrain side correction without masking measured motion or the final guard."""
+        points, counts = self.geometry()
+        vx, vy, wz = planned
+        c, s = math.cos(rotation), math.sin(rotation)
+        requested = (c * vx - s * vy, s * vx + c * vy, wz)
+        self.translation_coverage(points, counts, requested, movement)
+        velocity, scale = bounded_follow_velocity(points, planned, rotation)
+        if self.twist_frame != 'base_link':
+            raise RuntimeError('Follow guard requires odom twist in base_link')
+        measured_gap = swept_clearance(points, *self.body_velocity)
+        if measured_gap < 0.02:
+            self.reject_translation(
+                points, self.body_velocity, movement, measured_gap, source='measured'
+            )
+        if scale < 1.0 and time.monotonic() - getattr(self, 'last_side_limit_log', 0) >= 1.0:
+            self.last_side_limit_log = time.monotonic()
+            detail = {
+                'scan_stamp_ns': self.cached_stamp,
+                'planned_velocity': planned,
+                'rotation_rad': rotation,
+                'lateral_scale': scale,
+                'body_velocity': velocity,
+                'protected_gap_m': swept_clearance(points, *velocity),
+            }
+            self.observations.append({'side_correction_limited': detail})
+            print('SIDE_CORRECTION_LIMITED ' + json.dumps(detail), flush=True)
+        return velocity
+
+    def translation_velocity(self, planned, rotation, policy, movement):
+        """Rotate planned axes, constraining lateral motion only for wall-following actions."""
+        if policy.follow != 'none':
+            return self.follow_velocity(planned, rotation, movement)
+        vx, vy, wz = planned
+        return (
+            math.cos(rotation) * vx - math.sin(rotation) * vy,
+            math.sin(rotation) * vx + math.cos(rotation) * vy,
+            wz,
+        )
 
     def translation(self, step, target, policy):
         """Closed-loop distance/wall arrival with heading hold, travel bound and stable endpoint."""
@@ -491,12 +538,7 @@ class WallRunner(PlannedRunner):
             )
             # Convert the nominal heading axes to the current body axes.
             rotation = heading - actual.yaw
-            vx, vy, wz = velocity
-            velocity = (
-                math.cos(rotation) * vx - math.sin(rotation) * vy,
-                math.sin(rotation) * vx + math.cos(rotation) * vy,
-                wz,
-            )
+            velocity = self.translation_velocity(velocity, rotation, policy, movement)
             self.guard_translation(velocity, movement)
             self.send((0.0, 0.0, 0.0) if ready else velocity)
             if ready and self.latest[2] < 0.01 and self.latest[3] < 0.02:
