@@ -62,6 +62,41 @@ class GuardDiagnostics(unittest.TestCase):
         self.assertEqual(d['linear_allowance_m'], 0)
         self.assertTrue(math.isfinite(d['sweep_gap_m']))
 
+    def translation_fixture(self, gap):
+        runner = self.fixture()
+        points = [(1.0, i * 0.005, 0.0) for i in range(10)]
+        points.append((0.076, -0.16 - gap, -1.19))
+        runner.geometry = lambda: (points, {'front': 10, 'right': 10})
+        return runner
+
+    def test_zero_command_preserves_safe_close_returns(self):
+        runner = self.translation_fixture(0.0278)
+        runner.guard_translation((0, 0, 0), 'front')
+        self.assertEqual(runner.observations, [])
+
+    def test_recovery_zero_command_records_static_obstacle(self):
+        runner = self.translation_fixture(0.015)
+        with redirect_stdout(StringIO()), self.assertRaisesRegex(RuntimeError, 'OBSTACLE'):
+            runner.guard_translation((0, 0, 0), 'front')
+        detail = runner.observations[0]['guard_failure']
+        self.assertTrue(detail['zero_command'])
+        self.assertAlmostEqual(detail['static_gap_m'], 0.015)
+        self.assertAlmostEqual(detail['protected_gap_m'], 0.015)
+        self.assertEqual(len(detail['points_base_xy_bearing']), 11)
+        self.assertLess(detail['limiting_bearing_deg'], 0)
+
+    def test_moving_sweep_records_command_and_predictive_gap(self):
+        runner = self.fixture()
+        points = [(0.21, i * 0.001, 0) for i in range(10)]
+        runner.geometry = lambda: (points, {'front': 10})
+        with redirect_stdout(StringIO()), self.assertRaisesRegex(RuntimeError, 'OBSTACLE'):
+            runner.guard_translation((0.06, 0, 0), 'front')
+        detail = runner.observations[0]['guard_failure']
+        self.assertFalse(detail['zero_command'])
+        self.assertEqual(detail['command_vx_vy_wz'], (0.06, 0, 0))
+        self.assertAlmostEqual(detail['static_gap_m'], 0.04)
+        self.assertAlmostEqual(detail['protected_gap_m'], 0.01)
+
 
 if __name__ == '__main__':
     unittest.main()

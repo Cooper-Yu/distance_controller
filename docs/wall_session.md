@@ -288,3 +288,11 @@ The session JSONL failure event includes all transformed valid points under
 `laser[].guard_failure.points_base_xy_bearing`. Preserve this audit when reporting
 a failure: a later stationary scan cannot reconstruct the triggering geometry or
 velocity feedback. This is diagnostic evidence, not proof that a return path is safe.
+
+Translation `OBSTACLE` failures now emit the same diagnostic prefix with
+`mode=translation`, `movement`, `zero_command`, `command_vx_vy_wz`, and the
+0.5-second prediction horizon. Static gap and predicted gap are separate.
+A zero-command check occurs during recovery/settling and does not subtract
+measured speed allowances. Measured speeds are recorded only as context for this
+branch. Full transformed returns are retained in the failure audit. No points
+are discarded and the 2 cm threshold is unchanged.

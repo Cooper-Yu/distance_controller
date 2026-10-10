@@ -298,8 +298,40 @@ class WallRunner(PlannedRunner):
             ]
             if len(rays) < 8 or len(rays) < 0.5 * counts[direction]:
                 raise RuntimeError(f'Travel-direction scan unavailable: {direction}')
-        if swept_clearance(points, *velocity) < 0.02:
-            raise RuntimeError('OBSTACLE: predicted body clearance below 2 cm')
+        gap = swept_clearance(points, *velocity)
+        if gap < 0.02:
+            self.reject_translation(points, velocity, movement, gap)
+
+    def reject_translation(self, points, velocity, movement, gap):
+        """Record the exact translation/recovery guard input without weakening rejection.
+
+        A zero command identifies the stationary check used during wall recovery
+        or settling. Measured speeds remain separate from the commanded sweep.
+        """
+        nearest = min(points, key=lambda p: swept_clearance([p]))
+        limiting = min(points, key=lambda p: swept_clearance([p], *velocity))
+        detail = {
+            'mode': 'translation',
+            'movement': movement,
+            'zero_command': all(v == 0.0 for v in velocity),
+            'command_vx_vy_wz': velocity,
+            'prediction_duration_s': 0.5,
+            'scan_stamp_ns': self.cached_stamp,
+            'pose': asdict(self.latest[0]),
+            'measured_speed_m_s': self.latest[2],
+            'measured_abs_wz_rad_s': self.latest[3],
+            'static_gap_m': swept_clearance(points),
+            'protected_gap_m': gap,
+            'threshold_m': 0.02,
+            'nearest_base_point': nearest,
+            'limiting_base_point': limiting,
+            'limiting_bearing_deg': math.degrees(limiting[2]),
+            'points_base_xy_bearing': points,
+        }
+        self.observations.append({'guard_failure': detail})
+        summary = {k: v for k, v in detail.items() if k != 'points_base_xy_bearing'}
+        print('CLEARANCE_DIAGNOSTIC ' + json.dumps(summary), flush=True)
+        raise RuntimeError('OBSTACLE: predicted body clearance below 2 cm; see diagnostic')
 
     def checked_motion_gaps(self, sides, heading, movement, prior):
         """Recover only fit loss/jumps; critical feedback errors leave through the stop handler."""
