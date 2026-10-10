@@ -24,7 +24,7 @@ from wall_geometry import (
     side_distance,
     front_distance,
 )
-from wall_policy import Policy, command
+from wall_policy import Policy, command, FrontStopVerification
 
 
 class WallFitError(RuntimeError):
@@ -576,7 +576,7 @@ class WallRunner(PlannedRunner):
             wz,
         )
 
-    def translation(self, step, target, policy):
+    def translation(self, step, target, policy):  # noqa: PLR0915 - one ordered safety/control loop
         """Closed-loop distance/wall arrival with heading hold, travel bound and stable endpoint."""
         observed_start = self.pose()
         start = getattr(self, 'resume_origin', None) or observed_start
@@ -602,6 +602,7 @@ class WallRunner(PlannedRunner):
         self.recovery_seconds = 0.0
         path = getattr(self, 'resume_path', 0.0)
         hold = None
+        front_verify = FrontStopVerification()
         last_log = 0.0
         while time.monotonic() < deadline:
             self.pump()
@@ -623,6 +624,7 @@ class WallRunner(PlannedRunner):
             }[step.kind]
             gaps = self.checked_motion_gaps(sides, heading, movement, prior_gaps)
             if gaps is None:
+                front_verify.reset()
                 hold = None
                 continue
             prior_gaps = gaps
@@ -635,6 +637,14 @@ class WallRunner(PlannedRunner):
                 errors(actual, target)[1],
                 gaps,
                 self.max_speed,
+            )
+            velocity, ready = front_verify.apply(
+                policy,
+                residual,
+                self.cached_stamp,
+                self.latest[2] < 0.01 and self.latest[3] < 0.02,
+                velocity,
+                ready,
             )
             # Convert the nominal heading axes to the current body axes.
             rotation = heading - actual.yaw
@@ -662,7 +672,7 @@ class WallRunner(PlannedRunner):
             if time.monotonic() - last_log >= 1:
                 print(
                     f'WALL_PROGRESS {step.name} progress={progress:.3f} path={path:.3f} '
-                    f'gaps={gaps} residual={residual} side_estimator=held_heading_30deg front_estimator=tls_12deg',
+                    f'gaps={gaps} residual={residual} front_verified={front_verify.confirmed} side_estimator=held_heading_30deg front_estimator=tls_12deg',
                     flush=True,
                 )
                 last_log = time.monotonic()

@@ -20,6 +20,7 @@ class Policy:
     follow_clearance: float | None = None
     stop_clearance: float | None = None
     follow_offset: float = 0.0
+    stop_tolerance: float = 0.008
 
     def validate(self, kind):
         if self.follow not in ('none', 'left', 'right') or self.capture not in (
@@ -43,6 +44,8 @@ class Policy:
             raise ValueError('Wall-follow correction is for forward actions only')
         if self.capture != 'none' and kind != 'turn':
             raise ValueError('Recapture is a stopped post-turn operation')
+        if not math.isfinite(self.stop_tolerance) or not 0.005 <= self.stop_tolerance <= 0.010:
+            raise ValueError('Stop tolerance must be within [.005,.010] m')
         self.validate_clearances()
         return self
 
@@ -102,7 +105,8 @@ def command(step, policy, reference, progress, cross, yaw_error, gaps, max_speed
         residual = gaps[policy.stop] - stop_goal
         if residual < -0.015:
             raise RuntimeError('Stopping wall already too close; inspect and back')
-    ready = abs(residual) <= 0.008
+    tolerance = policy.stop_tolerance if policy.stop != 'distance' else 0.008
+    ready = abs(residual) <= tolerance
     speed = 0 if ready else clamp(0.7 * residual, max_speed)
     vx, vy = axis[0] * speed, axis[1] * speed
     side_error = cross
@@ -135,3 +139,39 @@ def command(step, policy, reference, progress, cross, yaw_error, gaps, max_speed
 
 def policy_dict(policy):
     return asdict(policy)
+
+
+class FrontStopVerification:
+    """Freeze all axes on entering the front band; require three distinct stopped scans.
+
+    A lost fit or out-of-band sample invalidates verification. After confirmation,
+    lateral/heading correction may run, while the front distance remains monitored.
+    This is separate from the final all-axis endpoint hold.
+    """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.count = 0
+        self.stamp = None
+        self.confirmed = False
+
+    def apply(self, policy, residual, stamp, stopped, velocity, ready):
+        if policy.stop != 'front':
+            return velocity, ready
+        if abs(residual['along_m']) > policy.stop_tolerance:
+            self.reset()
+            return velocity, ready
+        if self.confirmed:
+            return velocity, ready
+        if not stopped:
+            self.count = 0
+            self.stamp = stamp
+        elif stamp != self.stamp:
+            self.stamp = stamp
+            self.count += 1
+        if self.count >= 3:
+            self.confirmed = True
+        # Even the confirming tick stays zero; correction starts on the next tick.
+        return (0.0, 0.0, 0.0), False

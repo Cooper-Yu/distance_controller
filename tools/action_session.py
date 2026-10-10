@@ -144,7 +144,7 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
     else:
         print(
             'next | resume | checkpoint FILE | run | back | set INDEX METERS_OR_DEGREES | load FILE | save FILE | '
-            'policy INDEX follow_clearance|stop_clearance METERS_OR_auto | policy INDEX follow_offset|offset|max_travel VALUE | plan | status | history | measure | quit'
+            'policy INDEX follow_clearance|stop_clearance METERS_OR_auto | policy INDEX follow_offset|offset|max_travel|stop_tolerance VALUE | plan | status | history | measure | quit'
         )
 
 

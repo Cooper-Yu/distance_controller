@@ -22,7 +22,7 @@ stopped pose; it does not resume old progress and still requires a left referenc
 
 ## Route policies
 
-All clearances below are fitted wall-to-body distances. The default route keeps inherited values. Targets resolve independently: explicit absolute clearances override inherited `d` plus offsets.
+All clearances below are fitted wall-to-body distances. Most default actions inherit the carried reference; P03 uses a calibrated absolute front target. Targets resolve independently: explicit absolute clearances override inherited `d` plus offsets.
 The `value` of wall-stop actions is a nominal preview distance, not their stopping criterion.
 Every action has an independent accumulated maximum-travel limit. All translations
 hold planned odom heading. Straight wall-following adds at most 0.012 m/s lateral
@@ -34,7 +34,7 @@ turn_controller at 0.20 rad/s. The odom heading remains continuous across +/-pi.
 | Action | Reference / arrival | Maximum path |
 |---|---|---|
 | P01-P02 forward | left `d`; travel 0.90 m | 1.20 m |
-| P02-P03 forward | left `d`; front `d-0.01` | 1.05 m |
+| P02-P03 forward | left `d`; front 0.075 m, tolerance 0.010 m | 1.05 m |
 | P03 right 90 degrees | capture new left `d` after stopped turn | no translation |
 | P03-P04 forward | left `d`; front `d` | 0.75 m |
 | P04-P05 right | stop at right `d` | 0.60 m |
@@ -81,7 +81,7 @@ A reference may still select the wrong nearby parallel surface; inspect site geo
 No unseen obstacle or transparent surface is certified safe by the laser model.
 
 Approach slows proportionally before the target. Arrival requires distance/gap and
-side residuals <=0.008 m, heading error <=0.01 rad, measured linear speed <0.01 m/s
+side residuals <=0.008 m (front arrival uses its per-action stop_tolerance), heading error <=0.01 rad, measured linear speed <0.01 m/s
 and angular speed <0.02 rad/s, continuously for 0.5 wall seconds. A stopping wall
 already more than 0.015 m closer than its target rejects motion for inspection.
 
@@ -176,7 +176,7 @@ next
 These example values are body clearances, not sensor ranges or site-validated recommendations.
 Use `policy 2 follow_clearance auto` to restore inheritance; `follow_offset` can then
 adjust the inherited follow gap. `offset` adjusts an inherited stop gap. Edits only
-apply to unexecuted actions; `back` must complete before editing a finished/partial
+apply to unexecuted actions; except for the stopped front-endpoint calibration below, `back` must complete before editing a finished/partial
 action. Returning restores the recorded reference but retains the action's independent
 configuration. Saved JSON includes all values; `--route task6_trial.json` reloads them.
 Existing `--start` semantics still apply: saved routes do not restore progress or odom.
@@ -435,8 +435,8 @@ side target remains infeasible at the endpoint, completion is withheld and the
 existing action timeout remains. Strafe and turn actions do not use this limiter.
 Independent `follow_clearance` / `follow_offset` policies remain available; this
 change deliberately leaves P02-P03's target unchanged for isolated cloud testing.
-A partial action cannot have its policy edited: return to its start before making
-a deliberate policy change, then re-run that action. Do not edit checkpoint JSON
+A partial action normally requires return before edits. The stopped front-endpoint
+calibration exception below permits only stop_clearance and stop_tolerance. Do not edit checkpoint JSON
 by hand to bypass this boundary.
 
 Local evidence (2026-10-10): 86 relevant pure tests, Ruff and colcon passed. Replay
@@ -474,3 +474,44 @@ Motion fits, including failed fits, are cached only for the exact scan timestamp
 heading and requested wall set. Geometry and pose freshness checks still run on
 every use; new scans re-fit. The cache holds one result, not a history of surfaces.
 The 0.15 s pairing bound, 2/4 s recovery budgets and all-point obstacle guard remain.
+
+## P03 stopped front-endpoint calibration
+
+P03 now requests 0.075 m fitted body clearance with `stop_tolerance=0.010` m.
+This is provisional calibration from three stationary readings (0.07738, 0.07101,
+0.06948 m), not a verified turn clearance. The carried left reference stays unchanged.
+Other wall stops default to 0.008 m tolerance; supported tolerances are 0.005-0.010 m.
+
+For front-wall stops, entering the front band first commands zero on all axes.
+Three distinct fresh scans with stopped odom are required before lateral/heading
+correction resumes. A missing fit or out-of-band front reading resets this gate.
+The final all-axis arrival/0.5 s hold remains required. The 15 mm too-close rejection,
+raw-point 20 mm collision guard, scan freshness and accumulated travel limits remain.
+`front_verified` in progress logs distinguishes verification from normal approach.
+
+Existing checkpoints preserve their own policies; new defaults do not overwrite them.
+Quit the old process, update/build, then restore the **latest** stopped checkpoint
+using `--resume` (unchanged odom and no manual relocation). At the restored prompt:
+
+```text
+status
+policy 2 stop_clearance 0.075
+policy 2 stop_tolerance 0.010
+plan
+resume
+```
+
+Use these commands only when status identifies action 2 as the current partial P03
+approach. Confirm RESUME after inspecting the stopped pose/path. Do not run `next`
+to turn until this action completes and its resulting clearance is reviewed.
+
+Partial edits are restricted to the current outward front-stop action, require fresh
+stopped feedback and unchanged pose, and reject edits during an interrupted return
+or legacy back-only recovery. They preserve start, target pose preview, reference,
+path budget and completed history; the route and partial record change together,
+with previous/new definitions in the append-only audit and automatic checkpoint.
+Distance, following policy and maximum travel cannot be changed this way.
+
+Local verification: 116 unit tests, Ruff and colcon passed in Ubuntu-22.04/Humble.
+ROS synthetic feedback validated the 0.075 m stop with 0.010 m tolerance and completed/
+partial checkpoint recovery. Cloud P03 completion and subsequent turn remain pending.

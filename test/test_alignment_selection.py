@@ -5,7 +5,7 @@ import io
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import action_session
@@ -47,7 +47,11 @@ class AlignmentSelection(unittest.TestCase):
             self.assertEqual(error.exception.code, 2)
 
     def test_selected_wall_reaches_child_parameter(self):
-        with patch.object(PlannedRunner, '__init__', return_value=None):
+        with (
+            patch.object(PlannedRunner, '__init__', return_value=None),
+            patch.object(WallRunner, 'node', Mock(), create=True),
+            patch.object(WallRunner, 'twist', Mock(), create=True),
+        ):
             for side in ('left', 'right'):
                 runner = WallRunner(alignment_wall=side)
                 self.assertIn('alignment_wall:=' + side, runner.prepare_options)

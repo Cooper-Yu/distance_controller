@@ -57,24 +57,59 @@ class WallSession(Session):
 
     def set_policy(self, index, field, value):
         """Edit independent future gaps or bounds; None restores inherited absolute targets."""
-        if self.partial is not None or not self.cursor <= index < len(self.steps):
+        if not self.cursor <= index < len(self.steps):
             raise ValueError('Only future policies may be edited')
         if (
             field
-            not in ('offset', 'max_travel', 'follow_offset', 'follow_clearance', 'stop_clearance')
+            not in (
+                'offset',
+                'max_travel',
+                'follow_offset',
+                'follow_clearance',
+                'stop_clearance',
+                'stop_tolerance',
+            )
             or not self.steps[index].wall
         ):
             raise ValueError('Unknown wall policy field')
         if value is None and field not in ('follow_clearance', 'stop_clearance'):
             raise ValueError('auto is only valid for absolute clearance fields')
+        if self.partial is not None:
+            self.check_partial_policy_edit(index, field)
         data = dict(self.steps[index].wall)
         data[field] = value
         candidate = replace(self.steps[index], wall=data).validate()
+        previous = asdict(self.steps[index])
         self.steps[index] = candidate
         self.revision += 1
+        if self.partial is not None:
+            self.partial['step'] = asdict(candidate)
+            self.partial['revision'] = self.revision
         self.emit(
-            'policy_edit', {'index': index, 'revision': self.revision, 'step': asdict(candidate)}
+            'policy_edit',
+            {
+                'index': index,
+                'revision': self.revision,
+                'step': asdict(candidate),
+                'previous': previous,
+            },
         )
+
+    def check_partial_policy_edit(self, index, field):
+        """Only recalibrate a stopped outward front endpoint; preserve start/path/history."""
+        record = self.partial
+        if (
+            index != self.cursor
+            or record['index'] != index
+            or record.get('return_started')
+            or record.get('resume_unavailable')
+            or self.steps[index].wall.get('stop') != 'front'
+            or field not in ('stop_clearance', 'stop_tolerance')
+        ):
+            raise ValueError(
+                'Partial action only permits front stop_clearance/stop_tolerance edits'
+            )
+        self.check_location()  # Fresh stopped feedback and unchanged odom are required.
 
     def reload(self, steps):
         if not all(s.wall for s in steps):

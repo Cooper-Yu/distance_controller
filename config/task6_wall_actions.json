@@ -29,8 +29,9 @@
         "max_travel": 1.05,
         "capture": "none",
         "follow_clearance": null,
-        "stop_clearance": null,
-        "follow_offset": 0.0
+        "stop_clearance": 0.075,
+        "follow_offset": 0.0,
+        "stop_tolerance": 0.01
       }
     },
     {
