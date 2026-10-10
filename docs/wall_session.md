@@ -274,3 +274,17 @@ An already-running Python session does not load this code update. To keep route 
 return to P01 with the existing session's back command while the return path is clear,
 then quit, update/build and prepare again. Do not start the full route with --start current
 at P02: that would adopt P02 as a new origin and repeat P01-P02.
+
+### Clearance failure diagnostics
+
+`CLEARANCE_DIAGNOSTIC` reports the triggering scan stamp, pose, measured linear
+speed and absolute angular speed, static body gap, swept gap, separate speed
+allowances, protected residual and 0.02 m threshold. Point coordinates and bearing
+are in `base_link` (meters and radians; an explicit degree bearing is also printed).
+`RETURN_CLEARANCE` identifies recorded-pose return protection; `TURN_CLEARANCE`
+identifies delegated rotation. Return still uses the original conservative scalar
+allowances; this diagnostic change does not relax any protection or enable resume.
+The session JSONL failure event includes all transformed valid points under
+`laser[].guard_failure.points_base_xy_bearing`. Preserve this audit when reporting
+a failure: a later stationary scan cannot reconstruct the triggering geometry or
+velocity feedback. This is diagnostic evidence, not proof that a return path is safe.

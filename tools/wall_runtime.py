@@ -6,6 +6,7 @@ an action and preserves its incomplete record. Geometry is the local model.
 """
 
 from dataclasses import asdict
+import json
 import math
 import time
 
@@ -175,7 +176,44 @@ class WallRunner(PlannedRunner):
             else:
                 gap = swept_clearance(pts, wz=self.turn_sign * 0.20)
             if gap < 0.02:
-                raise RuntimeError('TURN_CLEARANCE: observed body sweep below 2 cm')
+                self.reject_sweep(pts, gap)
+
+    def reject_sweep(self, points, protected_gap):
+        """Capture the triggering frame before unwinding; never alter the guard decision.
+
+        Return protection subtracts scalar speed allowances from static clearance.
+        Turn protection samples a directional sweep. Report both independently so
+        a swept residual is not mistaken for a directly measured wall distance.
+        """
+        returning = self.turn_sign == 0
+        wz = 0.0 if returning else self.turn_sign * 0.20
+        limiting = min(points, key=lambda p: swept_clearance([p], wz=wz))
+        nearest = min(points, key=lambda p: swept_clearance([p]))
+        speed, measured_wz = self.latest[2], self.latest[3]
+        detail = {
+            'mode': 'return' if returning else 'turn',
+            'scan_stamp_ns': self.cached_stamp,
+            'pose': asdict(self.latest[0]),
+            'measured_speed_m_s': speed,
+            'measured_abs_wz_rad_s': measured_wz,
+            'static_gap_m': swept_clearance(points),
+            'sweep_gap_m': swept_clearance(points, wz=wz),
+            'linear_allowance_m': speed * 0.5 if returning else 0.0,
+            'angular_allowance_m': measured_wz * 0.22 * 0.5 if returning else 0.0,
+            'protected_gap_m': protected_gap,
+            'threshold_m': 0.02,
+            'nearest_base_point': nearest,
+            'limiting_base_point': limiting,
+            'limiting_bearing_deg': math.degrees(limiting[2]),
+            'points_base_xy_bearing': points,
+        }
+        # Preserve all transformed returns in the existing failure audit, not just
+        # a later manual scan. Console output stays compact for cloud diagnosis.
+        self.observations.append({'guard_failure': detail})
+        summary = {k: v for k, v in detail.items() if k != 'points_base_xy_bearing'}
+        print('CLEARANCE_DIAGNOSTIC ' + json.dumps(summary), flush=True)
+        code = 'RETURN_CLEARANCE' if returning else 'TURN_CLEARANCE'
+        raise RuntimeError(f'{code}: protected clearance below 2 cm; see diagnostic')
 
     def capture_reference(self, side, heading=None):
         """Capture side offset at a fixed heading from five distinct stable stopped scans.
