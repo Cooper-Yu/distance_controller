@@ -12,7 +12,7 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from action_session import export_route
 from action_plan import Pose, Step, load_steps, reverse_steps
-from wall_geometry import fit_wall, scan_points, support, swept_clearance
+from wall_geometry import dominant_wall, fit_wall, scan_points, support, swept_clearance
 from wall_policy import Policy, command
 from wall_session import WallSession
 
@@ -31,6 +31,24 @@ def wall_points(side, gap):
 
 
 class Geometry(unittest.TestCase):
+    def test_recorded_left_wall_outliers(self):
+        points = json.loads((Path(__file__).parent / 'left_wall_returns.json').read_text())
+        selected = dominant_wall([(x, y) for x, y, _ in points], 0.18)
+        self.assertGreaterEqual(len(selected), 100)
+        wall = fit_wall(points, {'left': 80}, 'left')
+        self.assertLess(wall.rms, 0.012)
+        self.assertGreater(wall.raw_count, wall.count)
+        self.assertTrue(0.10 < wall.gap < 0.16)
+
+    def test_competing_walls_and_obstacle_retention(self):
+        ambiguous = [(i * 0.01, 0.3) for i in range(20)] + [(i * 0.01, 0.5) for i in range(20)]
+        with self.assertRaises(ValueError):
+            dominant_wall(ambiguous, 0.08)
+        points = wall_points('left', 0.1) + [(0, 0.17, math.pi / 2)]
+        wall = fit_wall(points, {'left': len(points)}, 'left')
+        self.assertAlmostEqual(wall.gap, 0.1)
+        self.assertLess(swept_clearance(points), 0.02)
+
     def test_gap_from_offset_backward_laser(self):
         tf = SimpleNamespace(
             rotation=SimpleNamespace(x=0.0, y=0.0, z=1.0, w=0.0),

@@ -20,7 +20,7 @@ class WallRunner(PlannedRunner):
 
     def __init__(self, max_speed=0.06):
         super().__init__()
-        self.prepare_options = ['-p', 'alignment_wall:=left']
+        self.prepare_options = ['-p', 'alignment_wall:=left', '-p', 'robust_wall_heading:=true']
         self.max_speed = max_speed
         self.reference = None
         self.velocity_pub = None

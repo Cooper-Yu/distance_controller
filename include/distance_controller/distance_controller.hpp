@@ -297,6 +297,7 @@ private:
   /// Steady-clock throttle for initial wall-angle diagnostic logs.
   std::chrono::steady_clock::time_point heading_log_time_{};
   /// Initial heading-fit side: right by default; wall-guided sessions select left.
+  bool robust_wall_heading_{false};  ///< Opt-in dominant-line heading selection.
   std::string alignment_wall_{
     "right"};  ///< Initial heading-fit side; left is used by wall sessions.
   /// Selected-wall fitting half-width (rad) around body +pi/2 or -pi/2.

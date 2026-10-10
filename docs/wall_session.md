@@ -186,3 +186,15 @@ Execution prints resolved follow/stop targets and records them in `wall_result`.
 remain provisional. Distance-only actions have no stop-wall target. Turns do not
 translate or automatically search for space: insufficient clearance still stops the
 action. Inspect and return before changing the preceding translation target.
+
+## Dominant wall fitting
+
+Wall sessions enable `robust_wall_heading` for preparation (legacy default remains false).
+Both heading and body-clearance fits select a dominant line using bounded candidate
+pairs and a 12 mm perpendicular inlier threshold. At least 80% of valid window points
+must agree; original minimum return coverage, fitted span, angle and RMS checks still
+apply. Preparation retains the continuous stability gate. No dominant line means stop.
+The recorded single scan `test/left_wall_returns.json` reproduces sparse distant returns;
+it does not certify continuous hardware operation or identify the physical reflector.
+All original valid scan points remain available to clearance/swept-obstacle guards.
+This estimator never declares discarded wall-fit points to be free space.

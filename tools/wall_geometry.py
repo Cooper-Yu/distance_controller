@@ -72,6 +72,32 @@ class Wall:
     rms: float
     span: float
     count: int
+    raw_count: int
+
+
+def dominant_wall(points, minimum_baseline):
+    """Select >=80% consensus within 12 mm; bounded candidates, all returns scored.
+
+    This selection is for wall estimation only. Raw obstacle points remain unchanged.
+    """
+    best = []
+    stride = max(1, (len(points) + 31) // 32)
+    for i in range(0, len(points), stride):
+        for j in range(i + stride, len(points), stride):
+            dx, dy = points[j][0] - points[i][0], points[j][1] - points[i][1]
+            length = math.hypot(dx, dy)
+            if length < minimum_baseline:
+                continue
+            inliers = [
+                (x, y)
+                for x, y in points
+                if abs(-dy * (x - points[i][0]) + dx * (y - points[i][1])) / length <= 0.012
+            ]
+            if len(inliers) > len(best):
+                best = inliers
+    if len(best) < 8 or len(best) * 5 < len(points) * 4:
+        raise ValueError('No dominant wall with 80 percent consensus')
+    return best
 
 
 def fit_wall(points, counts, side):
@@ -84,6 +110,10 @@ def fit_wall(points, counts, side):
     ]
     if len(pts) < 8 or len(pts) < 0.6 * counts[side]:
         raise ValueError(f'{side}: insufficient wall returns')
+    raw_count = len(pts)
+    pts = dominant_wall(pts, 0.08)
+    if len(pts) < 0.6 * counts[side]:
+        raise ValueError(f'{side}: insufficient inlier coverage')
     mx = sum(x for x, y in pts) / len(pts)
     my = sum(y for x, y in pts) / len(pts)
     xx = sum((x - mx) ** 2 for x, y in pts)
@@ -102,7 +132,7 @@ def fit_wall(points, counts, side):
         raise ValueError(
             f'{side}: unreliable wall angle={math.degrees(angle):.1f} rms={rms:.4f} span={span:.3f}'
         )
-    return Wall(nx * mx + ny * my - support(nx, ny), angle, rms, span, len(pts))
+    return Wall(nx * mx + ny * my - support(nx, ny), angle, rms, span, len(pts), raw_count)
 
 
 def swept_clearance(points, vx=0.0, vy=0.0, wz=0.0, duration=0.5):

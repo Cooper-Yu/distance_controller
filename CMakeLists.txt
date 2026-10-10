@@ -64,6 +64,8 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_route test/test_route.cpp test/test_history.cpp src/route.cpp src/route_history.cpp)
   target_include_directories(test_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  ament_add_gtest(test_robust_wall test/test_robust_wall.cpp)
+  target_include_directories(test_robust_wall PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files

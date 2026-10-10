@@ -26,6 +26,7 @@ void DistanceController::configure_centering()
     }
     return value;
   };
+  robust_wall_heading_ = declare_parameter<bool>("robust_wall_heading", false);
   alignment_wall_ = declare_parameter<std::string>("alignment_wall", "right");
   if (alignment_wall_ != "left" && alignment_wall_ != "right")
     throw std::invalid_argument("alignment_wall must be left or right");

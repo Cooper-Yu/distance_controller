@@ -6,15 +6,19 @@
 #include <limits>
 
 #include "distance_controller/distance_controller.hpp"
+#include "distance_controller/robust_wall.hpp"
 
 void DistanceController::estimate_right_heading(
-  const std::vector<std::pair<double, double>> & points, std::size_t samples)
+  const std::vector<std::pair<double, double>> & raw_points, std::size_t samples)
 {
   const bool was_valid = right_heading_tracking_;
   right_heading_tracking_ = false;
   right_heading_stable_ = false;
   right_heading_valid_ = false;
   right_wall_rms_ = right_wall_span_ = 0.0;
+  const auto points = robust_wall_heading_
+                        ? distance_controller::dominant_wall(raw_points, wall_heading_min_span_)
+                        : raw_points;
   if (!received_odom_ || points.size() < 12 || points.size() * 2 < samples) return;
   double mean_x = 0.0, mean_y = 0.0;
   for (const auto & point : points) {
