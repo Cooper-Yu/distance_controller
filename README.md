@@ -612,3 +612,7 @@ P02-P03 follows 2 cm closer to the left reference wall, with bounded side alignm
 Front-wall arrival pauses for three distinct stopped scans before final side correction.
 Existing partial checkpoints require an explicit policy edit; see
 [P03 calibration and continuation](docs/wall_session.md#p03-stopped-front-endpoint-calibration).
+
+
+Task6 blocked-turn adjustment: `adjust_turn 0.02` performs a guarded, checkpointed
+2 cm right correction without starting the turn. See [wall-session limits and retries](docs/wall_session.md#explicit-clearance-adjustment-before-a-blocked-turn).

@@ -113,7 +113,9 @@ def tick(previous, scan_enabled=True, front=0.55):
             if abs(dx) > 1e-8:
                 candidates.append(((front if dx > 0 else -0.3) - x) / dx)
             if abs(dy) > 1e-8:
-                candidates.append(((0.3 if dy > 0 else -0.5) - y) / dy)
+                candidates.append(
+                    ((float(os.getenv('WALL_LEFT_Y', '0.3')) if dy > 0 else -0.5) - y) / dy
+                )
             distance = min(v for v in candidates if v > 0)
             values.append(distance if distance >= 0.15 else float('inf'))
         mode = os.getenv('WALL_LOSS_MODE', '')
@@ -204,6 +206,34 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'turn_adjust':
+        os.environ['WALL_LEFT_Y'] = '0.224'
+        rows = [row('turn', 'turn', -90)]
+        events, log = run('turn_blocked', rows, 'next\nquit\n')
+        assert any(e['event'] == 'incomplete' for e in events), log
+        saved = next((OUT / 'turn_blocked').glob('*.checkpoint.json'))
+        command_samples.clear()
+        events, log = run(
+            'turn_adjusted',
+            rows,
+            'SAME_ODOM\nadjust_turn 0.02\nadjust_turn 0.02\nquit\n',
+            resume=saved,
+        )
+        assert 'TURN_CHECK passed on fresh scan' in log, log[-4000:]
+        assert not any(e['event'] == 'completed' for e in events)
+        assert -0.023 < pose[1] < -0.016 and abs(pose[2]) < 0.01, pose
+        assert all(math.hypot(v[0], v[1]) <= 0.010001 for _, v in command_samples)
+        saved = next((OUT / 'turn_adjusted').glob('*.checkpoint.json'))
+        data = json.loads(saved.read_text())
+        assert data['partial']['turn_adjustment']['done'] and data['cursor'] == 0
+        events, log = run(
+            'turn_after_adjust', rows, 'SAME_ODOM\nresume\nRESUME\nback\nBACK\nquit\n', resume=saved
+        )
+        assert sum(e['event'] == 'completed' for e in events) == 1, log[-4000:]
+        assert sum(e['event'] == 'returned' for e in events) == 1, log[-4000:]
+        assert math.hypot(pose[0], pose[1]) < 0.004 and abs(pose[2]) < 0.02, pose
+        print('PASS turn adjustment', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'follow_adjust':
         rows = [row('partial_front', 'forward', 0.2, 'left', 'front')]
         rows[0]['wall'].update(stop_clearance=0.095, stop_tolerance=0.01)

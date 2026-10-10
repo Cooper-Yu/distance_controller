@@ -35,6 +35,8 @@ def import_audit(path):  # noqa: PLR0912 - explicit replay branch per recorded e
             busy = False
         elif data is None:
             continue
+        elif event.startswith('turn_adjustment_'):
+            raise ValueError('Turn adjustment audit requires its checkpoint file')
         elif event == 'checkpoint_restored':
             raise ValueError('This audit was itself restored; use its checkpoint file')
         elif event == 'initial_reference':

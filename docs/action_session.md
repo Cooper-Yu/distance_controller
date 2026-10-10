@@ -149,3 +149,7 @@ python3 test/test_survey_return.py
 # Source ROS Humble and the workspace. The fixture sets localhost/domain179.
 python3 test/verify_action_session.py
 ```
+
+For a blocked, unstarted wall-guided turn, `adjust_turn 0.02` requests one fixed
+2 cm right correction. See [clearance adjustment](wall_session.md#explicit-clearance-adjustment-before-a-blocked-turn).
+It remains stopped for a separate `resume` and persists through checkpoints.

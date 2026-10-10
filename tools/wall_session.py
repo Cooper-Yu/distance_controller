@@ -37,7 +37,16 @@ class WallSession(Session):
         self.emit('wall_result', self.active[-1])
         return actual
 
+    def adjust_turn(self, distance):
+        """Explicit rightward preparation; never starts the pending rotation."""
+        from turn_adjustment import adjust_session
+
+        return adjust_session(self, distance)
+
     def resume(self):
+        adjustment = (self.partial or {}).get('turn_adjustment')
+        if adjustment and not adjustment['done']:
+            raise RuntimeError('Finish the fixed adjust_turn target or back before turning')
         actual = super().resume()
         self.active[-1]['reference_after'] = self.backend.reference
         self.active[-1]['wall_result'] = self.backend.last_report

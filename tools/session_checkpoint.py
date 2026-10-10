@@ -60,8 +60,37 @@ def validate_records(data, steps):
         for key in ('start', 'target', 'end'):
             if key in record:
                 finite_pose(record[key])
+        if record.get('turn_adjustment'):
+            validate_adjustment(record)
         if not math.isfinite(record.get('path_m', 0)) or record.get('path_m', 0) < 0:
             raise ValueError('Invalid travel budget')
+
+
+def validate_adjustment(record):
+    """Reject malformed saved micro-adjustments before any restored motion."""
+    state = record['turn_adjustment']
+    origin, target = finite_pose(state['origin']), finite_pose(state['target'])
+    distance = state['distance']
+    if (
+        record['step']['kind'] != 'turn'
+        or not math.isfinite(distance)
+        or not 0.005 <= distance <= 0.03
+        or type(state['done']) is not bool
+        or not math.isfinite(state['path_m'])
+        or state['path_m'] < 0
+        or errors(origin, target)[0] > 0.031
+        or abs(target.yaw - origin.yaw) > 1e-6
+    ):
+        raise ValueError('Invalid turn adjustment checkpoint')
+    expected = Pose(
+        origin.x + math.sin(origin.yaw) * distance,
+        origin.y - math.cos(origin.yaw) * distance,
+        origin.yaw,
+    )
+    if errors(expected, target)[0] > 1e-6:
+        raise ValueError('Turn adjustment target is not its original right offset')
+    if state.get('last_sample'):
+        finite_pose(state['last_sample'])
 
 
 def finite_pose(row):

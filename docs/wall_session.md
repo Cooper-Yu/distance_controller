@@ -555,3 +555,32 @@ history and path budget. It updates the route and partial record together and is
 persisted/audited. A failed adjustment stays incomplete; it does not advance the
 cursor. Repeated resume rechecks alignment, rather than assuming a saved flag
 proves the current robot is aligned. No obstacle points or safety margins are removed.
+
+## Explicit clearance adjustment before a blocked turn
+
+For a stopped, incomplete outward turn that has not yet changed heading:
+
+```text
+adjust_turn 0.02
+```
+
+This requests a 2 cm right shift at at most 0.01 m/s while holding heading.
+The odom target is fixed on the first attempt and stored in the checkpoint.
+Repeated calls with the same distance continue toward that target; after completion,
+they only recheck the turn. They never add another 2 cm. Changing the distance is
+rejected. `resume` is blocked while the adjustment is incomplete.
+
+The correction has a 20 s attempt limit, a cumulative 6 cm travel limit, 3 mm
+position tolerance and 0.01 rad heading tolerance. It retains full scan coverage,
+command/measured velocity clearance checks and the 2 cm obstacle threshold.
+After stopping, a fresh scan must pass the full rotation sweep check. Success
+leaves the session waiting; **only a separate `resume` starts the turn**. A failed
+sweep leaves the adjustment recorded and the robot stopped.
+
+Save/restore the `.checkpoint.json` file with unchanged odom and no manual
+relocation. JSONL migration refuses adjustment records because it cannot safely
+reconstruct their complete state. `back` reverses the turn and then returns to
+the recorded original XY using guarded small translation.
+
+This is an explicit local correction, not a new default wall-follow clearance.
+The P03 scan suggested 2 cm right as a candidate; live checks may still refuse it.

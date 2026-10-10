@@ -686,8 +686,8 @@ class WallRunner(PlannedRunner):
                 last_log = time.monotonic()
         raise RuntimeError('WALL_ACTION_TIMEOUT')
 
-    def turn(self, step, target, policy):
-        """Check observed full turn sweep, then monitor near-term sweep during C++ turn execution."""
+    def check_turn(self, target):
+        """Check the complete observed turn sweep without issuing motion commands."""
         actual = self.pose()
         delta = target.yaw - actual.yaw
         points, counts = self.geometry()
@@ -703,6 +703,12 @@ class WallRunner(PlannedRunner):
             angle = delta * i / max(2, int(abs(delta) / 0.04))
             if swept_clearance(points, wz=angle, duration=1) < 0.02:
                 raise RuntimeError('Turn would sweep within 2 cm of observed obstacle')
+        print(f'TURN_CHECK: full observed sweep passed, delta={delta:.6f} rad', flush=True)
+
+    def turn(self, step, target, policy):
+        """Recheck at execution time even if a previous stopped check passed."""
+        self.check_turn(target)
+        delta = target.yaw - self.pose().yaw
         self.turn_sign = 1 if delta > 0 else -1
         self.turn_guard = True
         try:
@@ -729,6 +735,22 @@ class WallRunner(PlannedRunner):
             policy = Policy(**step.wall) if step.wall else Policy(max_travel=3.0)
             if step.kind == 'turn':
                 resolved = self.turn(step, target, policy)
+                if step.wall is None and errors(self.pose(), target)[0] > 0.003:
+                    # An adjusted historical turn also has a small translation to undo.
+                    from turn_adjustment import run_adjustment
+
+                    origin = self.pose()
+                    if errors(origin, target)[0] > 0.06:
+                        raise RuntimeError('Adjusted turn return exceeds 6 cm')
+                    run_adjustment(
+                        self,
+                        {
+                            'origin': asdict(origin),
+                            'target': asdict(target),
+                            'path_m': 0.0,
+                            'done': False,
+                        },
+                    )
             elif step.wall:
                 resolved = self.translation(step, target, policy)
             else:
