@@ -1,0 +1,56 @@
+{
+  "status": "provisional odom trial; intermediate shape not verified",
+  "spacing_m": 0.05,
+  "segments": [
+    {
+      "name": "P01_P02",
+      "kind": "translate",
+      "offsets": [
+        [
+          0.9,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "P02_P03",
+      "kind": "translate",
+      "offsets": [
+        [
+          0.59,
+          0
+        ],
+        [
+          0.2,
+          -0.04
+        ]
+      ]
+    },
+    {
+      "name": "P03_turn",
+      "kind": "turn",
+      "angle_deg": -90
+    },
+    {
+      "name": "P03_P04",
+      "kind": "translate",
+      "offsets": [
+        [
+          0.41,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "P04_P05",
+      "kind": "translate",
+      "offsets": [
+        [
+          0,
+          -0.287
+        ]
+      ]
+    }
+  ],
+  "provenance": "Nominal .9; measured approx .79 plus late right .04; .382+.028 front correction=.41; measured right .287. Not a continuous recorded trajectory."
+}

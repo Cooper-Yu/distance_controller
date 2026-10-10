@@ -107,7 +107,8 @@ def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - o
     )
     msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.angular.z = velocity
     for _ in range(int(os.getenv('WALL_ODOM_BURST', '1'))):
-        odom_pub.publish(msg)
+        if not (os.getenv('ODOM_TRIAL_STALE') and pose[0] > 0.025):
+            odom_pub.publish(msg)
     if scan_enabled and now - last_scan > float(os.getenv('WALL_SCAN_PERIOD', '0.07')):
         scan = LaserScan()
         scan.header.frame_id, scan.header.stamp = 'laser', msg.header.stamp
@@ -181,12 +182,14 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
     directory = OUT / name
     directory.mkdir()
     config = directory / 'route.json'
-    config.write_text(json.dumps({'actions': rows}))
+    odom_trial = os.getenv('WALL_CASE', '').startswith('odom_trial')
+    config.write_text(json.dumps(rows if odom_trial else {'actions': rows}))
     with (directory / 'runtime.log').open('w') as log:
         proc = subprocess.Popen(
             [
                 'python3',
-                str(ROOT / 'tools/action_session.py'),
+                str(ROOT / ('tools/odom_trial.py' if odom_trial else 'tools/action_session.py')),
+                *(['--laser-log-only'] if odom_trial else []),
                 *(
                     ['--resume', str(resume)]
                     if resume
@@ -214,7 +217,11 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
         assert proc.returncode == 0, (directory / 'runtime.log').read_text()[-3500:]
     events = [
         json.loads(line)
-        for line in next(directory.glob('action_session_*.jsonl')).read_text().splitlines()
+        for line in next(
+            directory.glob('odom_trial_*.jsonl' if odom_trial else 'action_session_*.jsonl')
+        )
+        .read_text()
+        .splitlines()
     ]
     assert sum(abs(v) for v in velocity) < 1e-6
     print(name, [e['event'] for e in events], pose, flush=True)
@@ -222,6 +229,20 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'odom_trial':
+        data = json.loads((ROOT / 'config/task6_odom_p01_p05.json').read_text())
+        events, log = run(
+            'odom_p01_p05', data, 'next\nnext\nnext\nnext\nnext\nstatus\nquit\n', stale=True
+        )
+        assert sum(e['event'] == 'completed' for e in events) == 5, log[-5000:]
+        assert abs(pose[0] - 1.403) < 0.02 and abs(pose[1] + 0.45) < 0.02, pose
+        assert 'Next action=6, partial=False' in log, log[-2000:]
+        os.environ['ODOM_TRIAL_STALE'] = '1'
+        events, log = run('odom_stale', data, 'next\nquit\n')
+        assert any(e['event'] == 'stopped' for e in events) and 'stale' in log, log[-4000:]
+        assert not any(e['event'] == 'completed' for e in events)
+        print('PASS full odom trial with missing scans and odom-stale stop', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'front_same_process':
         rows = [
             row('p04', 'forward', 0.2, follow='left', stop='front'),

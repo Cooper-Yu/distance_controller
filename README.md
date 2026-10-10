@@ -636,3 +636,5 @@ Task6 completed front-stop endpoints support `adjust_front 0.08` (absolute body
 clearance, low-speed correction, persistent fixed target). Action 4's 8 cm front
 target is provisional and independent of the left-follow reference.
 See [wall session endpoint adjustment](docs/wall_session.md#completed-p04-front-clearance-adjustment-2026-10-10).
+
+P01-P05 supervised odom/interpolation trial: [commands and boundaries](docs/odom_trial.md).
