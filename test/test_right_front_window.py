@@ -52,3 +52,28 @@ class RightFrontWindow(unittest.TestCase):
         self.assertTrue(s.partial['step']['wall']['right_front_window'])
         self.assertEqual(s.partial['path_m'], 0.012)
         self.assertEqual(s.partial['target'], asdict(Pose(0, -0.27, 0)))
+
+    def test_old_near_right_patch_excluded(self):
+        points = []
+        for deg in range(-90, -59):
+            a = math.radians(deg)
+            y = -0.62 if deg < -80 else -0.55
+            points.append((y / math.sin(a) * math.cos(a), y, a))
+        wall = side_distance(
+            points, {'right': 40, 'right_front20': 21}, 'right', 0, right_front_window=True
+        )
+        self.assertAlmostEqual(wall.gap, 0.39)
+
+    def test_empty_inliers_report_diagnostics(self):
+        points = [(i * 0.01, -0.3 if i < 10 else -0.6, math.radians(-75)) for i in range(20)]
+        with self.assertRaisesRegex(ValueError, 'consensus=0.000.*rms_m=unavailable'):
+            side_distance(
+                points, {'right': 40, 'right_front20': 20}, 'right', 0, right_front_window=True
+            )
+
+    def test_short_surface_reports_rms_and_span(self):
+        points = [(i * 0.001, -0.3, math.radians(-75)) for i in range(20)]
+        with self.assertRaisesRegex(ValueError, 'rms_m=.*span_m='):
+            side_distance(
+                points, {'right': 40, 'right_front20': 20}, 'right', 0, right_front_window=True
+            )

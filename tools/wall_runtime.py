@@ -206,7 +206,13 @@ class WallRunner(PlannedRunner):
                     'scheduled_ray_counts': counts,
                     'right_front_window': getattr(self, 'right_front_window', False),
                     'points_base_xy_bearing': points,
-                    'estimator': 'held_heading_30deg' if side in ('left', 'right') else 'tls_12deg',
+                    'estimator': (
+                        'right_front_10_to_30deg'
+                        if side == 'right' and getattr(self, 'right_front_window', False)
+                        else 'held_heading_30deg'
+                        if side in ('left', 'right')
+                        else 'tls_12deg'
+                    ),
                 }
                 raise WallFitError(f'WALL_LOST {side}: {failure}', detail) from failure
         return walls
@@ -718,7 +724,7 @@ class WallRunner(PlannedRunner):
             if time.monotonic() - last_log >= 1:
                 print(
                     f'WALL_PROGRESS {step.name} progress={progress:.3f} path={path:.3f} '
-                    f'gaps={gaps} residual={residual} front_verified={front_verify.confirmed} follow_aligned={follow_align.done} side_estimator={"right_front20" if policy.right_front_window else "held_heading_30deg"} front_estimator=tls_12deg',
+                    f'gaps={gaps} residual={residual} front_verified={front_verify.confirmed} follow_aligned={follow_align.done} side_estimator={"right_front_10_to_30deg" if policy.right_front_window else "held_heading_30deg"} front_estimator=tls_12deg',
                     flush=True,
                 )
                 last_log = time.monotonic()

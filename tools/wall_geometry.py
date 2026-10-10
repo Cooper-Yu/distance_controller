@@ -62,7 +62,7 @@ def scan_points(scan, transform):
                 math.atan2(math.sin(bearing - center), math.cos(bearing - center))
             ) <= math.radians(20):
                 counts[name] += 1
-        if -math.pi / 2 <= bearing <= math.radians(-70):
+        if math.radians(-80) <= bearing <= math.radians(-60):
             counts['right_front20'] += 1
         if abs(bearing) <= math.radians(12):
             counts['front_narrow'] += 1
@@ -169,7 +169,7 @@ def side_distance(points, counts, side, heading_error, *, right_front_window=Fal
 
     Require 80% within 20 mm of the median projection, 60% scan coverage,
     12 mm RMS and 8 cm longitudinal span. This is a distance estimator, not
-    a new heading observation. Optional right-front sector is [-90,-70] degrees
+    a new heading observation. Optional right-front sector is [-80,-60] degrees
     in base_link; it retains all quality thresholds and full raw guard points.
     """
     if side not in ('left', 'right') or not math.isfinite(heading_error):
@@ -185,24 +185,39 @@ def side_distance(points, counts, side, heading_error, *, right_front_window=Fal
     if right_front_window:
         if side != 'right':
             raise ValueError('Forward sector requires right wall')
-        selected = [(x, y) for x, y, a in points if -math.pi / 2 <= a <= math.radians(-70)]
+        selected = [(x, y) for x, y, a in points if math.radians(-80) <= a <= math.radians(-60)]
     expected = (
         counts.get('right_front20', 0)
         if right_front_window
         else counts.get(side + '_wide', counts[side])
     )
     if len(selected) < 8 or len(selected) < 0.6 * expected:
-        raise ValueError(f'{side}: insufficient wide-window returns')
+        raise ValueError(
+            f'{side}: insufficient returns: valid={len(selected)} expected={expected} required_coverage=0.60 min_points=8'
+        )
     offset = median(nx * x + ny * y for x, y in selected)
     inliers = [(x, y) for x, y in selected if abs(nx * x + ny * y - offset) <= 0.020]
-    if len(inliers) * 5 < len(selected) * 4 or len(inliers) < 0.6 * expected:
-        raise ValueError(f'{side}: constrained distance lacks 80 percent consensus')
+    if not inliers:
+        raise ValueError(
+            f'{side}: constrained distance lacks 80 percent consensus; '
+            f'consensus=0.000 min=0.800 coverage=0.000 min=0.600 '
+            f'rms_m=unavailable span_m=0.00000 min=0.08000 '
+            f'inliers=0 valid={len(selected)} expected={expected}'
+        )
     offset = median(nx * x + ny * y for x, y in inliers)
     rms = math.sqrt(sum((nx * x + ny * y - offset) ** 2 for x, y in inliers) / len(inliers))
     along = [ny * x - nx * y for x, y in inliers]
     span = max(along) - min(along)
+    quality = (
+        f'consensus={len(inliers) / len(selected):.3f} min=0.800 '
+        f'coverage={len(inliers) / max(expected, 1):.3f} min=0.600 '
+        f'rms_m={rms:.5f} max=0.01200 span_m={span:.5f} min=0.08000 '
+        f'inliers={len(inliers)} valid={len(selected)} expected={expected}'
+    )
+    if len(inliers) * 5 < len(selected) * 4 or len(inliers) < 0.6 * expected:
+        raise ValueError(f'{side}: constrained distance lacks 80 percent consensus; {quality}')
     if rms > 0.012 or span < 0.08:
-        raise ValueError(f'{side}: constrained distance rough or short')
+        raise ValueError(f'{side}: constrained distance rough or short; {quality}')
     return Wall(offset - support(nx, ny), heading_error, rms, span, len(inliers), len(selected))
 
 

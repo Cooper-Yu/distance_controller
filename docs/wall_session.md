@@ -771,7 +771,7 @@ is zero. This is interface/state verification, not a real collision test.
 ### P04 to P05 right stopping-wall sector
 
 Action 5 now defaults to `right_front_window: true`: use base_link bearings
-[-90,-70] degrees (straight right through 20 degrees forward) only for the
+[-80,-60] degrees (10 through 30 degrees forward of straight right) only for the
 stopping-wall distance. Other actions retain their existing windows. All raw
 points remain available to translation/turn obstacle guards. The 80% consensus,
 60% coverage, 12 mm RMS and 8 cm wall-span checks remain unchanged.
@@ -798,7 +798,17 @@ accumulated path and history; it does not initiate motion. It is allowed for an
 incomplete outward right translation with a right stopping wall, never a return.
 Use 0 to restore the original window. New sessions get the setting from the route.
 
-Offline real-scan replay: 34/34 frames pass at the reported approximate heading
+Historical [-90,-70] sector replay: 34/34 frames pass at the reported approximate heading
 error -0.00065 rad; 33/34 pass at -0.01 rad. This is not proof of a complete real
 P04-P05 traversal. Lateral arrival, injected obstacles and stale scans are covered
 by the local ROS raycast fixture (`WALL_CASE=right_front_window`).
+
+The refined [-80,-60] sector passes both supplied stopped datasets (34 + 40
+frames), including +/-0.01 rad perturbations around each reported heading error.
+The previous sector failed 39/40 frames after a short real lateral movement;
+a stationary-only initial pass was insufficient. Real continuous traversal is
+still pending. Quality failures now report consensus, coverage, RMS and span
+with their limits; the estimator label is `right_front_10_to_30deg`.
+Existing `right_front_window=true` checkpoints use the refined sector after
+updating. Save a NEW checkpoint at the latest stop before quitting; do not
+restore the old P04 checkpoint after the robot has moved.
