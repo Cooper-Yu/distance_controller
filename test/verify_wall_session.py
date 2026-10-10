@@ -86,9 +86,11 @@ def inject_turn_obstacle(values, now):
             values[0:3] = [0.165] * 3
 
 
-def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0915 - one fixture sensor tick with explicit fault injections
+def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - one fixture sensor tick with explicit fault injections
     global last_scan, scan_number, bad_scan_start
     rclpy.spin_once(node, timeout_sec=0.008)
+    if os.getenv('ESCAPE_LOSS_MODE') == 'stale' and pose[1] < -0.01:
+        scan_enabled = False
     now = time.monotonic()
     dt = min(now - previous, 0.03)
     c, s = math.cos(pose[2]), math.sin(pose[2])
@@ -146,6 +148,8 @@ def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0915 - one fixtur
                 delta = math.atan2(math.sin(bearing - math.pi / 2), math.cos(bearing - math.pi / 2))
                 if abs(delta) < math.radians(35):
                     values[i] += 0.018 * ((i % 11) / 5 - 1) / abs(math.sin(bearing))
+        if os.getenv('ESCAPE_LOSS_MODE') == 'obstacle' and pose[1] < -0.01:
+            values[0:3] = [0.165] * 3
         inject_turn_obstacle(values, now)
         inject_narrow_patch(values, scan, now)
         scan.ranges = values
@@ -216,6 +220,35 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'turn_escape':
+        rows = [row('turn', 'turn', -5.73)]
+        run('escape_seed', rows, 'quit\n')
+        saved = next((OUT / 'escape_seed').glob('*.checkpoint.json'))
+        os.environ['WALL_LEFT_Y'] = '0.177'
+        events, log = run(
+            'turn_escape',
+            [row('turn', 'turn', -5.73)],
+            'SAME_ODOM\nnext\nescape_turn 0.03\nescape_turn 0.03\nquit\n',
+            resume=saved,
+        )
+        assert 'ESCAPE_READY' in log, log[-5000:]
+        if os.getenv('ESCAPE_LOSS_MODE'):
+            assert 'turn_escape_completed' not in [e['event'] for e in events], log[-4000:]
+            assert 'turn_escape_stopped' in [e['event'] for e in events], log[-4000:]
+            assert -0.02 < pose[1] < -0.009, pose
+            assert max(abs(v) for v in velocity) < 1e-6, velocity
+            print('PASS escape failure', os.getenv('ESCAPE_LOSS_MODE'), OUT, flush=True)
+            raise SystemExit(0)
+
+        assert 'TURN_CHECK passed on fresh scan' in log, log[-5000:]
+        assert not any(e['event'] == 'completed' for e in events)
+        escaped = [e['data']['actual'] for e in events if e['event'] == 'turn_escape_completed']
+        assert len(escaped) == 2 and escaped[0] == escaped[1], log[-5000:]
+        assert -0.033 <= pose[1] <= -0.026 and abs(pose[2]) < 0.001, pose
+        assert all(math.hypot(*v[:2]) <= 0.005001 and v[2] == 0 for _, v in command_samples)
+        assert max(abs(v) for v in velocity) < 1e-6
+        print('PASS turn escape', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'turn_recovery':
         mode = os.getenv('TURN_LOSS_MODE', '')
         if not mode:

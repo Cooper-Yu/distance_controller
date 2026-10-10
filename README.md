@@ -620,3 +620,7 @@ Task6 blocked-turn adjustment: `adjust_turn 0.02` performs a guarded, checkpoint
 Task6 turns now stop and verify near the clearance boundary, then resume at
 0.08 rad/s only after fresh stopped scans pass. Two retries maximum; the 2 cm
 protection and fixed yaw target remain. See [turn recovery](docs/wall_session.md#bounded-turn-slowdown-and-stopped-recovery).
+
+Task6 partial-turn recovery: `escape_turn 0.03` requests a fixed low-speed right
+translation at the current heading, with receding-point guards and no automatic
+rotation. Read the [escape limits](docs/wall_session.md#escape-from-a-partially-completed-turn) before use; automatic back across this recovery is disabled.

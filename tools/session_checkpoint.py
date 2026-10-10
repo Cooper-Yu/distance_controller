@@ -60,15 +60,33 @@ def validate_records(data, steps):
         for key in ('start', 'target', 'end'):
             if key in record:
                 finite_pose(record[key])
+        if record.get('turn_escape'):
+            validate_adjustment(record, 'turn_escape')
+            state = record['turn_escape']
+            if (
+                abs(state['distance'] - 0.03) > 1e-9
+                or state['final_yaw'] != record['target']['yaw']
+            ):
+                raise ValueError('Invalid escape fixed distance or final yaw')
+            if (
+                state.get('escape') is not True
+                or type(state.get('cleared')) is not bool
+                or not math.isfinite(state['final_yaw'])
+            ):
+                raise ValueError('Invalid turn escape checkpoint')
+            if 'floor' in state and (
+                not math.isfinite(state['floor']) or not 0.012 <= state['floor'] <= 0.02
+            ):
+                raise ValueError('Invalid escape clearance floor')
         if record.get('turn_adjustment'):
             validate_adjustment(record)
         if not math.isfinite(record.get('path_m', 0)) or record.get('path_m', 0) < 0:
             raise ValueError('Invalid travel budget')
 
 
-def validate_adjustment(record):
+def validate_adjustment(record, key='turn_adjustment'):
     """Reject malformed saved micro-adjustments before any restored motion."""
-    state = record['turn_adjustment']
+    state = record[key]
     origin, target = finite_pose(state['origin']), finite_pose(state['target'])
     distance = state['distance']
     if (

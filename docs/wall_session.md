@@ -608,3 +608,35 @@ this version therefore does not guarantee that the current P03 pose can turn.
 
 Local ROS fixtures cover a close-wall slowdown, transient obstacle recovery and
 persistent-obstacle rejection. Real robot verification remains pending.
+## Escape from a partially completed turn
+
+`escape_turn 0.03` is an explicit recovery at the **current heading**, using a
+fixed 3 cm rightward odom target. It is distinct from `adjust_turn`: an incomplete
+outward turn is required, but its original heading need not be retained. The
+original final yaw remains unchanged. No rotation starts automatically.
+
+Before motion, three fresh stopped scans must confirm quadrant coverage, a
+non-worsening translation path and at least 2.5 cm remaining rotation clearance
+at the proposed endpoint. Only existing left-side points below 2 cm receive the
+receding-point exception. Each commanded and measured 0.5 s prediction must not
+reduce their clearance by more than 0.3 mm; other points retain the 2 cm guard.
+The static floor is the initial observed gap minus 2 mm, never below 12 mm. This
+is a bounded escape exception, not a new normal-motion threshold. Once clearance
+reaches 22 mm, the normal 20 mm guard is latched for the rest of the attempt and
+checkpoint retries. Unstable scans, new obstacles and stale feedback stop it.
+
+Speed is at most 0.005 m/s; angular command is zero. Heading drift above 0.015 rad
+or longitudinal drift above 4 mm stops the operation rather than rotating near
+obstacles. The shared adjustment limits remain: 20 s per attempt, 6 cm cumulative
+path, 3 mm endpoint tolerance and a final 0.01 rad heading check. The fixed target,
+clearance floor and completion flag persist in checkpoints. Repeating the command
+continues the same target or only rechecks the completed escape.
+
+`resume` is blocked until escape completion. A successful escape still requires
+fresh full-turn verification and a separate `resume`. Automatic `back` across an
+escape record is refused because replaying the old turn/translation order could
+re-enter the close region. Preserve the checkpoint and inspect a recovery path.
+JSONL import is not a substitute for the checkpoint.
+
+Local verification uses a raycast ROS fixture and the uploaded P03 scan for
+read-only geometry replay; real robot execution remains pending.

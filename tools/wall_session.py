@@ -43,7 +43,16 @@ class WallSession(Session):
 
         return adjust_session(self, distance)
 
+    def escape_turn(self, distance):
+        """Explicit right escape at the current heading; never rotates automatically."""
+        from turn_adjustment import adjust_session
+
+        return adjust_session(self, distance, escape=True)
+
     def resume(self):
+        escape = (self.partial or {}).get('turn_escape')
+        if escape and not escape['done']:
+            raise RuntimeError('Finish the fixed escape_turn target before turning')
         adjustment = (self.partial or {}).get('turn_adjustment')
         if adjustment and not adjustment['done']:
             raise RuntimeError('Finish the fixed adjust_turn target or back before turning')
@@ -55,6 +64,8 @@ class WallSession(Session):
 
     def back(self):
         record = self.partial or (self.active[-1] if self.active else None)
+        if record and record.get('turn_escape'):
+            raise RuntimeError('Automatic back across an escape is disabled; inspect recovery path')
         before = (
             record.get('reference_before', self.backend.reference)
             if record
