@@ -10,7 +10,7 @@ from pathlib import Path
 import signal
 import time
 from action_plan import Pose, errors
-from odom_path import compile_path, track, limited_velocity
+from odom_path import compile_path, track, limited_velocity, waypoint_stop
 from wall_runtime import WallRunner
 
 
@@ -34,7 +34,7 @@ class Trial:
     def execute(self):
         r = self.runner
         if self.cursor >= len(self.route):
-            print('All P01-P05 actions completed; stopped.')
+            print('All configured actions completed; stopped.')
             return
         r.exclusive()
         start = r.pose()
@@ -69,6 +69,20 @@ class Trial:
         self.cursor, self.index, self.partial = self.cursor + 1, 0, False
         self.observe()
         print('Reached:', self.last, flush=True)
+
+    def run_to(self, label):
+        """Execute the remaining ordered actions to arrival; any error ends this batch."""
+        stop = waypoint_stop(self.route, label)
+        if self.partial:
+            raise RuntimeError('Incomplete action; inspect then resume before run_to')
+        if stop < self.cursor:
+            raise RuntimeError('Waypoint already passed; run_to does not return or reset origin')
+        self.emit('run_to_started', dict(waypoint=label, next_action=self.cursor + 1))
+        while self.cursor < stop:
+            self.runner.pump()
+            self.execute()
+        self.emit('run_to_completed', dict(waypoint=label, completed_actions=self.cursor))
+        print(f'RUN_TO reached {label}; stopped. Use next or quit.', flush=True)
 
     def follow(self, segment, budget):
         """Odom-only command loop; stale odom, cancellation and competing publishers stop it."""
@@ -111,6 +125,13 @@ class Trial:
         raise RuntimeError('Odom action timeout')
 
 
+def report_stop(trial, error):
+    """End automatic advancement while keeping this process available for inspection."""
+    trial.runner.cancel_requested = False
+    trial.emit('stopped', dict(reason=str(error), cursor=trial.cursor, partial=trial.partial))
+    print('STOPPED:', error, flush=True)
+
+
 def interact(trial):
     """Keep key-point stops and explicit resume; no cross-process checkpoint guessing."""
     while True:
@@ -125,18 +146,16 @@ def interact(trial):
             elif cmd == 'measure':
                 trial.observe()
                 print('Laser snapshot written to audit (log-only).')
+            elif cmd.startswith('run_to '):
+                trial.run_to(cmd.split(maxsplit=1)[1].strip())
             elif cmd in ('next', 'resume'):
                 if trial.partial and cmd != 'resume':
                     raise RuntimeError('Incomplete action; inspect then resume the same target')
                 trial.execute()
             else:
-                print('next | resume | status | measure | quit')
-        except (RuntimeError, KeyboardInterrupt) as error:
-            trial.runner.cancel_requested = False
-            trial.emit(
-                'stopped', dict(reason=str(error), cursor=trial.cursor, partial=trial.partial)
-            )
-            print('STOPPED:', error, flush=True)
+                print('next | run_to WAYPOINT | resume | status | measure | quit')
+        except (RuntimeError, ValueError, KeyboardInterrupt) as error:
+            report_stop(trial, error)
         except EOFError:
             return
 
@@ -144,6 +163,7 @@ def interact(trial):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--route', type=Path)
+    parser.add_argument('--until', help='After initialization execute in order to this waypoint')
     parser.add_argument('--start', choices=['prepare', 'current'])
     parser.add_argument('--laser-log-only', action='store_true')
     parser.add_argument('--speed', type=float, default=0.06)
@@ -158,7 +178,12 @@ def main():
             / 'config/task6_odom_p01_p05.json'
         )
     data = json.loads(args.route.read_text())
-    for row in compile_path(Pose(0, 0, 0), data):
+    preview = compile_path(Pose(0, 0, 0), data)
+    if args.until:
+        waypoint_stop(preview, args.until)
+        if not args.start:
+            parser.error('--until requires --start prepare or current')
+    for row in preview:
         print(row['name'], row['kind'], 'end=', row['points'][-1])
     if not args.start:
         return 0
@@ -178,6 +203,11 @@ def main():
             with path.open('x') as log:
                 trial = Trial(r, data, origin, log)
                 print('P01:', origin, 'audit:', path.resolve(), flush=True)
+                if args.until:
+                    try:
+                        trial.run_to(args.until)
+                    except (RuntimeError, ValueError, KeyboardInterrupt) as error:
+                        report_stop(trial, error)
                 interact(trial)
         finally:
             r.stop_translation()

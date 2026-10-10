@@ -11,6 +11,7 @@ def compile_path(origin, data):
         raise ValueError('Spacing must be .01-.10 m')
     anchor = origin
     result = []
+    labels = {'P01'}
     for row in data['segments']:
         points = []
         if row['kind'] == 'turn':
@@ -39,7 +40,12 @@ def compile_path(origin, data):
             raise ValueError('Unknown segment kind')
         if not points or not row['name']:
             raise ValueError('Empty segment')
-        result.append(dict(name=row['name'], kind=row['kind'], points=points))
+        label = row.get('waypoint')
+        if label is not None:
+            if not isinstance(label, str) or not label.strip() or label in labels:
+                raise ValueError('Waypoint labels must be nonempty and unique (P01 is reserved)')
+            labels.add(label)
+        result.append(dict(name=row['name'], kind=row['kind'], points=points, waypoint=label))
     if not result:
         raise ValueError('Empty route')
     return result
@@ -77,3 +83,13 @@ def limited_velocity(previous, requested, dt):
     scale = min(1.0, 0.12 * dt / max(math.hypot(dx, dy), 1e-9))
     dw = max(-0.4 * dt, min(0.4 * dt, requested[2] - previous[2]))
     return previous[0] + scale * dx, previous[1] + scale * dy, previous[2] + dw
+
+
+def waypoint_stop(route, label):
+    """Return the exclusive action index at arrival, before any subsequent turn."""
+    if label == 'P01':
+        return 0
+    for index, segment in enumerate(route):
+        if segment.get('waypoint') == label:
+            return index + 1
+    raise ValueError(f'Unknown waypoint: {label}; add it to the route before testing')

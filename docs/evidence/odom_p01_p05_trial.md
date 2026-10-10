@@ -20,3 +20,18 @@ Preparation uses the unchanged existing left-wall preparation routine; this
 fixture used --start current. New-entry preparation on real hardware remains
 pending. Candidate route geometry and P01-P05 physical replay remain pending.
 Teleop point recorder is deferred until this trial is accepted.
+
+
+## Named waypoint batching — 2026-10-10
+--until P04 runs four ordered actions, then returns to the prompt at rest.
+run_to P05 subsequently executes only action five. Unique waypoint labels support
+future taught segments without hard-coded P05 limits. P03 is arrival before turn.
+Invalid/passed labels and partial actions refuse a new batch; failures abort it.
+Ruff, 168 unittest tests, colcon build, and git diff --check passed in Ubuntu-22.04.
+WALL_CASE=odom_trial WALL_SCAN_PERIOD=.1 ROS_DOMAIN_ID=181 ROS_LOCALHOST_ONLY=1
+ timeout 180 python3 test/verify_wall_session.py passed:
+P04 stop at completed_actions=4, P05 stop at 5, final zero velocity;
+final pose (1.412998204,-.479999466,-1.560800378).
+Odom-stale batch stops on action one with no completed action (x=.049967966).
+Logs: /tmp/wall_session_test/1791633603829436020.
+This is a synthetic ROS fixture, not real maze clearance validation.

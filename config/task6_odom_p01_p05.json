@@ -10,7 +10,8 @@
           0.9,
           0
         ]
-      ]
+      ],
+      "waypoint": "P02"
     },
     {
       "name": "P02_P03",
@@ -24,7 +25,8 @@
           0.2,
           -0.04
         ]
-      ]
+      ],
+      "waypoint": "P03"
     },
     {
       "name": "P03_turn",
@@ -39,7 +41,8 @@
           0.44,
           0
         ]
-      ]
+      ],
+      "waypoint": "P04"
     },
     {
       "name": "P04_P05",
@@ -49,7 +52,8 @@
           0,
           -0.287
         ]
-      ]
+      ],
+      "waypoint": "P05"
     }
   ],
   "provenance": "Nominal .9; measured approx .79 plus late right .04; P03-P04 .382+.028+.03 user correction=.44; P04-P05 right .287 only. Not a continuous recorded trajectory; pending physical verification."

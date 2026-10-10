@@ -45,9 +45,25 @@ captures P01. It cannot return an arbitrary P05 position to P01.
 Omitting --start only previews the route.
 
 At odom> enter one next for each table row. Inspect before each next.
-Available: next, resume, status, measure, quit.
+Available: next, run_to WAYPOINT, resume, status, measure, quit.
+
+To initialize at physical P01 and automatically execute the ordered route to P04:
+
+    ros2 run distance_controller odom_trial --start prepare --laser-log-only --until P04
+
+It stops at P04 and returns to odom>. Enter quit before starting teleop.
+Alternatively, after initialization enter run_to P04. Intermediate key-point
+stops and turns are retained; this does not drive directly across the maze.
+A failure or Ctrl+C interrupts the batch; inspect and resume the incomplete
+action explicitly, then run_to again for the remaining actions.
+
+Each translation can declare a unique waypoint in the JSON route. Newly taught
+points become run_to targets after being added to the configuration. P03 means
+arrival before the separate P03 turn. Already passed points are rejected;
+run_to does not drive back or reset P01. Unknown labels are rejected before motion.
+Only use --start current if the robot is actually at the intended new P01 origin.
 resume retains the same target/index only within this process after interruption.
-No continuous run, automatic back, or cross-process resume in this first slice.
+No automatic back or cross-process resume in this slice.
 Old action_session checkpoints cannot be loaded.
 
 Odom stale/nonfinite/jump/frame/time faults, competing publishers, endpoint

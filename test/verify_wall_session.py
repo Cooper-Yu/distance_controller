@@ -171,7 +171,7 @@ def row(name, kind, value, follow='none', stop='distance', offset=0.0, bound=0.7
     )
 
 
-def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=None):
+def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=None, until=None):
     if resume is None:
         pose[:] = [
             float(os.getenv('WALL_START_X', '0')),
@@ -190,6 +190,7 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
                 'python3',
                 str(ROOT / ('tools/odom_trial.py' if odom_trial else 'tools/action_session.py')),
                 *(['--laser-log-only'] if odom_trial else []),
+                *(['--until', until] if until else []),
                 *(
                     ['--resume', str(resume)]
                     if resume
@@ -232,13 +233,19 @@ try:
     if os.getenv('WALL_CASE') == 'odom_trial':
         data = json.loads((ROOT / 'config/task6_odom_p01_p05.json').read_text())
         events, log = run(
-            'odom_p01_p05', data, 'next\nnext\nnext\nnext\nnext\nstatus\nquit\n', stale=True
+            'odom_p01_p05', data, 'status\nrun_to P05\nstatus\nquit\n', stale=True, until='P04'
         )
         assert sum(e['event'] == 'completed' for e in events) == 5, log[-5000:]
         assert abs(pose[0] - 1.403) < 0.02 and abs(pose[1] + 0.48) < 0.02, pose
         assert 'Next action=6, partial=False' in log, log[-2000:]
+        reached = [e['data'] for e in events if e['event'] == 'run_to_completed']
+        assert reached == [
+            dict(waypoint='P04', completed_actions=4),
+            dict(waypoint='P05', completed_actions=5),
+        ]
+        assert 'Next action=5, partial=False' in log
         os.environ['ODOM_TRIAL_STALE'] = '1'
-        events, log = run('odom_stale', data, 'next\nquit\n')
+        events, log = run('odom_stale', data, 'run_to P05\nquit\n')
         assert any(e['event'] == 'stopped' for e in events) and 'stale' in log, log[-4000:]
         assert not any(e['event'] == 'completed' for e in events)
         print('PASS full odom trial with missing scans and odom-stale stop', OUT, flush=True)

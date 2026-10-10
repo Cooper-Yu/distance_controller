@@ -1,14 +1,17 @@
 """Relative odom trial geometry, direction and invalid-input regression tests."""
 
+import io
 import json
 import math
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from action_plan import Pose
-from odom_path import compile_path, track, limited_velocity
+from odom_path import compile_path, track, limited_velocity, waypoint_stop
+from odom_trial import Trial
 
 
 class OdomPath(unittest.TestCase):
@@ -52,3 +55,49 @@ class OdomPath(unittest.TestCase):
         self.data['spacing_m'] = float('nan')
         with self.assertRaises(ValueError):
             compile_path(Pose(0, 0, 0), self.data)
+
+    def test_named_arrival_and_future_extension(self):
+        self.data['segments'].append(
+            dict(name='P05_P06', kind='translate', offsets=[[0.1, 0]], waypoint='P06')
+        )
+        route = compile_path(Pose(0, 0, 0), self.data)
+        self.assertEqual(waypoint_stop(route, 'P01'), 0)
+        self.assertEqual(waypoint_stop(route, 'P03'), 2)
+        self.assertEqual(waypoint_stop(route, 'P04'), 4)
+        self.assertEqual(waypoint_stop(route, 'P06'), 6)
+        with self.assertRaises(ValueError):
+            waypoint_stop(route, 'P99')
+        self.data['segments'][-1]['waypoint'] = 'P04'
+        with self.assertRaises(ValueError):
+            compile_path(Pose(0, 0, 0), self.data)
+
+    def test_run_to_boundary_failure_and_partial(self):
+        trial = Trial(SimpleNamespace(pump=lambda: None), self.data, Pose(0, 0, 0), io.StringIO())
+        calls = []
+
+        def execute():
+            calls.append(trial.cursor)
+            trial.cursor += 1
+
+        trial.execute = execute
+        trial.run_to('P04')
+        self.assertEqual(calls, [0, 1, 2, 3])
+        trial.run_to('P04')
+        self.assertEqual(len(calls), 4)
+        with self.assertRaises(RuntimeError):
+            trial.run_to('P03')
+        trial.partial = True
+        with self.assertRaises(RuntimeError):
+            trial.run_to('P05')
+        trial.partial = False
+        trial.cursor = 0
+
+        def failure():
+            trial.partial = True
+            raise RuntimeError('stale odom')
+
+        trial.execute = failure
+        with self.assertRaisesRegex(RuntimeError, 'stale odom'):
+            trial.run_to('P04')
+        self.assertEqual(trial.cursor, 0)
+        self.assertTrue(trial.partial)
