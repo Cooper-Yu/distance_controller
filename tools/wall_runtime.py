@@ -690,6 +690,17 @@ class WallRunner(PlannedRunner):
                 hold = None
                 continue
             prior_gaps = gaps
+            if adjustment_origin is not None and -0.015 <= gaps['front'] - stop_goal <= 0.01:
+                from front_settling import verify_stopped
+
+                report = verify_stopped(self, target, policy)
+                self.last_report = {
+                    'path_m': path,
+                    'completion': 'front',
+                    'stopped_window': report,
+                    'stop_target_m': stop_goal,
+                }
+                return Pose(self.latest[0].x, self.latest[0].y, heading)
             velocity, ready, residual = command(
                 step,
                 policy,

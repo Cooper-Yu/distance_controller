@@ -86,10 +86,16 @@ def run_adjustment(runner, step, state):
         actual = runner.pose()
         if errors(actual, origin)[0] > 0.06 or abs(errors(actual, target)[1]) > 0.02:
             raise RuntimeError('FRONT_ADJUSTMENT: final stopped pose outside bounds')
-        # Recheck after the stop publisher has finished; use the same motion estimator.
-        gap = runner.motion_walls(['front'], target.yaw)['front'].gap
-        if abs(gap - state['clearance']) > 0.01:
-            raise RuntimeError('FRONT_ADJUSTMENT: final stopped clearance outside tolerance')
+        # The endpoint window already held all commands at zero. Verify again
+        # after stop_translation; do not replace the window with one noisy fit.
+        from front_settling import verify_stopped
+
+        runner.velocity_pub = runner.node.create_publisher(runner.twist, '/cmd_vel', 10)
+        try:
+            final_window = verify_stopped(runner, target, policy)
+        finally:
+            runner.stop_translation()
+        runner.last_report['final_stopped_window'] = final_window
         state['result'] = deepcopy(runner.last_report)
     finally:
         report = runner.last_report or {}

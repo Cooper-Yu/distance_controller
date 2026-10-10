@@ -839,8 +839,8 @@ segment's side-follow policy and the carried reference.
 
 Correction speed is at most 0.02 m/s, with a 20 s attempt deadline, 6 cm displacement
 bound and 8 cm cumulative path budget across retries. It uses the existing
-front-wall estimator, three stopped verification scans, endpoint hold, full scan
-translation guard and fresh odom/scan checks. Final clearance is checked again
+front-wall estimator, the stopped multi-scan window described below, full scan
+translation guard and fresh odom/scan checks. The window is checked again
 after stopping within 1 cm of the target. Arguments must be within [0.06,0.15] m.
 A large change is not a supported replacement for replaying a route segment.
 
@@ -856,3 +856,29 @@ Local verification uses synthetic ROS scan/odom/TF, not physical collision tests
 Cases `WALL_CASE=front_adjust` and `front_adjust_fault` cover completion,
 repeat-without-motion, checkpoint restart, following rightward motion and an
 obstacle-triggered interruption/retry. Real P04-P05 passage remains pending.
+
+### Stationary window for adjust_front (2026-10-10)
+
+Only the explicit endpoint correction changes: once front residual is between
+-15 mm and +10 mm, freeze all commands and inspect seven distinct scans over
+0.5–1.2 seconds. At least five scans must have valid front and followed-wall fits.
+Accept front median within 10 mm of the unchanged target, front spread <=20 mm,
+and no valid front sample more than 15 mm below target. Follow-wall median must
+remain within the original 8 mm tolerance, with spread <=20 mm. Actual motion
+must be stopped; yaw must remain within 0.02 rad of the saved target.
+
+Fit failures count as invalid samples, not successful measurements. Duplicate
+timestamps cannot fill the window. Freshness, TF, full raw-point clearance and
+measured-motion sweep checks remain mandatory on every loop; no median filtering
+is applied to obstacle guards. Failure to confirm within two seconds leaves the
+adjustment pending with zero commands, rather than resuming correction automatically.
+After the normal stop publisher finishes, another stopped window verifies arrival.
+This replaces the final single-fit check for adjust_front only; other route
+actions retain their existing arrival behavior.
+
+The provided stationary P04 scan has 50 frames, 47 valid front fits, median gap
+74.519 mm and range 65.830–82.048 mm. All 44 complete seven-scan windows pass the
+new estimator-only replay, including the actual left-follow target .117754 m.
+First confirmation covers .623 s. This replay assumes the supplied stopped pose;
+the file contains no odom, so it does not validate live odom timing or motion.
+No valid sample reproduced the previous below-65-mm rejection.
