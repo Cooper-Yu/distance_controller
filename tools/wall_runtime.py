@@ -26,6 +26,10 @@ from wall_policy import Policy, command
 class WallFitError(RuntimeError):
     """A fresh scan has no acceptable wall fit; distinct from missing/stale feedback or TF."""
 
+    def __init__(self, message, detail=None):
+        super().__init__(message)
+        self.detail = detail
+
 
 class ReturnClearanceError(RuntimeError):
     """Recoverable return obstacle; feedback and turn failures remain immediate failures."""
@@ -109,15 +113,67 @@ class WallRunner(PlannedRunner):
         error = math.atan2(
             math.sin(heading - self.moving_pose().yaw), math.cos(heading - self.moving_pose().yaw)
         )
-        try:
-            return {
-                side: side_distance(points, counts, side, error)
-                if side in ('left', 'right')
-                else front_distance(points, counts)
-                for side in sides
-            }
-        except ValueError as error:
-            raise WallFitError(f'WALL_LOST: {error}') from error
+        walls = {}
+        for side in sorted(sides):
+            try:
+                walls[side] = (
+                    side_distance(points, counts, side, error)
+                    if side in ('left', 'right')
+                    else front_distance(points, counts)
+                )
+            except ValueError as failure:
+                detail = {
+                    'side': side,
+                    'reason': str(failure),
+                    'scan_stamp_ns': self.cached_stamp,
+                    'odom_stamp_ns': self.stamp,
+                    'pose': asdict(self.latest[0]),
+                    'heading_reference_rad': heading,
+                    'heading_error_rad': error,
+                    'measured_speed_m_s': self.latest[2],
+                    'measured_abs_wz_rad_s': self.latest[3],
+                    'scheduled_ray_counts': counts,
+                    'points_base_xy_bearing': points,
+                    'estimator': 'held_heading_30deg' if side in ('left', 'right') else 'tls_12deg',
+                }
+                raise WallFitError(f'WALL_LOST {side}: {failure}', detail) from failure
+        return walls
+
+    def record_wall_failure(self, failure, stage, heading=None):
+        """Log after zero command; keep replayable geometry in the audit, concise text on screen."""
+        detail = failure.detail or {
+            'side': 'distance_continuity',
+            'heading_reference_rad': heading,
+            'reason': str(failure),
+            'scan_stamp_ns': self.cached_stamp,
+            'pose': asdict(self.latest[0]),
+            'points_base_xy_bearing': self.cached_geometry[0],
+            'scheduled_ray_counts': self.cached_geometry[1],
+        }
+        detail = {**detail, 'stage': stage}
+        key = (stage, detail['scan_stamp_ns'], detail['side'])
+        if key == getattr(self, 'last_wall_failure_key', None):
+            return
+        self.last_wall_failure_key = key
+        self.observations.append({'wall_fit_failure': detail})
+        summary = {k: v for k, v in detail.items() if k != 'points_base_xy_bearing'}
+        print('WALL_FIT_DIAGNOSTIC ' + json.dumps(summary), flush=True)
+
+    def record_recovery_check(self, gaps, prior, samples):
+        """Expose non-fit reasons for waiting without changing the recovery decision."""
+        detail = {
+            'scan_stamp_ns': self.cached_stamp,
+            'gaps': gaps,
+            'prior_gaps': prior,
+            'measured_speed_m_s': self.latest[2],
+            'measured_abs_wz_rad_s': self.latest[3],
+            'stopped': self.latest[2] < 0.01 and self.latest[3] < 0.02,
+            'distance_continuous': all(abs(gaps[k] - v) <= 0.03 for k, v in prior.items()),
+            'previous_stable_samples': len(samples),
+            'used_recovery_seconds': self.recovery_seconds,
+        }
+        self.observations.append({'wall_recovery_check': detail})
+        print('WALL_RECOVERY_CHECK ' + json.dumps(detail), flush=True)
 
     def recover_walls(self, sides, heading, movement, prior):
         """Hold zero for at most two seconds; require three distinct stable stopped scans.
@@ -135,7 +191,8 @@ class WallRunner(PlannedRunner):
             self.guard_translation((0.0, 0.0, 0.0), movement)
             try:
                 walls = self.motion_walls(sides, heading)
-            except WallFitError:
+            except WallFitError as failure:
+                self.record_wall_failure(failure, 'recovery')
                 samples = []
                 stamp = self.cached_stamp
                 continue
@@ -143,6 +200,7 @@ class WallRunner(PlannedRunner):
                 continue
             stamp = self.cached_stamp
             gaps = {side: wall.gap for side, wall in walls.items()}
+            self.record_recovery_check(gaps, prior, samples)
             if (
                 self.latest[2] >= 0.01
                 or self.latest[3] >= 0.02
@@ -363,10 +421,13 @@ class WallRunner(PlannedRunner):
             walls = self.motion_walls(sides, heading)
             gaps = {name: wall.gap for name, wall in walls.items()}
             if any(abs(gaps[k] - v) > 0.03 for k, v in prior.items()):
-                raise WallFitError('Wall distance jumped by more than 3 cm')
+                raise WallFitError(
+                    f'Wall distance jumped by more than 3 cm: prior={prior}, current={gaps}'
+                )
             return gaps
-        except WallFitError:
+        except WallFitError as failure:
             self.send((0.0, 0.0, 0.0))
+            self.record_wall_failure(failure, 'motion', heading)
             self.recover_walls(sides, heading, movement, prior)
             return None
 

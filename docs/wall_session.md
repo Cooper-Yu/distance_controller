@@ -395,3 +395,22 @@ passed. Final ROS fixture: `/tmp/wall_session_test/1791614903979554593`.
 Transient rear returns recovered to x=0.009557 m near the original x=0 target;
 persistent returns timed out at x=0.070595 m, remained incomplete and stopped.
 No real-robot or full-route acceptance is claimed by these results.
+
+
+### Capture the actual wall-estimation failure
+
+`WALL_FIT_DIAGNOSTIC` identifies the first failing `side` and `reason`, estimator,
+scan/odom stamps, pose, held heading and measured motion. Motion sends zero before
+logging. The JSONL observation `wall_fit_failure` also retains all transformed
+valid points (`points_base_xy_bearing`) and scheduled ray counts for offline
+replay; the terminal omits the large point array. Duplicate stage/side/scan failures
+are suppressed. Distance jumps report the previous/current gaps separately from
+line-fit failures. Successful stationary scans cannot explain earlier moving scans.
+
+`WALL_RECOVERY_CHECK` reports fresh fitted gaps, previous gaps, stopped status,
+distance continuity, previous stable sample count and already-used recovery time.
+These are diagnostics only: the +/-12-degree front window, side estimator,
+consensus thresholds, 2 cm guard and 2/4-second recovery limits are unchanged.
+After updating a partial session, restore its latest checkpoint with unchanged
+odom; use `resume` / `RESUME` for outward continuation, not `next` or P01 preparation.
+Send the newly printed audit JSONL if another failure occurs.

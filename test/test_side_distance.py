@@ -95,6 +95,12 @@ class RecoveryFixture:
             raise self.frame[1]
         return {'left': SimpleNamespace(gap=self.frame[1])}
 
+    def record_wall_failure(self, *args):
+        pass
+
+    def record_recovery_check(self, *args):
+        pass
+
     def run(self, prior=None):
         with patch('wall_runtime.time.monotonic', lambda: self.now):
             return WallRunner.recover_walls(self, {'left'}, 0, 'front', prior or {})
