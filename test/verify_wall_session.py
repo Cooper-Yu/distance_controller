@@ -171,6 +171,15 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'directional_return':
+        events, log = run(
+            'directional_return', [row('f', 'forward', 0.08, 'left')], 'next\nback\nBACK\nquit\n'
+        )
+        assert sum(e['event'] == 'completed' for e in events) == 1, log
+        assert sum(e['event'] == 'returned' for e in events) == 1, log
+        assert math.hypot(pose[0], pose[1]) < 0.03, pose
+        print('PASS directional return', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'checkpoint':
         rows = [row('one', 'forward', 0.08, 'left'), row('two', 'forward', 0.06, 'left')]
         run('completed_save', rows, 'next\nquit\n')

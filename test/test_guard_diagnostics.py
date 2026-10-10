@@ -7,6 +7,7 @@ from unittest.mock import patch
 from contextlib import redirect_stdout
 from io import StringIO
 import math
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from action_plan import Pose
@@ -19,6 +20,9 @@ class GuardDiagnostics(unittest.TestCase):
         runner = object.__new__(WallRunner)
         runner.latest = [Pose(0, 0, 0), 0, speed, wz]
         runner.moving_pose = lambda: runner.latest[0]
+        runner.body_velocity = (0.0, 0.0, 0.0)
+        runner.twist_frame = 'base_link'
+        runner.guarded_command = None
         runner.turn_guard = True
         runner.turn_sign = sign
         runner.cached_stamp = 123
@@ -32,8 +36,25 @@ class GuardDiagnostics(unittest.TestCase):
             runner.pump()
         self.assertEqual(runner.observations, [])
 
-    def test_return_allowances_trigger_and_are_recorded(self):
-        runner = self.fixture(speed=0.03, wz=0.3)
+    def cloud_point(self):
+        runner = self.fixture()
+        runner.geometry = lambda: (
+            [(0.07926728692732123, -0.1868244809731391, -1.2636034452640497)],
+            {},
+        )
+        return runner
+
+    def test_cloud_near_point_backward_with_either_small_yaw_sign(self):
+        for wz in (-0.0226191578, 0.0226191578):
+            runner = self.cloud_point()
+            runner.body_velocity = (-0.01300647, 0, wz)
+            with patch.object(PlannedRunner, 'pump'):
+                runner.pump()
+            self.assertEqual(runner.observations, [])
+
+    def test_measured_motion_toward_right_obstacle_rejects(self):
+        runner = self.cloud_point()
+        runner.body_velocity = (0, -0.03, 0)
         with (
             patch.object(PlannedRunner, 'pump'),
             redirect_stdout(StringIO()),
@@ -41,12 +62,50 @@ class GuardDiagnostics(unittest.TestCase):
         ):
             runner.pump()
         d = runner.observations[0]['guard_failure']
-        self.assertAlmostEqual(d['static_gap_m'], 0.05837)
-        self.assertAlmostEqual(d['linear_allowance_m'], 0.015)
-        self.assertAlmostEqual(d['angular_allowance_m'], 0.033)
-        self.assertAlmostEqual(d['protected_gap_m'], 0.01037)
-        self.assertEqual(d['scan_stamp_ns'], 123)
-        self.assertEqual(len(d['points_base_xy_bearing']), 1)
+        self.assertAlmostEqual(d['static_gap_m'], 0.02682448097313911)
+        self.assertAlmostEqual(d['protected_gap_m'], 0.01182448097313911)
+        self.assertEqual(d['limiting_velocity_vx_vy_wz'], (0, -0.03, 0))
+        self.assertEqual(d['linear_allowance_m'], 0)
+
+    def test_rotation_toward_point_rejects(self):
+        runner = self.cloud_point()
+        runner.body_velocity = (0, 0, -0.3)
+        with (
+            patch.object(PlannedRunner, 'pump'),
+            redirect_stdout(StringIO()),
+            self.assertRaisesRegex(RuntimeError, 'RETURN_CLEARANCE'),
+        ):
+            runner.pump()
+
+    def test_command_acceleration_checked_before_measured_motion(self):
+        runner = self.cloud_point()
+        runner.guarded_command = ((0, -0.03, 0), time.monotonic())
+        with (
+            patch.object(PlannedRunner, 'pump'),
+            redirect_stdout(StringIO()),
+            self.assertRaisesRegex(RuntimeError, 'RETURN_CLEARANCE'),
+        ):
+            runner.pump()
+        self.assertEqual(
+            len(runner.observations[0]['guard_failure']['velocity_scenarios_vx_vy_wz']), 2
+        )
+
+    def test_unknown_twist_frame_refused(self):
+        runner = self.fixture()
+        runner.twist_frame = 'odom'
+        with patch.object(PlannedRunner, 'pump'), self.assertRaisesRegex(RuntimeError, 'base_link'):
+            runner.pump()
+
+    def test_static_obstacle_not_ignored_while_moving_away(self):
+        runner = self.fixture()
+        runner.geometry = lambda: ([(0.18, 0, 0)], {})
+        runner.body_velocity = (-0.03, 0, 0)
+        with (
+            patch.object(PlannedRunner, 'pump'),
+            redirect_stdout(StringIO()),
+            self.assertRaisesRegex(RuntimeError, 'RETURN_CLEARANCE'),
+        ):
+            runner.pump()
 
     def test_turn_records_sweep_without_return_allowances(self):
         runner = self.fixture(sign=1)

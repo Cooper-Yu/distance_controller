@@ -47,6 +47,10 @@ class WallRunner(PlannedRunner):
         self.last_report = {}
         self.cached_stamp = None
         self.cached_geometry = None
+        self.guarded_command = None
+        self.guard_command_sub = self.node.create_subscription(
+            self.twist, '/cmd_vel', self.receive_guard_command, 10
+        )
 
     def observe(self, phase):
         """Record raw ray ranges and separately labelled model-based fitted body gaps."""
@@ -165,41 +169,58 @@ class WallRunner(PlannedRunner):
             raise RuntimeError('Odom stale during wall action')
         return self.latest[0]
 
+    def receive_guard_command(self, msg):
+        """Observe the delegated controller command without creating another publisher."""
+        velocity = (msg.linear.x, msg.linear.y, msg.angular.z)
+        if all(math.isfinite(v) for v in velocity):
+            self.guarded_command = (velocity, time.monotonic())
+
+    def return_scenarios(self):
+        """Protect measured body motion and the latest command, including acceleration onset."""
+        if getattr(self, 'twist_frame', None) != 'base_link':
+            raise RuntimeError('Return guard requires odom twist in base_link')
+        scenarios = [self.body_velocity]
+        if self.guarded_command is not None:
+            velocity, receipt = self.guarded_command
+            if time.monotonic() - receipt <= 0.5:
+                scenarios.append(velocity)
+        return scenarios
+
     def pump(self):
         super().pump()
         if self.turn_guard:
             self.moving_pose()
             pts, _ = self.geometry()
-            if self.turn_sign == 0:
-                speed, wz = self.latest[2], self.latest[3]
-                gap = swept_clearance(pts) - speed * 0.5 - wz * 0.22 * 0.5
-            else:
-                gap = swept_clearance(pts, wz=self.turn_sign * 0.20)
+            scenarios = (
+                self.return_scenarios()
+                if self.turn_sign == 0
+                else [(0.0, 0.0, self.turn_sign * 0.20)]
+            )
+            gap = min(swept_clearance(pts, *velocity) for velocity in scenarios)
             if gap < 0.02:
-                self.reject_sweep(pts, gap)
+                self.reject_sweep(pts, gap, scenarios)
 
-    def reject_sweep(self, points, protected_gap):
-        """Capture the triggering frame before unwinding; never alter the guard decision.
-
-        Return protection subtracts scalar speed allowances from static clearance.
-        Turn protection samples a directional sweep. Report both independently so
-        a swept residual is not mistaken for a directly measured wall distance.
-        """
+    def reject_sweep(self, points, protected_gap, scenarios):
+        """Record the limiting directional prediction, retaining all raw obstacle returns."""
         returning = self.turn_sign == 0
-        wz = 0.0 if returning else self.turn_sign * 0.20
-        limiting = min(points, key=lambda p: swept_clearance([p], wz=wz))
+        velocity = min(scenarios, key=lambda v: swept_clearance(points, *v))
+        limiting = min(points, key=lambda p: swept_clearance([p], *velocity))
         nearest = min(points, key=lambda p: swept_clearance([p]))
         speed, measured_wz = self.latest[2], self.latest[3]
         detail = {
             'mode': 'return' if returning else 'turn',
+            'prediction': 'directional_sweep',
+            'velocity_scenarios_vx_vy_wz': scenarios,
+            'limiting_velocity_vx_vy_wz': velocity,
+            'prediction_duration_s': 0.5,
             'scan_stamp_ns': self.cached_stamp,
             'pose': asdict(self.latest[0]),
             'measured_speed_m_s': speed,
             'measured_abs_wz_rad_s': measured_wz,
             'static_gap_m': swept_clearance(points),
-            'sweep_gap_m': swept_clearance(points, wz=wz),
-            'linear_allowance_m': speed * 0.5 if returning else 0.0,
-            'angular_allowance_m': measured_wz * 0.22 * 0.5 if returning else 0.0,
+            'sweep_gap_m': swept_clearance(points, *velocity),
+            'linear_allowance_m': 0.0,
+            'angular_allowance_m': 0.0,
             'protected_gap_m': protected_gap,
             'threshold_m': 0.02,
             'nearest_base_point': nearest,
@@ -207,8 +228,6 @@ class WallRunner(PlannedRunner):
             'limiting_bearing_deg': math.degrees(limiting[2]),
             'points_base_xy_bearing': points,
         }
-        # Preserve all transformed returns in the existing failure audit, not just
-        # a later manual scan. Console output stays compact for cloud diagnosis.
         self.observations.append({'guard_failure': detail})
         summary = {k: v for k, v in detail.items() if k != 'points_base_xy_bearing'}
         print('CLEARANCE_DIAGNOSTIC ' + json.dumps(summary), flush=True)
@@ -505,6 +524,7 @@ class WallRunner(PlannedRunner):
         """Return to an actual history pose under short-horizon laser protection."""
         # Retain existing absolute-target controller and guard its motion from fresh scans.
         self.turn_sign = 0
+        self.guarded_command = None
         self.turn_guard = True
         try:
             self.translate_target(target)

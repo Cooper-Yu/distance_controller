@@ -55,6 +55,8 @@ class PlannedRunner(Runner):
             self.invalid = 'Odom yaw jumped'
         self.continuous_yaw = raw if self.last_raw is None else self.continuous_yaw + delta
         self.last_raw, self.stamp, self.frame = raw, stamp, msg.header.frame_id
+        self.body_velocity = (v.linear.x, v.linear.y, v.angular.z)
+        self.twist_frame = msg.child_frame_id
         self.latest = (
             Pose(p.x, p.y, self.continuous_yaw),
             time.monotonic(),

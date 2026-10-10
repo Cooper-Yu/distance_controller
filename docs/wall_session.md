@@ -282,8 +282,8 @@ speed and absolute angular speed, static body gap, swept gap, separate speed
 allowances, protected residual and 0.02 m threshold. Point coordinates and bearing
 are in `base_link` (meters and radians; an explicit degree bearing is also printed).
 `RETURN_CLEARANCE` identifies recorded-pose return protection; `TURN_CLEARANCE`
-identifies delegated rotation. Return still uses the original conservative scalar
-allowances; this diagnostic change does not relax any protection or enable resume.
+identifies delegated rotation. Return now evaluates directional sweeps of signed measured body velocity and
+the fresh delegated command; the 2 cm threshold remains unchanged.
 The session JSONL failure event includes all transformed valid points under
 `laser[].guard_failure.points_base_xy_bearing`. Preserve this audit when reporting
 a failure: a later stationary scan cannot reconstruct the triggering geometry or
@@ -341,3 +341,22 @@ Local verification: `test/test_session_checkpoint.py` and
 round-trips, mismatched pose/frame/time, busy files, yaw wrapping, legacy migration,
 and real ROS process restart for completed and interrupted translations in the
 synthetic scan/odometry fixture. This does not certify the real maze or hardware.
+
+### Directional protection during history return
+
+Return prediction uses signed `vx`, `vy`, `wz` from fresh odometry (twist frame
+must be `base_link`) and the latest `/cmd_vel` command received within 0.5 s.
+Each scenario is sampled over the existing 0.5 s horizon; the minimum clearance
+across both and all original scan points controls stopping. Static overlap is
+still checked at time zero. A point on the right does not automatically consume
+backward clearance merely because speed magnitude increased. Yaw sign is retained.
+The observer never publishes a competing command. Unknown twist frames refuse
+return; stale odom/scan checks and the 2 cm threshold are unchanged.
+
+Diagnostics label `prediction=directional_sweep`, list the velocity scenarios and
+identify the limiting one. Old scalar allowance fields are zero; compare
+`static_gap_m` to `sweep_gap_m`. This remains a sampled, constant-velocity model,
+not a proof about unseen obstacles or future acceleration beyond the horizon.
+The captured nearest point from the cloud failure is covered by backward,
+approaching, rotational and static-overlap tests. Full triggering scan replay
+still requires the cloud JSONL, not just its nearest-point console summary.
