@@ -76,7 +76,7 @@ class FrontStop(unittest.TestCase):
         validate_records({'active': [], 'partial': s.partial}, s.steps)
         self.assertEqual(events[-1][1]['previous']['wall']['stop_tolerance'], 0.008)
         for field, value in (
-            ('follow_clearance', 0.08),
+            ('follow_offset', 0.08),
             ('max_travel', 2),
             ('stop_tolerance', None),
         ):

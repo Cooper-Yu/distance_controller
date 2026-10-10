@@ -25,6 +25,7 @@ odom_pub = node.create_publisher(Odometry, '/odometry/filtered', 10)
 scan_pub = node.create_publisher(LaserScan, '/scan_filtered', 10)
 pose = [0.0, 0.0, 0.0]
 velocity = [0.0, 0.0, 0.0]
+command_samples = []
 tf = TransformStamped()
 tf.header.frame_id, tf.child_frame_id = 'base_link', 'laser'
 tf.transform.translation.x = 0.02
@@ -37,6 +38,7 @@ broadcaster.sendTransform(tf)
 
 def receive(msg):
     velocity[:] = [msg.linear.x, msg.linear.y, msg.angular.z]
+    command_samples.append((list(pose), list(velocity)))
     assert math.hypot(*velocity[:2]) <= math.hypot(0.06, 0.012) + 1e-6 and abs(velocity[2]) < 0.501
 
 
@@ -202,6 +204,35 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'follow_adjust':
+        rows = [row('partial_front', 'forward', 0.2, 'left', 'front')]
+        rows[0]['wall'].update(stop_clearance=0.095, stop_tolerance=0.01)
+        run('follow_partial', rows, 'next\nquit\n', stale=True)
+        saved = next((OUT / 'follow_partial').glob('*.checkpoint.json'))
+        before = json.loads(saved.read_text())
+        assert before['partial'] and before['partial']['path_m'] > 0
+        command_samples.clear()
+        events, log = run(
+            'follow_restore',
+            rows,
+            'SAME_ODOM\npolicy 1 follow_clearance 0.12\nresume\nRESUME\nquit\n',
+            resume=saved,
+        )
+        assert sum(e['event'] == 'completed' for e in events) == 1, log[-4000:]
+        assert 'follow_aligned=False' in log and 'follow_aligned=True' in log
+        first_forward = next(i for i, (_, v) in enumerate(command_samples) if v[0] > 0.001)
+        assert any(v[1] > 0.001 for _, v in command_samples[:first_forward])
+        assert command_samples[first_forward][0][1] >= 0.014, command_samples[first_forward]
+        assert all(
+            abs(v[0]) < 1e-6 and abs(v[1]) <= 0.010001 for _, v in command_samples[:first_forward]
+        )
+        after = json.loads(next((OUT / 'follow_restore').glob('*.checkpoint.json')).read_text())
+        assert after['active'][0]['start'] == before['partial']['start']
+        assert after['reference'] == before['reference']
+        assert after['active'][0]['wall_result']['path_m'] > before['partial']['path_m']
+        assert after['steps'][0]['wall']['align_follow_first']
+        print('PASS follow adjustment', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'side_limit':
         events, log = run('side_limit', [row('f', 'forward', 0.12, 'left')], 'next\nquit\n')
         assert 'SIDE_CORRECTION_LIMITED' in log, log

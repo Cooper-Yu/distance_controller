@@ -2,6 +2,7 @@
 
 from dataclasses import asdict, replace
 from action_plan import Session, Pose, targets
+from wall_policy import Policy
 
 
 class WallSession(Session):
@@ -78,6 +79,13 @@ class WallSession(Session):
             self.check_partial_policy_edit(index, field)
         data = dict(self.steps[index].wall)
         data[field] = value
+        if self.partial is not None and field == 'follow_clearance':
+            old_goal = Policy(**self.steps[index].wall).clearances(self.backend.reference)[0]
+            if value is None or abs(value - old_goal) > 0.03:
+                raise ValueError(
+                    'Partial follow adjustment requires an absolute target within 3 cm'
+                )
+            data['align_follow_first'] = True
         candidate = replace(self.steps[index], wall=data).validate()
         previous = asdict(self.steps[index])
         self.steps[index] = candidate
@@ -96,7 +104,7 @@ class WallSession(Session):
         )
 
     def check_partial_policy_edit(self, index, field):
-        """Only recalibrate a stopped outward front endpoint; preserve start/path/history."""
+        """Recalibrate a stopped outward front action; preserve start/path/history."""
         record = self.partial
         if (
             index != self.cursor
@@ -104,10 +112,14 @@ class WallSession(Session):
             or record.get('return_started')
             or record.get('resume_unavailable')
             or self.steps[index].wall.get('stop') != 'front'
-            or field not in ('stop_clearance', 'stop_tolerance')
+            or field not in ('stop_clearance', 'stop_tolerance', 'follow_clearance')
+            or (
+                field == 'follow_clearance'
+                and self.steps[index].wall.get('follow', 'none') == 'none'
+            )
         ):
             raise ValueError(
-                'Partial action only permits front stop_clearance/stop_tolerance edits'
+                'Partial forward/front action permits bounded follow_clearance or stop target edits'
             )
         self.check_location()  # Fresh stopped feedback and unchanged odom are required.
 

@@ -21,6 +21,7 @@ class Policy:
     stop_clearance: float | None = None
     follow_offset: float = 0.0
     stop_tolerance: float = 0.008
+    align_follow_first: bool = False
 
     def validate(self, kind):
         if self.follow not in ('none', 'left', 'right') or self.capture not in (
@@ -46,6 +47,10 @@ class Policy:
             raise ValueError('Recapture is a stopped post-turn operation')
         if not math.isfinite(self.stop_tolerance) or not 0.005 <= self.stop_tolerance <= 0.010:
             raise ValueError('Stop tolerance must be within [.005,.010] m')
+        if type(self.align_follow_first) is not bool or (
+            self.align_follow_first and (kind != 'forward' or self.follow == 'none')
+        ):
+            raise ValueError('align_follow_first requires a forward wall-follow action')
         self.validate_clearances()
         return self
 
@@ -175,3 +180,44 @@ class FrontStopVerification:
             self.confirmed = True
         # Even the confirming tick stays zero; correction starts on the next tick.
         return (0.0, 0.0, 0.0), False
+
+
+class FollowAlignment:
+    """Bounded pre-translation side correction, rechecked on every resumed attempt.
+
+    No commanded motion along the planned heading until three stopped scans and
+    a 0.5 s hold satisfy side/heading tolerances. All actual travel still counts
+    against the parent action budget; this phase also has a 6 cm / 20 s bound.
+    """
+
+    def __init__(self, enabled, now, path):
+        self.done = not enabled
+        self.started, self.path_start = now, path
+        self.hold, self.stamp, self.count = None, None, 0
+
+    def invalidate(self):
+        self.hold, self.stamp, self.count = None, None, 0
+
+    def apply(self, policy, residual, stamp, stopped, now, path):
+        if self.done:
+            return None
+        if now - self.started > 20 or path - self.path_start > 0.06:
+            raise RuntimeError('FOLLOW_ALIGNMENT_LIMIT: stopped; inspect side correction')
+        side, heading = residual['side_m'], residual['heading_rad']
+        ready = abs(side) <= 0.005 and abs(heading) <= 0.01
+        if ready and stopped:
+            if self.hold is None:
+                self.hold = now
+            if stamp != self.stamp:
+                self.stamp = stamp
+                self.count += 1
+            if self.count >= 3 and now - self.hold >= 0.5:
+                self.done = True
+        else:
+            self.invalidate()
+        vy = 0.0 if abs(side) <= 0.005 else clamp(0.7 * side, 0.01)
+        vy *= 1 if policy.follow == 'left' else -1
+        wz = 0.0 if abs(heading) <= 0.01 else clamp(1.2 * heading, 0.08)
+        if abs(heading) > 0.08:
+            vy = 0.0
+        return (0.0, vy, wz)

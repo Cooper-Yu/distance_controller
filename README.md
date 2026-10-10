@@ -607,7 +607,8 @@ side-distance estimator after alignment. This does not change per-action followi
 Stopped action sessions can now restart with `action_session --resume FILE` without P01 preparation. See [checkpoint recovery](docs/wall_session.md#resume-at-a-stopped-waypoint-after-updating-code) for odom continuity checks, partial-action resume, and legacy audit migration.
 
 
-Task6 P03 uses a provisional **7.5 cm body-clearance target / 1 cm tolerance**.
+Task6 P03 uses a provisional **9.5 cm body-clearance target / 1 cm tolerance**.
+P02-P03 follows 2 cm closer to the left reference wall, with bounded side alignment before forward travel.
 Front-wall arrival pauses for three distinct stopped scans before final side correction.
 Existing partial checkpoints require an explicit policy edit; see
 [P03 calibration and continuation](docs/wall_session.md#p03-stopped-front-endpoint-calibration).

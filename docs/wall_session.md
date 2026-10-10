@@ -34,7 +34,7 @@ turn_controller at 0.20 rad/s. The odom heading remains continuous across +/-pi.
 | Action | Reference / arrival | Maximum path |
 |---|---|---|
 | P01-P02 forward | left `d`; travel 0.90 m | 1.20 m |
-| P02-P03 forward | left `d`; front 0.075 m, tolerance 0.010 m | 1.05 m |
+| P02-P03 forward | left `d-0.02`; front 0.095 m, tolerance 0.010 m | 1.05 m |
 | P03 right 90 degrees | capture new left `d` after stopped turn | no translation |
 | P03-P04 forward | left `d`; front `d` | 0.75 m |
 | P04-P05 right | stop at right `d` | 0.60 m |
@@ -436,7 +436,7 @@ existing action timeout remains. Strafe and turn actions do not use this limiter
 Independent `follow_clearance` / `follow_offset` policies remain available; this
 change deliberately leaves P02-P03's target unchanged for isolated cloud testing.
 A partial action normally requires return before edits. The stopped front-endpoint
-calibration exception below permits only stop_clearance and stop_tolerance. Do not edit checkpoint JSON
+calibration exception below permits stop-target edits and bounded follow_clearance realignment. Do not edit checkpoint JSON
 by hand to bypass this boundary.
 
 Local evidence (2026-10-10): 86 relevant pure tests, Ruff and colcon passed. Replay
@@ -477,9 +477,10 @@ The 0.15 s pairing bound, 2/4 s recovery budgets and all-point obstacle guard re
 
 ## P03 stopped front-endpoint calibration
 
-P03 now requests 0.075 m fitted body clearance with `stop_tolerance=0.010` m.
-This is provisional calibration from three stationary readings (0.07738, 0.07101,
-0.06948 m), not a verified turn clearance. The carried left reference stays unchanged.
+P03 now requests 0.095 m fitted body clearance with `stop_tolerance=0.010` m.
+The former 0.075 m target completed translation but failed the turn-sweep check.
+The 0.095 m trial and per-action left offset still need cloud turn validation.
+The carried reference is unchanged; the explicit per-action target overrides it.
 Other wall stops default to 0.008 m tolerance; supported tolerances are 0.005-0.010 m.
 
 For front-wall stops, entering the front band first commands zero on all axes.
@@ -495,7 +496,7 @@ using `--resume` (unchanged odom and no manual relocation). At the restored prom
 
 ```text
 status
-policy 2 stop_clearance 0.075
+policy 2 stop_clearance 0.095
 policy 2 stop_tolerance 0.010
 plan
 resume
@@ -505,13 +506,52 @@ Use these commands only when status identifies action 2 as the current partial P
 approach. Confirm RESUME after inspecting the stopped pose/path. Do not run `next`
 to turn until this action completes and its resulting clearance is reviewed.
 
-Partial edits are restricted to the current outward front-stop action, require fresh
+Partial stop-target edits are restricted to the current outward front-stop action, require fresh
 stopped feedback and unchanged pose, and reject edits during an interrupted return
 or legacy back-only recovery. They preserve start, target pose preview, reference,
 path budget and completed history; the route and partial record change together,
 with previous/new definitions in the append-only audit and automatic checkpoint.
-Distance, following policy and maximum travel cannot be changed this way.
+Distance and maximum travel cannot be changed this way. Bounded follow-target edits
+use the separate alignment behavior described below.
 
 Local verification: 116 unit tests, Ruff and colcon passed in Ubuntu-22.04/Humble.
 ROS synthetic feedback validated the 0.075 m stop with 0.010 m tolerance and completed/
 partial checkpoint recovery. Cloud P03 completion and subsequent turn remain pending.
+
+
+## Adjust a stopped partial forward segment away from a side obstruction
+
+The default P02-P03 action now follows left `d-0.02` and stops at **0.095 m**
+front clearance (0.010 m tolerance). Other actions retain their policies.
+The preceding 0.075 m P03 calibration is historical: translation completed, but
+its turn sweep was rejected. The new default still requires cloud validation.
+
+For the current interrupted action 2 with carried reference approximately 0.1007 m,
+restore the latest checkpoint with unchanged odom/pose, verify `status`, then:
+
+```text
+policy 2 follow_clearance 0.0807
+plan
+resume
+```
+
+The edit publishes no motion. It is limited to a 3 cm change from the existing
+follow target, with a finite absolute target, valid forward/front wall policy and
+fresh stopped pose. Interrupted returns, legacy back-only recovery and changed
+odom/pose remain rejected. Check `plan` still shows front target 0.095 m.
+
+Editing a partial follow target enables `align_follow_first` in its saved policy.
+On every execution/resume of that policy, a bounded alignment phase holds the
+planned forward component at zero, caps side speed at 0.010 m/s and angular speed
+at 0.08 rad/s, and checks all original measured/commanded swept-clearance guards.
+Side error must be within 5 mm and heading within 0.01 rad for a 0.5 s stopped hold
+with at least three distinct scans before forward travel resumes. Loss of wall
+feedback clears the hold. The phase is bounded to 20 s / 6 cm actual travel per
+attempt; all travel also consumes the original accumulated action path budget.
+`follow_aligned` in progress output indicates this phase's state.
+
+The edit preserves the original start, planned heading, carried reference, past
+history and path budget. It updates the route and partial record together and is
+persisted/audited. A failed adjustment stays incomplete; it does not advance the
+cursor. Repeated resume rechecks alignment, rather than assuming a saved flag
+proves the current robot is aligned. No obstacle points or safety margins are removed.

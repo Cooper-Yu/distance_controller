@@ -24,7 +24,7 @@ from wall_geometry import (
     side_distance,
     front_distance,
 )
-from wall_policy import Policy, command, FrontStopVerification
+from wall_policy import Policy, command, FrontStopVerification, FollowAlignment
 
 
 class WallFitError(RuntimeError):
@@ -576,6 +576,17 @@ class WallRunner(PlannedRunner):
             wz,
         )
 
+    def endpoint_stages(self, policy, residual, velocity, ready, path, front, follow):
+        """Apply side realignment before approach, then stopped front verification."""
+        stopped = self.latest[2] < 0.01 and self.latest[3] < 0.02
+        adjusted = follow.apply(
+            policy, residual, self.cached_stamp, stopped, time.monotonic(), path
+        )
+        if adjusted is not None:
+            front.reset()
+            return adjusted, False
+        return front.apply(policy, residual, self.cached_stamp, stopped, velocity, ready)
+
     def translation(self, step, target, policy):  # noqa: PLR0915 - one ordered safety/control loop
         """Closed-loop distance/wall arrival with heading hold, travel bound and stable endpoint."""
         observed_start = self.pose()
@@ -603,6 +614,7 @@ class WallRunner(PlannedRunner):
         path = getattr(self, 'resume_path', 0.0)
         hold = None
         front_verify = FrontStopVerification()
+        follow_align = FollowAlignment(policy.align_follow_first, time.monotonic(), path)
         last_log = 0.0
         while time.monotonic() < deadline:
             self.pump()
@@ -625,6 +637,7 @@ class WallRunner(PlannedRunner):
             gaps = self.checked_motion_gaps(sides, heading, movement, prior_gaps)
             if gaps is None:
                 front_verify.reset()
+                follow_align.invalidate()
                 hold = None
                 continue
             prior_gaps = gaps
@@ -638,13 +651,8 @@ class WallRunner(PlannedRunner):
                 gaps,
                 self.max_speed,
             )
-            velocity, ready = front_verify.apply(
-                policy,
-                residual,
-                self.cached_stamp,
-                self.latest[2] < 0.01 and self.latest[3] < 0.02,
-                velocity,
-                ready,
+            velocity, ready = self.endpoint_stages(
+                policy, residual, velocity, ready, path, front_verify, follow_align
             )
             # Convert the nominal heading axes to the current body axes.
             rotation = heading - actual.yaw
@@ -672,7 +680,7 @@ class WallRunner(PlannedRunner):
             if time.monotonic() - last_log >= 1:
                 print(
                     f'WALL_PROGRESS {step.name} progress={progress:.3f} path={path:.3f} '
-                    f'gaps={gaps} residual={residual} front_verified={front_verify.confirmed} side_estimator=held_heading_30deg front_estimator=tls_12deg',
+                    f'gaps={gaps} residual={residual} front_verified={front_verify.confirmed} follow_aligned={follow_align.done} side_estimator=held_heading_30deg front_estimator=tls_12deg',
                     flush=True,
                 )
                 last_log = time.monotonic()
