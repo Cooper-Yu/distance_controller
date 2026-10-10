@@ -60,6 +60,8 @@ def validate_records(data, steps):
         for key in ('start', 'target', 'end'):
             if key in record:
                 finite_pose(record[key])
+        if record.get('turn_rewind'):
+            validate_rewind(record)
         if record.get('turn_escape'):
             validate_adjustment(record, 'turn_escape')
             state = record['turn_escape']
@@ -177,3 +179,17 @@ def restore_checkpoint(data, backend, emit):
     session.last_actual = saved
     emit('checkpoint_restored', {'cursor': session.cursor, 'partial': session.partial})
     return session
+
+
+def validate_rewind(record):
+    """A rewind cannot translate its fixed origin or choose another reference yaw."""
+    state = record['turn_rewind']
+    origin, target = finite_pose(state['origin']), finite_pose(state['target'])
+    if (
+        record['step']['kind'] != 'turn'
+        or type(state['done']) is not bool
+        or errors(origin, target)[0] > 1e-9
+        or abs(target.yaw - record['start']['yaw']) > 1e-9
+        or abs(target.yaw - origin.yaw) > 2 * math.pi + 0.05
+    ):
+        raise ValueError('Invalid fixed rewind target')

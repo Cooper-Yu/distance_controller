@@ -49,7 +49,16 @@ class WallSession(Session):
 
         return adjust_session(self, distance, escape=True)
 
+    def rewind_turn(self):
+        """Undo only a partial turn's yaw, then wait for a separate adjustment."""
+        from turn_adjustment import rewind_session
+
+        return rewind_session(self)
+
     def resume(self):
+        rewind = (self.partial or {}).get('turn_rewind')
+        if rewind and not rewind['done']:
+            raise RuntimeError('Finish rewind_turn before resuming outward motion')
         escape = (self.partial or {}).get('turn_escape')
         if escape and not escape['done']:
             raise RuntimeError('Finish the fixed escape_turn target before turning')
@@ -64,6 +73,8 @@ class WallSession(Session):
 
     def back(self):
         record = self.partial or (self.active[-1] if self.active else None)
+        if record and record.get('turn_rewind'):
+            raise RuntimeError('Automatic back across a rewind is disabled; inspect recovery path')
         if record and record.get('turn_escape'):
             raise RuntimeError('Automatic back across an escape is disabled; inspect recovery path')
         before = (

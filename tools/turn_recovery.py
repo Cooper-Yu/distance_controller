@@ -62,11 +62,13 @@ def recover_turn(runner, target):
         runner.velocity_pub = None
 
 
-def supervised_turn(runner, target):
+def supervised_turn(runner, target, initial_speed=0.20):
     """Stop and reap the child before recovery; at most two retries to the same yaw."""
     from wall_runtime import TurnClearanceError
 
-    runner.turn_speed = 0.20
+    if initial_speed not in (0.08, 0.20):
+        raise ValueError('Unsupported supervised turn speed')
+    runner.turn_speed = initial_speed
     for attempt in range(3):
         runner.turn_sign = 1 if target.yaw - runner.pose().yaw > 0 else -1
         runner.guarded_command = None

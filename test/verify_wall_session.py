@@ -220,6 +220,47 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'turn_rewind':
+        rows = [row('turn', 'turn', -90)]
+        run('rewind_seed', rows, 'quit\n')
+        saved = next((OUT / 'rewind_seed').glob('*.checkpoint.json'))
+        data = json.loads(saved.read_text())
+        pose[:] = [0.0, -0.02, -0.89]
+        data['last_actual'] = dict(x=pose[0], y=pose[1], yaw=pose[2])
+        data['partial'] = dict(
+            index=0,
+            revision=0,
+            step=data['steps'][0],
+            start=dict(x=0.0, y=0.0, yaw=0.0),
+            target=dict(x=0.0, y=-0.02, yaw=-math.pi / 2),
+            turn_adjustment=dict(
+                origin=dict(x=0.0, y=0.0, yaw=0.0),
+                target=dict(x=0.0, y=-0.02, yaw=0.0),
+                distance=0.02,
+                path_m=0.02,
+                done=True,
+            ),
+        )
+        saved.write_text(json.dumps(data))
+        if os.getenv('REWIND_BLOCK'):
+            os.environ['WALL_LEFT_Y'] = '0.17'
+        events, log = run(
+            'turn_rewind',
+            rows,
+            'SAME_ODOM\nrewind_turn\nrewind_turn\nadjust_turn 0.02\nadjust_turn 0.02\nquit\n',
+            resume=saved,
+        )
+        if os.getenv('REWIND_BLOCK'):
+            assert 'turn_rewind_stopped' in [e['event'] for e in events], log[-5000:]
+            assert abs(pose[2] + 0.89) < 1e-6 and abs(pose[1] + 0.02) < 1e-6, pose
+        else:
+            assert sum(e['event'] == 'turn_rewind_completed' for e in events) == 1, log[-5000:]
+            assert 'max_wz=0.080' in log and 'REWIND already completed' in log
+            assert abs(pose[2]) < 0.02 and -0.043 < pose[1] < -0.034, pose
+            assert not any(e['event'] == 'completed' for e in events)
+        assert max(abs(v) for v in velocity) < 1e-6
+        print('PASS rewind', os.getenv('REWIND_BLOCK', 'normal'), OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'turn_escape':
         rows = [row('turn', 'turn', -5.73)]
         run('escape_seed', rows, 'quit\n')

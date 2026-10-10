@@ -23,6 +23,8 @@ def adjust_session(session, distance, escape=False):
         raise ValueError('Right adjustment must be within [.005,.03] m')
     if escape and abs(distance - 0.03) > 1e-9:
         raise ValueError('escape_turn requires exactly 0.03 m right')
+    if record.get('turn_rewind') and not record['turn_rewind']['done']:
+        raise ValueError('Finish rewind_turn before any adjustment')
     actual = session.check_location()
     if not escape and abs(errors(actual, Pose(**record['start']))[1]) > 0.03:
         raise ValueError('Turn already changed heading; adjustment refused')
@@ -153,3 +155,81 @@ def run_adjustment(runner, state):
         raise RuntimeError('Adjustment moved outside acceptance during final stop')
     state['done'] = True
     runner.observe('turn_adjustment_after')
+
+
+def rewind_session(session):
+    """Restore only the original yaw at a fixed current XY, once per partial turn."""
+    record = session.partial
+    if (
+        record is None
+        or record['index'] != session.cursor
+        or record['step']['kind'] != 'turn'
+        or record.get('return_started')
+        or record.get('resume_unavailable')
+    ):
+        raise ValueError('rewind_turn requires an incomplete outward turn')
+    actual = session.check_location()
+    state = record.get('turn_rewind')
+    if state and state['done']:
+        print('REWIND already completed; no motion; use adjust_turn 0.02', flush=True)
+        return actual
+    if state is None:
+        escape = record.get('turn_escape')
+        if escape and (
+            escape['done']
+            or escape['path_m'] > 0
+            or errors(actual, Pose(**escape['origin']))[0] > 0.003
+        ):
+            raise ValueError('Escape already moved; rewind requires separate path review')
+        adjustment = record.get('turn_adjustment')
+        if adjustment and not adjustment['done']:
+            raise ValueError('Pending adjustment must be resolved before rewind')
+        state = {
+            'origin': asdict(actual),
+            'target': asdict(Pose(actual.x, actual.y, record['start']['yaw'])),
+            'done': False,
+        }
+        record['turn_rewind'] = state
+    session.emit('turn_rewind_started', state)
+    try:
+        run_rewind(session.backend, Pose(**state['target']))
+        actual = session.backend.pose()
+        distance, angle = errors(actual, Pose(**state['target']))
+        if distance > 0.03 or abs(angle) > 0.02:
+            raise RuntimeError('Rewind endpoint outside acceptance')
+        state['done'] = True
+        # Preserve both the original route start and the original outward yaw.
+        # Archive old fixed adjustments; the next explicit adjustment is additional.
+        record['rewind_previous_adjustments'] = {
+            key: record.pop(key) for key in ('turn_adjustment', 'turn_escape') if key in record
+        }
+        record['target']['x'], record['target']['y'] = actual.x, actual.y
+        session.last_actual = actual
+        session.emit('turn_rewind_completed', {**state, 'actual': asdict(actual)})
+        print('REWIND completed; WAITING; inspect then use adjust_turn 0.02', flush=True)
+        return actual
+    except (Exception, KeyboardInterrupt):
+        try:
+            session.last_actual = session.backend.pose()
+        except (Exception, KeyboardInterrupt):
+            session.last_actual = None
+        session.emit('turn_rewind_stopped', state)
+        raise
+
+
+def run_rewind(runner, target):
+    """Rotate only, with existing scan/odom guards and 0.08 rad/s speed cap."""
+    from turn_recovery import recover_turn, supervised_turn
+
+    runner.child = None
+    try:
+        runner.exclusive()
+        runner.pose()
+        runner.observe('rewind_before')
+        runner.check_turn(target)
+        recover_turn(runner, target)
+        supervised_turn(runner, target, initial_speed=0.08)
+    finally:
+        runner.turn_guard = False
+        runner.stop_owned()
+        runner.child = None

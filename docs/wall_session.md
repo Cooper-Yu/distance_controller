@@ -645,3 +645,51 @@ read-only geometry replay; real robot execution remains pending.
 
 See [the isolated Gazebo comparison](turn_audit.md). It includes an independent
 wall-contact positive control and does not expose a real-robot bypass option.
+
+### Restore heading before an additional right adjustment
+
+`rewind_turn` is a separate, explicit yaw-only recovery for an incomplete outward
+turn. It restores the recorded pre-turn yaw at a fixed current XY, caps angular
+speed at 0.08 rad/s, and never starts a translation or the original outward turn.
+It does not return to P01, undo earlier right adjustments, or overwrite the route's
+original final yaw. Physical rotation drift is still possible; a final XY error
+above 3 cm or heading error above 0.02 rad refuses completion.
+
+Before motion, the full reverse sweep must pass, followed by the existing stopped
+recovery gate: three fresh scan/odom pairs over at least 0.2 s, stopped feedback,
+and remaining clearance at least 2.5 cm within 2 s. The ordinary 2 cm hard limit,
+feedback timeouts and live turn guards remain. A rejected preflight cannot be
+bypassed by issuing `resume` or an adjustment while rewind is incomplete.
+
+At the existing `route>` prompt, preserve a current checkpoint and quit before
+updating the package. Restore the checkpoint only with unchanged odom and no manual
+relocation. Then execute these individually, inspecting each result:
+
+```text
+rewind_turn
+measure
+adjust_turn 0.02
+measure
+resume
+```
+
+Proceed to the adjustment only after `REWIND completed`; proceed to the outward
+turn only after the adjustment and fresh full-sweep check pass. Repeated
+`rewind_turn` after completion does nothing. Repeating `adjust_turn 0.02` retries
+the same fixed target, not another 2 cm. The earlier adjustment is archived and
+the new one is additional. Rewind is deliberately limited to one completed cycle
+per partial turn. A failed rewind keeps its fixed recovery target across restarts.
+Do not manually edit checkpoint targets to force acceptance.
+
+An `escape_turn` rejected before movement (zero recorded path, within 3 mm of its
+origin) may be superseded by this recovery. An escape that already moved, or an
+unfinished ordinary adjustment, requires separate review. Automatic `back` across
+a rewind record is disabled because it would combine a different translation and
+rotation path. Use the checkpoint, not JSONL import, to restore this recovery.
+
+Local ROS raycast tests cover yaw-only recovery, additional non-accumulating
+adjustment, and blocked reverse sweep with zero movement. These are not real-robot
+clearance evidence. The supplied P03 stationary scan replay had 26/40 reverse-sweep
+samples below 2 cm and none reaching 2.5 cm (assumed pre-turn yaw -0.011425 rad).
+Those old scans do not authorize motion: inspect persistent near returns if the
+fresh recovery gate rejects it; do not keep retrying to select a favorable scan.

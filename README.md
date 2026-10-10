@@ -624,3 +624,7 @@ protection and fixed yaw target remain. See [turn recovery](docs/wall_session.md
 Task6 partial-turn recovery: `escape_turn 0.03` requests a fixed low-speed right
 translation at the current heading, with receding-point guards and no automatic
 rotation. Read the [escape limits](docs/wall_session.md#escape-from-a-partially-completed-turn) before use; automatic back across this recovery is disabled.
+
+Task6 ewind_turn restores only the recorded pre-turn heading before an additional
+right adjustment. It preserves live clearance protection and waits between actions;
+see [the recovery procedure](docs/wall_session.md#restore-heading-before-an-additional-right-adjustment).
