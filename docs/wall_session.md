@@ -767,3 +767,38 @@ Local verification: 149 Python tests, Ruff and colcon build; ROS raycast fixture
 first blocks a normal turn, completes its original target under manual mode,
 then blocks the next normal turn with the same injected obstacle. Final command
 is zero. This is interface/state verification, not a real collision test.
+
+### P04 to P05 right stopping-wall sector
+
+Action 5 now defaults to `right_front_window: true`: use base_link bearings
+[-90,-70] degrees (straight right through 20 degrees forward) only for the
+stopping-wall distance. Other actions retain their existing windows. All raw
+points remain available to translation/turn obstacle guards. The 80% consensus,
+60% coverage, 12 mm RMS and 8 cm wall-span checks remain unchanged.
+`measure` still reports general +/-20 degree TLS walls; its right-wall result may
+remain unavailable even when the action-specific estimator succeeds.
+
+Old checkpoints preserve their old policies. At stopped P04, save and quit:
+
+```text
+checkpoint /home/user/ros2_ws/task6_p04.checkpoint.json
+quit
+```
+
+Update/build, restore that checkpoint with unchanged odom/no manual relocation,
+then explicitly update only action 5 before continuing:
+
+```text
+policy 5 right_front_window 1
+resume
+```
+
+Confirm RESUME when prompted. The edit preserves the original start, target,
+accumulated path and history; it does not initiate motion. It is allowed for an
+incomplete outward right translation with a right stopping wall, never a return.
+Use 0 to restore the original window. New sessions get the setting from the route.
+
+Offline real-scan replay: 34/34 frames pass at the reported approximate heading
+error -0.00065 rad; 33/34 pass at -0.01 rad. This is not proof of a complete real
+P04-P05 traversal. Lateral arrival, injected obstacles and stale scans are covered
+by the local ROS raycast fixture (`WALL_CASE=right_front_window`).

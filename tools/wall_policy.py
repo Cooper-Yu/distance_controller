@@ -22,6 +22,7 @@ class Policy:
     follow_offset: float = 0.0
     stop_tolerance: float = 0.008
     align_follow_first: bool = False
+    right_front_window: bool = False
 
     def validate(self, kind):
         if self.follow not in ('none', 'left', 'right') or self.capture not in (
@@ -51,6 +52,10 @@ class Policy:
             self.align_follow_first and (kind != 'forward' or self.follow == 'none')
         ):
             raise ValueError('align_follow_first requires a forward wall-follow action')
+        if type(self.right_front_window) is not bool or (
+            self.right_front_window and (kind != 'right' or self.stop != 'right')
+        ):
+            raise ValueError('right_front_window requires right translation stopping at right wall')
         self.validate_clearances()
         return self
 

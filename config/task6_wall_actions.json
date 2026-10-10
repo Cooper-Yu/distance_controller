@@ -80,7 +80,8 @@
         "capture": "none",
         "follow_clearance": null,
         "stop_clearance": null,
-        "follow_offset": 0.0
+        "follow_offset": 0.0,
+        "right_front_window": true
       }
     },
     {

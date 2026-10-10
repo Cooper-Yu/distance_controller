@@ -47,7 +47,10 @@ def scan_points(scan, transform):
         raise ValueError('Nonfinite laser geometry')
     if scan.angle_increment == 0 or not 0 < scan.range_min < scan.range_max:
         raise ValueError('Invalid scan bounds')
-    points, counts = [], dict.fromkeys((*DIRECTIONS, 'left_wide', 'right_wide', 'front_narrow'), 0)
+    points, counts = (
+        [],
+        dict.fromkeys((*DIRECTIONS, 'left_wide', 'right_wide', 'front_narrow', 'right_front20'), 0),
+    )
     for i, distance in enumerate(scan.ranges):
         angle = scan.angle_min + i * scan.angle_increment
         c, s = math.cos(angle), math.sin(angle)
@@ -59,6 +62,8 @@ def scan_points(scan, transform):
                 math.atan2(math.sin(bearing - center), math.cos(bearing - center))
             ) <= math.radians(20):
                 counts[name] += 1
+        if -math.pi / 2 <= bearing <= math.radians(-70):
+            counts['right_front20'] += 1
         if abs(bearing) <= math.radians(12):
             counts['front_narrow'] += 1
         for side in ('left', 'right'):
@@ -159,12 +164,13 @@ def swept_clearance(points, vx=0.0, vy=0.0, wz=0.0, duration=0.5):
     return best
 
 
-def side_distance(points, counts, side, heading_error):
+def side_distance(points, counts, side, heading_error, *, right_front_window=False):
     """Estimate side offset in a +/-30 degree window using the held odom direction.
 
     Require 80% within 20 mm of the median projection, 60% scan coverage,
     12 mm RMS and 8 cm longitudinal span. This is a distance estimator, not
-    a new heading observation. All original returns remain available to guards.
+    a new heading observation. Optional right-front sector is [-90,-70] degrees
+    in base_link; it retains all quality thresholds and full raw guard points.
     """
     if side not in ('left', 'right') or not math.isfinite(heading_error):
         raise ValueError('Invalid constrained side direction')
@@ -176,7 +182,15 @@ def side_distance(points, counts, side, heading_error):
         if abs(math.atan2(math.sin(bearing - center), math.cos(bearing - center)))
         <= math.radians(30)
     ]
-    expected = counts.get(side + '_wide', counts[side])
+    if right_front_window:
+        if side != 'right':
+            raise ValueError('Forward sector requires right wall')
+        selected = [(x, y) for x, y, a in points if -math.pi / 2 <= a <= math.radians(-70)]
+    expected = (
+        counts.get('right_front20', 0)
+        if right_front_window
+        else counts.get(side + '_wide', counts[side])
+    )
     if len(selected) < 8 or len(selected) < 0.6 * expected:
         raise ValueError(f'{side}: insufficient wide-window returns')
     offset = median(nx * x + ny * y for x, y in selected)

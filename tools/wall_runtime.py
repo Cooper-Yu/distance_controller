@@ -151,7 +151,12 @@ class WallRunner(PlannedRunner):
         """Fit each scan/heading/side set once, including failures; freshness is never cached."""
         self.geometry()
         self.scan_pose()
-        key = (self.cached_stamp, heading, tuple(sorted(sides)))
+        key = (
+            self.cached_stamp,
+            heading,
+            tuple(sorted(sides)),
+            getattr(self, 'right_front_window', False),
+        )
         cached = getattr(self, 'motion_fit_cache', None)
         if cached is not None and cached[0] == key:
             if isinstance(cached[1], WallFitError):
@@ -175,7 +180,15 @@ class WallRunner(PlannedRunner):
         for side in sorted(sides):
             try:
                 walls[side] = (
-                    side_distance(points, counts, side, error)
+                    side_distance(
+                        points,
+                        counts,
+                        side,
+                        error,
+                        right_front_window=(
+                            side == 'right' and getattr(self, 'right_front_window', False)
+                        ),
+                    )
                     if side in ('left', 'right')
                     else front_distance(points, counts)
                 )
@@ -191,6 +204,7 @@ class WallRunner(PlannedRunner):
                     'measured_speed_m_s': self.latest[2],
                     'measured_abs_wz_rad_s': self.latest[3],
                     'scheduled_ray_counts': counts,
+                    'right_front_window': getattr(self, 'right_front_window', False),
                     'points_base_xy_bearing': points,
                     'estimator': 'held_heading_30deg' if side in ('left', 'right') else 'tls_12deg',
                 }
@@ -612,13 +626,14 @@ class WallRunner(PlannedRunner):
 
     def translation(self, step, target, policy):  # noqa: PLR0915 - one ordered safety/control loop
         """Closed-loop distance/wall arrival with heading hold, travel bound and stable endpoint."""
+        self.right_front_window = policy.right_front_window
         observed_start = self.pose()
         start = getattr(self, 'resume_origin', None) or observed_start
         follow_goal, stop_goal = policy.clearances(self.reference)
         print(
             f'WALL_ACTION {step.name}: follow={policy.follow} reference={self.reference:.4f} m follow_target={follow_goal}; '
             f'stop={policy.stop} target_clearance={stop_goal} m; '
-            f'nominal_distance={step.value:.3f} m max_travel={policy.max_travel:.3f} m',
+            f'nominal_distance={step.value:.3f} m max_travel={policy.max_travel:.3f} m right_front_window={policy.right_front_window}',
             flush=True,
         )
         heading = target.yaw
@@ -703,7 +718,7 @@ class WallRunner(PlannedRunner):
             if time.monotonic() - last_log >= 1:
                 print(
                     f'WALL_PROGRESS {step.name} progress={progress:.3f} path={path:.3f} '
-                    f'gaps={gaps} residual={residual} front_verified={front_verify.confirmed} follow_aligned={follow_align.done} side_estimator=held_heading_30deg front_estimator=tls_12deg',
+                    f'gaps={gaps} residual={residual} front_verified={front_verify.confirmed} follow_aligned={follow_align.done} side_estimator={"right_front20" if policy.right_front_window else "held_heading_30deg"} front_estimator=tls_12deg',
                     flush=True,
                 )
                 last_log = time.monotonic()
@@ -782,6 +797,7 @@ class WallRunner(PlannedRunner):
             self.stop_owned()
             raise
         finally:
+            self.right_front_window = False
             self.child = None
             self.cancel_requested = False
 

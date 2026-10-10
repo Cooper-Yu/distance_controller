@@ -220,6 +220,20 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'right_front_window':
+        rows = [row('p04_right', 'right', 0.27, stop='right')]
+        rows[0]['wall']['right_front_window'] = True
+        events, log = run('right_front_arrival', rows, 'next\nquit\n')
+        assert sum(e['event'] == 'completed' for e in events) == 1, log[-4000:]
+        assert abs(pose[1] + 0.20) < 0.015
+        os.environ['ESCAPE_LOSS_MODE'] = 'obstacle'
+        events, log = run('right_front_obstacle', rows, 'next\nquit\n')
+        assert any(e['event'] == 'incomplete' for e in events) and 'OBSTACLE' in log
+        os.environ['ESCAPE_LOSS_MODE'] = 'stale'
+        events, log = run('right_front_stale', rows, 'next\nquit\n')
+        assert any(e['event'] == 'incomplete' for e in events) and 'stale' in log
+        print('PASS right-front arrival and fault stops', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'manual_turn':
         os.environ['TURN_LOSS_MODE'] = 'permanent'
         events, log = run(

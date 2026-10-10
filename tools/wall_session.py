@@ -124,6 +124,7 @@ class WallSession(Session):
                 'follow_clearance',
                 'stop_clearance',
                 'stop_tolerance',
+                'right_front_window',
             )
             or not self.steps[index].wall
         ):
@@ -133,6 +134,10 @@ class WallSession(Session):
         if self.partial is not None:
             self.check_partial_policy_edit(index, field)
         data = dict(self.steps[index].wall)
+        if field == 'right_front_window':
+            if value not in (0, 1):
+                raise ValueError('right_front_window accepts 0 or 1')
+            value = bool(value)
         data[field] = value
         if self.partial is not None and field == 'follow_clearance':
             old_goal = Policy(**self.steps[index].wall).clearances(self.backend.reference)[0]
@@ -161,6 +166,16 @@ class WallSession(Session):
     def check_partial_policy_edit(self, index, field):
         """Recalibrate a stopped outward front action; preserve start/path/history."""
         record = self.partial
+        if (
+            field == 'right_front_window'
+            and index == self.cursor == record['index']
+            and not record.get('return_started')
+            and not record.get('resume_unavailable')
+            and self.steps[index].kind == 'right'
+            and self.steps[index].wall.get('stop') == 'right'
+        ):
+            self.check_location()
+            return
         if (
             index != self.cursor
             or record['index'] != index
