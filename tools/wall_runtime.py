@@ -18,9 +18,10 @@ from wall_policy import Policy, command
 class WallRunner(PlannedRunner):
     """Own one wall-action lifetime and carry a verified scalar body-gap reference."""
 
-    def __init__(self):
+    def __init__(self, max_speed=0.06):
         super().__init__()
         self.prepare_options = ['-p', 'alignment_wall:=left']
+        self.max_speed = max_speed
         self.reference = None
         self.velocity_pub = None
         self.turn_guard = False
@@ -207,7 +208,14 @@ class WallRunner(PlannedRunner):
             walls = self.walls(sides)
             gaps = {name: w.gap for name, w in walls.items()}
             velocity, ready, residual = command(
-                step, policy, self.reference, progress, cross, errors(actual, target)[1], gaps
+                step,
+                policy,
+                self.reference,
+                progress,
+                cross,
+                errors(actual, target)[1],
+                gaps,
+                self.max_speed,
             )
             # Convert the nominal heading axes to the current body axes.
             rotation = heading - actual.yaw

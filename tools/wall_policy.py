@@ -43,13 +43,15 @@ class Policy:
         return self
 
 
-def command(step, policy, reference, progress, cross, yaw_error, gaps):  # noqa: PLR0912
+def command(step, policy, reference, progress, cross, yaw_error, gaps, max_speed=0.03):  # noqa: PLR0912
     # Keep mutually exclusive axis/arrival rules together for sign review.
     """Return body-aligned desired vx/vy/wz, ready and residuals; runtime rotates XY to live body.
 
     Read planned-heading progress/cross error and fitted body clearances. Writes no state.
     Side corrections use positive-left convention. Required missing gaps are errors.
     """
+    if not math.isfinite(max_speed) or not 0.01 <= max_speed <= 0.08:
+        raise ValueError('Wall speed must be finite and within [.01,.08] m/s')
     axis = {'forward': (1, 0), 'backward': (-1, 0), 'left': (0, 1), 'right': (0, -1)}[step.kind]
     if not 0.04 <= reference <= 0.30:
         raise ValueError('Reference clearance outside [.04,.30] m')
@@ -62,7 +64,7 @@ def command(step, policy, reference, progress, cross, yaw_error, gaps):  # noqa:
         if residual < -0.015:
             raise RuntimeError('Stopping wall already too close; inspect and back')
     ready = abs(residual) <= 0.008
-    speed = 0 if ready else clamp(0.7 * residual, 0.03)
+    speed = 0 if ready else clamp(0.7 * residual, max_speed)
     vx, vy = axis[0] * speed, axis[1] * speed
     side_error = cross
     if policy.follow != 'none':

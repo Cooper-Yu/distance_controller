@@ -37,7 +37,7 @@ broadcaster.sendTransform(tf)
 
 def receive(msg):
     velocity[:] = [msg.linear.x, msg.linear.y, msg.angular.z]
-    assert math.hypot(*velocity[:2]) < 0.051 and abs(velocity[2]) < 0.501
+    assert math.hypot(*velocity[:2]) <= math.hypot(0.06, 0.012) + 1e-6 and abs(velocity[2]) < 0.501
 
 
 sub = node.create_subscription(Twist, '/cmd_vel', receive, 10)

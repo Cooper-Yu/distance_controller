@@ -91,6 +91,16 @@ class Control(unittest.TestCase):
         self.assertEqual(v[:2], (0.0, 0.0))
         self.assertGreater(v[2], 0)
 
+    def test_speed_cap_and_approach(self):
+        step = Step('f', 'forward', 0.9)
+        fast, _, _ = command(step, Policy(), 0.1, 0, 0, 0, {}, 0.06)
+        near, _, _ = command(step, Policy(), 0.1, 0.88, 0, 0, {}, 0.06)
+        self.assertAlmostEqual(fast[0], 0.06)
+        self.assertAlmostEqual(near[0], 0.014)
+        for bad in (0, -0.1, 0.09, float('nan'), float('inf')):
+            with self.assertRaises(ValueError):
+                command(step, Policy(), 0.1, 0, 0, 0, {}, bad)
+
     def test_config_complete_and_reverse_rejected(self):
         path = Path(__file__).resolve().parents[1] / 'config/task6_wall_actions.json'
         steps = load_steps(json.loads(path.read_text()))

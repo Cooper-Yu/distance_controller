@@ -26,7 +26,9 @@ All clearances below are fitted wall-to-body distances. Front targets are `d + o
 The `value` of wall-stop actions is a nominal preview distance, not their stopping criterion.
 Every action has an independent accumulated maximum-travel limit. All translations
 hold planned odom heading. Straight wall-following adds at most 0.012 m/s lateral
-correction; main translation speed is at most 0.030 m/s. Turns are separate and use
+correction; main translation speed defaults to 0.060 m/s. Set `--wall-speed 0.03` to use the original
+slow trial speed; accepted limits are 0.01-0.08 m/s. Speed reduces proportionally near
+the distance/clearance target. Initialization, return and turn speeds are unchanged. Turns are separate and use
 turn_controller at 0.20 rad/s. The odom heading remains continuous across +/-pi.
 
 | Action | Reference / arrival | Maximum path |

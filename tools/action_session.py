@@ -138,7 +138,7 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
         )
 
 
-def run_session(steps, prepare):
+def run_session(steps, prepare, wall_speed=0.06):
     """Capture one origin after optional wall preparation and retain it until exit."""
     import fcntl
     from action_runtime import PlannedRunner
@@ -150,7 +150,7 @@ def run_session(steps, prepare):
             from wall_runtime import WallRunner
             from wall_session import WallSession
 
-            backend = WallRunner()
+            backend = WallRunner(wall_speed)
         else:
             backend = PlannedRunner()
         journal = Journal(backend)
@@ -163,7 +163,10 @@ def run_session(steps, prepare):
             if wall_mode:
                 backend.capture_reference('left')
                 session = WallSession(origin, steps, backend, journal.emit)
-                journal.emit('initial_reference', {'body_clearance_m': backend.reference})
+                journal.emit(
+                    'initial_reference',
+                    {'body_clearance_m': backend.reference, 'speed_cap_m_s': wall_speed},
+                )
             else:
                 session = Session(origin, steps, backend, journal.emit)
             print(f'Origin fixed: {origin}; audit: {journal.path.resolve()}', flush=True)
@@ -200,6 +203,12 @@ def main():
     parser.add_argument(
         '--wall-guided', action='store_true', help='Use provisional Task6 wall-clearance policies'
     )
+    parser.add_argument(
+        '--wall-speed',
+        type=float,
+        default=None,
+        help='Wall translation cap in m/s: .01-.08, default .06',
+    )
     parser.add_argument('--route', type=Path, help='JSON action definitions')
     parser.add_argument(
         '--start',
@@ -221,13 +230,18 @@ def main():
     steps = read_route(args.route)
     if any(s.wall for s in steps) and not all(s.wall for s in steps):
         parser.error('Mixed wall and legacy actions are not supported')
+    if args.wall_speed is not None:
+        if not any(s.wall for s in steps):
+            parser.error('--wall-speed requires a wall-guided route')
+        if not math.isfinite(args.wall_speed) or not 0.01 <= args.wall_speed <= 0.08:
+            parser.error('--wall-speed must be within [.01,.08] m/s')
     if args.reverse:
         steps = reverse_steps(steps)
     if args.start is None:
         show(steps, targets(Pose(0, 0, 0), steps))
         print('Preview only. --start current adopts the stopped pose; --start prepare prepares A.')
         return 0
-    return run_session(steps, args.start == 'prepare')
+    return run_session(steps, args.start == 'prepare', args.wall_speed or 0.06)
 
 
 if __name__ == '__main__':
