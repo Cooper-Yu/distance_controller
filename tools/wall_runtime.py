@@ -650,6 +650,9 @@ class WallRunner(PlannedRunner):
         ]
         self.velocity_pub = self.node.create_publisher(self.twist, '/cmd_vel', 10)
         deadline = time.monotonic() + policy.max_travel / 0.03 * 3 + 20
+        adjustment_origin = getattr(self, 'endpoint_adjustment_origin', None)
+        if adjustment_origin is not None:
+            deadline = time.monotonic() + 20
         self.path_last_pose = observed_start
         prior_gaps = {}
         self.wall_snapshot = None
@@ -663,6 +666,8 @@ class WallRunner(PlannedRunner):
         while time.monotonic() < deadline:
             self.pump()
             actual = self.moving_pose()
+            if adjustment_origin is not None and errors(actual, adjustment_origin)[0] > 0.06:
+                raise RuntimeError('FRONT_ADJUSTMENT: displacement exceeded 6 cm')
             path += errors(actual, self.path_last_pose)[0]
             self.path_last_pose = actual
             self.last_report = {'path_m': path}

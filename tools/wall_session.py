@@ -23,7 +23,20 @@ class WallSession(Session):
                 anchor = goal
         return result
 
+    def require_no_front_adjustment(self):
+        from front_adjustment import pending
+
+        if pending(self):
+            raise RuntimeError('Finish adjust_front with its saved clearance before other motion')
+
+    def adjust_front(self, clearance):
+        """Correct the most recent completed front stop, then wait."""
+        from front_adjustment import adjust_session
+
+        return adjust_session(self, clearance)
+
     def next(self):
+        self.require_no_front_adjustment()
         before = self.backend.reference
         try:
             actual = super().next()
@@ -63,23 +76,27 @@ class WallSession(Session):
 
     def adjust_turn(self, distance):
         """Explicit rightward preparation; never starts the pending rotation."""
+        self.require_no_front_adjustment()
         from turn_adjustment import adjust_session
 
         return adjust_session(self, distance)
 
     def escape_turn(self, distance):
         """Explicit right escape at the current heading; never rotates automatically."""
+        self.require_no_front_adjustment()
         from turn_adjustment import adjust_session
 
         return adjust_session(self, distance, escape=True)
 
     def rewind_turn(self):
         """Undo only a partial turn's yaw, then wait for a separate adjustment."""
+        self.require_no_front_adjustment()
         from turn_adjustment import rewind_session
 
         return rewind_session(self)
 
     def resume(self):
+        self.require_no_front_adjustment()
         rewind = (self.partial or {}).get('turn_rewind')
         if rewind and not rewind['done']:
             raise RuntimeError('Finish rewind_turn before resuming outward motion')
@@ -96,6 +113,7 @@ class WallSession(Session):
         return actual
 
     def back(self):
+        self.require_no_front_adjustment()
         record = self.partial or (self.active[-1] if self.active else None)
         if record and record.get('turn_rewind'):
             raise RuntimeError('Automatic back across a rewind is disabled; inspect recovery path')

@@ -60,6 +60,7 @@ def validate_records(data, steps):
         for key in ('start', 'target', 'end'):
             if key in record:
                 finite_pose(record[key])
+        validate_front_record(record, data)
         if record.get('turn_rewind'):
             validate_rewind(record)
         if record.get('turn_escape'):
@@ -193,3 +194,32 @@ def validate_rewind(record):
         or abs(target.yaw - origin.yaw) > 2 * math.pi + 0.05
     ):
         raise ValueError('Invalid fixed rewind target')
+
+
+def validate_front_adjustment(record):
+    """Persist one fixed clearance with finite origin, original history and travel budget."""
+    state = record['front_adjustment']
+    for key in ('origin', 'original_end', 'original_target'):
+        finite_pose(state[key])
+    if (
+        record['step']['kind'] != 'forward'
+        or record['step']['wall'].get('stop') != 'front'
+        or type(state['done']) is not bool
+        or not math.isfinite(state['clearance'])
+        or not 0.06 <= state['clearance'] <= 0.15
+        or not math.isfinite(state['path_m'])
+        or state['path_m'] < 0
+        or abs(state['original_target']['yaw'] - record['target']['yaw']) > 1e-9
+    ):
+        raise ValueError('Invalid front adjustment checkpoint')
+    if state.get('last_sample'):
+        finite_pose(state['last_sample'])
+
+
+def validate_front_record(record, data):
+    if record.get('front_adjustment'):
+        validate_front_adjustment(record)
+        if not record['front_adjustment']['done'] and (
+            not data['active'] or record is not data['active'][-1] or data['partial']
+        ):
+            raise ValueError('Pending front adjustment must own the stopped endpoint')

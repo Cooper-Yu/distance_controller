@@ -150,6 +150,8 @@ def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - o
                     values[i] += 0.018 * ((i % 11) / 5 - 1) / abs(math.sin(bearing))
         if os.getenv('ESCAPE_LOSS_MODE') == 'obstacle' and pose[1] < -0.01:
             values[0:3] = [0.165] * 3
+        if os.getenv('FRONT_ADJUST_FAULT') and pose[0] > 0.275:
+            values[0:3] = [0.165] * 3
         inject_turn_obstacle(values, now)
         inject_narrow_patch(values, scan, now)
         scan.ranges = values
@@ -220,6 +222,51 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'front_adjust_fault':
+        rows = [
+            row('p04', 'forward', 0.2, follow='left', stop='front'),
+            row('p05', 'right', 0.2, stop='right'),
+        ]
+        rows[0]['wall']['stop_clearance'] = 0.12
+        os.environ['FRONT_ADJUST_FAULT'] = '1'
+        events, log = run('front_fault', rows, 'next\nadjust_front 0.08\nnext\nquit\n')
+        assert 'OBSTACLE' in log and 'Finish adjust_front' in log, log[-6000:]
+        saved = next((OUT / 'front_fault').glob('*.checkpoint.json'))
+        data = json.loads(saved.read_text())
+        assert data['cursor'] == 1 and not data['active'][0]['front_adjustment']['done']
+        assert data['active'][0]['front_adjustment']['path_m'] > 0
+        del os.environ['FRONT_ADJUST_FAULT']
+        events, log = run(
+            'front_fault_restore', rows, 'SAME_ODOM\nadjust_front 0.08\nquit\n', resume=saved
+        )
+        assert 'FRONT_ADJUSTMENT completed' in log, log[-6000:]
+        assert abs(pose[0] - 0.30) < 0.015, pose
+        print('PASS interrupted front correction and checkpoint retry', OUT, flush=True)
+        raise SystemExit(0)
+    if os.getenv('WALL_CASE') == 'front_adjust':
+        rows = [
+            row('p04', 'forward', 0.2, follow='left', stop='front'),
+            row('p05', 'right', 0.2, stop='right'),
+        ]
+        rows[0]['wall']['stop_clearance'] = 0.12
+        rows[1]['wall']['right_front_window'] = True
+        events, log = run(
+            'front_adjust', rows, 'next\nadjust_front 0.08\nadjust_front 0.08\nquit\n'
+        )
+        assert 'FRONT_ADJUSTMENT completed' in log, log[-6000:]
+        assert 'already completed; no motion' in log
+        saved = next((OUT / 'front_adjust').glob('*.checkpoint.json'))
+        data = json.loads(saved.read_text())
+        assert data['cursor'] == 1 and data['active'][0]['front_adjustment']['done']
+        assert abs(pose[0] - 0.30) < 0.015, pose
+        events, log = run(
+            'front_restore', rows, 'SAME_ODOM\nadjust_front 0.08\nnext\nquit\n', resume=saved
+        )
+        assert 'already completed; no motion' in log
+        assert sum(e['event'] == 'completed' for e in events) == 1, log[-6000:]
+        assert abs(pose[0] - 0.30) < 0.015 and abs(pose[1] + 0.20) < 0.015, pose
+        print('PASS front adjustment, idempotent restart and next right action', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'right_front_window':
         rows = [row('p04_right', 'right', 0.27, stop='right')]
         rows[0]['wall']['right_front_window'] = True

@@ -63,7 +63,7 @@
         "max_travel": 0.75,
         "capture": "none",
         "follow_clearance": null,
-        "stop_clearance": null,
+        "stop_clearance": 0.08,
         "follow_offset": 0.0
       }
     },

@@ -107,6 +107,8 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
         print('Reached:', session.manual_turn())
     elif verb == 'rewind_turn' and len(words) == 1 and hasattr(session, 'rewind_turn'):
         print('Rewound:', session.rewind_turn())
+    elif verb == 'adjust_front' and len(words) == 2 and hasattr(session, 'adjust_front'):
+        print('Adjusted:', session.adjust_front(float(words[1])))
     elif verb == 'adjust_turn' and len(words) == 2 and hasattr(session, 'adjust_turn'):
         print('Adjusted:', session.adjust_turn(float(words[1])))
     elif verb == 'escape_turn' and len(words) == 2 and hasattr(session, 'escape_turn'):
@@ -142,16 +144,13 @@ def command(session, words):  # noqa: PLR0912 - one explicit branch per operator
         print(json.dumps(session.active, indent=2))
         print('Partial:', session.partial)
     elif verb == 'status':
-        print(
-            f'Next action={session.cursor + 1}, partial={session.partial is not None}, '
-            f'actual={session.backend.pose()}'
-        )
+        show_status(session)
     elif verb == 'measure':
         session.backend.observe('manual')
         session.emit('measurement', {})
     else:
         print(
-            'next | resume | manual_turn | rewind_turn | escape_turn 0.03 | adjust_turn RIGHT_METERS | checkpoint FILE | run | back | set INDEX METERS_OR_DEGREES | load FILE | save FILE | '
+            'next | resume | manual_turn | rewind_turn | escape_turn 0.03 | adjust_front BODY_CLEARANCE_METERS | adjust_turn RIGHT_METERS | checkpoint FILE | run | back | set INDEX METERS_OR_DEGREES | load FILE | save FILE | '
             'policy INDEX follow_clearance|stop_clearance METERS_OR_auto | policy INDEX follow_offset|offset|max_travel|stop_tolerance|right_front_window VALUE | plan | status | history | measure | quit'
         )
 
@@ -309,6 +308,16 @@ def main():
         return 0
     return run_session(
         steps, args.start == 'prepare', args.wall_speed or 0.06, args.alignment_wall or 'right'
+    )
+
+
+def show_status(session):
+    from front_adjustment import pending
+
+    print(f'Endpoint adjustment pending={pending(session)}')
+    print(
+        f'Next action={session.cursor + 1}, partial={session.partial is not None}, '
+        f'actual={session.backend.pose()}'
     )
 
 

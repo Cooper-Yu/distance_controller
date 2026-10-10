@@ -630,3 +630,9 @@ right adjustment. It preserves live clearance protection and waits between actio
 see [the recovery procedure](docs/wall_session.md#restore-heading-before-an-additional-right-adjustment).
 
 Task6 commissioning: [`manual_turn`](docs/wall_session.md#one-shot-visually-monitored-turn) explicitly makes clearance log-only for one visually monitored outward turn at 0.08 rad/s. Normal commands retain protection.
+
+
+Task6 completed front-stop endpoints support `adjust_front 0.08` (absolute body
+clearance, low-speed correction, persistent fixed target). Action 4's 8 cm front
+target is provisional and independent of the left-follow reference.
+See [wall session endpoint adjustment](docs/wall_session.md#completed-p04-front-clearance-adjustment-2026-10-10).

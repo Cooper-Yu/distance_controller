@@ -36,7 +36,7 @@ turn_controller at 0.20 rad/s. The odom heading remains continuous across +/-pi.
 | P01-P02 forward | left `d`; travel 0.90 m | 1.20 m |
 | P02-P03 forward | left `d-0.02`; front 0.095 m, tolerance 0.010 m | 1.05 m |
 | P03 right 90 degrees | capture new left `d` after stopped turn | no translation |
-| P03-P04 forward | left `d`; front `d` | 0.75 m |
+| P03-P04 forward | left `d`; front 0.08 m (provisional) | 0.75 m |
 | P04-P05 right | stop at right `d` | 0.60 m |
 | P05-P06 forward | right `d`; front `d` | 0.80 m |
 | P06-P07 left | stop at left `d` | 0.70 m |
@@ -812,3 +812,47 @@ with their limits; the estimator label is `right_front_10_to_30deg`.
 Existing `right_front_window=true` checkpoints use the refined sector after
 updating. Save a NEW checkpoint at the latest stop before quitting; do not
 restore the old P04 checkpoint after the robot has moved.
+
+## Completed P04 front-clearance adjustment (2026-10-10)
+
+The new run reached P04 with inherited front target 0.117754 m and measured
+arrival 0.120914 m. Action 4 now has an independent **0.08 m body-clearance
+candidate**; its left-follow reference remains inherited. This is a commissioning
+candidate, not a verified real-world passage or a change to the 2 cm guard.
+Existing checkpoints retain their saved route: updating the package does not
+rewrite completed actions.
+
+At a completed forward/front-wall endpoint with no partial action, use:
+
+```text
+adjust_front 0.08
+status
+measure
+```
+
+The argument is absolute front body clearance, not travel distance or raw laser
+range. The original completed endpoint/target remain under `front_adjustment`;
+success updates the endpoint XY used to anchor following actions, without
+incrementing the cursor or changing planned yaw. The original segment start and
+policy remain evidence of the first traversal. The correction retains the
+segment's side-follow policy and the carried reference.
+
+Correction speed is at most 0.02 m/s, with a 20 s attempt deadline, 6 cm displacement
+bound and 8 cm cumulative path budget across retries. It uses the existing
+front-wall estimator, three stopped verification scans, endpoint hold, full scan
+translation guard and fresh odom/scan checks. Final clearance is checked again
+after stopping within 1 cm of the target. Arguments must be within [0.06,0.15] m.
+A large change is not a supported replacement for replaying a route segment.
+
+Repeating the same command after completion causes no motion. After an interruption,
+repeat the same absolute clearance; the origin and travel budget remain fixed.
+Other movement commands are blocked while this correction is unfinished;
+`status` reports `Endpoint adjustment pending=True`. Save/restore the stopped
+checkpoint when updating or restarting, provided odom has not reset and the
+robot has not been relocated. JSONL alone cannot restore this adjustment.
+A guard rejection is not permission to change the target or bypass the guard.
+
+Local verification uses synthetic ROS scan/odom/TF, not physical collision tests.
+Cases `WALL_CASE=front_adjust` and `front_adjust_fault` cover completion,
+repeat-without-motion, checkpoint restart, following rightward motion and an
+obstacle-triggered interruption/retry. Real P04-P05 passage remains pending.
