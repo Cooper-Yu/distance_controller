@@ -132,7 +132,12 @@ void DistanceController::log_preparation_progress()
   const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
   const double lateral_error = (left_wall_ - right_wall_) * 0.5;
   const double rear_error = rear_target_distance_ - rear_wall_;
-  const double yaw_error = initial_alignment_complete_ ? heading_error(yaw) : -right_wall_angle_;
+  const bool frozen = robust_wall_heading_ && wall_target_frozen_ && !initial_alignment_complete_;
+  const double yaw_error =
+    initial_alignment_complete_
+      ? heading_error(yaw)
+      : (frozen ? std::atan2(std::sin(yaw - frozen_wall_yaw_), std::cos(yaw - frozen_wall_yaw_))
+                : -right_wall_angle_);
   RCLCPP_INFO(
     get_logger(),
     "Initialization progress: stage=%s | pose: x=%.6f y=%.6f yaw=%.6f rad | "
@@ -143,8 +148,10 @@ void DistanceController::log_preparation_progress()
     preparation_stage_name(), last_odom_.pose.pose.position.x, last_odom_.pose.pose.position.y, yaw,
     left_wall_, right_wall_, rear_wall_, rear_target_distance_, lateral_error, rear_error,
     centering_tolerance_, yaw_error, heading_tolerance_,
-    initial_alignment_complete_ ? "held_odom_heading"
-                                : (alignment_wall_ == "left" ? "left_wall" : "right_wall"),
+    initial_alignment_complete_
+      ? "held_odom_heading"
+      : (frozen ? (wall_verifying_ ? "wall_verification" : "frozen_odom_target")
+                : (alignment_wall_ == "left" ? "left_wall" : "right_wall")),
     std::abs(lateral_error) <= centering_tolerance_ && std::abs(rear_error) <= centering_tolerance_
       ? "true"
       : "false",

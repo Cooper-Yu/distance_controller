@@ -204,3 +204,11 @@ original four-second deadline. Each rejected fit clears the five-frame sequence;
 only five distinct stable accepted scans commit a new reference. Stale/missing
 feedback, TF failures and cancellation still abort immediately. Movement-time wall
 loss remains an immediate stop. Permanent bad fits time out with the last fit reason.
+
+Wall-guided heading preparation collects at least eight accepted stopped scans spanning
+0.5 seconds in a recent 1.5-second window. Directions are expressed in odom and
+unwrapped before taking the median; 80% must lie within 0.02 rad of it. The resulting
+yaw target is frozen during odom-controlled rotation. After settling, a fresh window
+verifies alignment against the unchanged heading tolerance. At most two refinements
+are allowed; existing preparation/scan/odom guards remain active. Legacy non-robust
+alignment is unchanged. Logs distinguish frozen odom target and wall verification.

@@ -12,6 +12,7 @@
 #include "distance_controller/route.hpp"
 #include "distance_controller/route_history.hpp"
 #include "distance_controller/srv/execute_step.hpp"
+#include "distance_controller/wall_heading_window.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -297,7 +298,20 @@ private:
   /// Steady-clock throttle for initial wall-angle diagnostic logs.
   std::chrono::steady_clock::time_point heading_log_time_{};
   /// Initial heading-fit side: right by default; wall-guided sessions select left.
-  bool robust_wall_heading_{false};  ///< Opt-in dominant-line heading selection.
+  distance_controller::WallHeadingWindow wall_direction_window_;  ///< Stopped scan evidence.
+  bool wall_target_frozen_{false};  ///< Odom turn target no longer follows individual scans.
+  bool wall_verifying_{false};      ///< Post-turn fresh scan verification phase.
+  double frozen_wall_yaw_{0.0};     ///< Frozen odom heading in radians.
+  unsigned wall_refinements_{0};    ///< At most two verified target refinements.
+  /// @brief Run multi-scan alignment.
+  /// @param current_time ROS time used for stopped dwell.
+  /// @return True while initialization owns the control tick.
+  bool handle_frozen_alignment(const rclcpp::Time & current_time);
+  /// @brief Commit or refine from fresh stopped scans.
+  /// @param yaw Current odom yaw in radians.
+  /// @return True while initialization owns the control tick.
+  bool verify_frozen_alignment(double yaw);
+  bool robust_wall_heading_{false};          ///< Opt-in dominant-line heading selection.
   std::string alignment_wall_{
     "right"};  ///< Initial heading-fit side; left is used by wall sessions.
   /// Selected-wall fitting half-width (rad) around body +pi/2 or -pi/2.

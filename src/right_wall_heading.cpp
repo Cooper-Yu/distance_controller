@@ -11,6 +11,11 @@
 void DistanceController::estimate_right_heading(
   const std::vector<std::pair<double, double>> & raw_points, std::size_t samples)
 {
+  if (robust_wall_heading_) {
+    const auto & v = last_odom_.twist.twist;
+    if (std::hypot(v.linear.x, v.linear.y) >= .01 || std::abs(v.angular.z) >= .02)
+      wall_direction_window_.clear();
+  }
   const bool was_valid = right_heading_tracking_;
   right_heading_tracking_ = false;
   right_heading_stable_ = false;
@@ -51,6 +56,17 @@ void DistanceController::estimate_right_heading(
   right_heading_valid_ = true;
   const double world_angle =
     quaternion_to_yaw(last_odom_.pose.pose.orientation) + right_wall_angle_;
+  if (robust_wall_heading_) {
+    const auto & v = last_odom_.twist.twist;
+    const double now =
+      std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (std::hypot(v.linear.x, v.linear.y) < .01 && std::abs(v.angular.z) < .02)
+      wall_direction_window_.add(now, world_angle);
+    double estimate = 0;
+    right_heading_stable_ = wall_direction_window_.estimate(now, estimate);
+    right_heading_tracking_ = true;
+    return;
+  }
   const double difference = std::atan2(
     std::sin(world_angle - right_heading_anchor_), std::cos(world_angle - right_heading_anchor_));
   const auto receipt = std::chrono::steady_clock::now();

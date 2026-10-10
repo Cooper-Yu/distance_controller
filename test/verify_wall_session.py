@@ -42,10 +42,11 @@ def receive(msg):
 
 sub = node.create_subscription(Twist, '/cmd_vel', receive, 10)
 last_scan = 0.0
+scan_number = 0
 
 
 def tick(previous, scan_enabled=True, front=0.55):
-    global last_scan
+    global last_scan, scan_number
     rclpy.spin_once(node, timeout_sec=0.008)
     now = time.monotonic()
     dt = min(now - previous, 0.03)
@@ -69,9 +70,11 @@ def tick(previous, scan_enabled=True, front=0.55):
         scan.angle_min, scan.angle_increment, scan.angle_max = -math.pi, math.pi / 360, math.pi
         scan.range_min, scan.range_max = 0.15, 40.0
         x, y = pose[0] + 0.02 * c, pose[1] + 0.02 * s
+        scan_number += 1
+        noise = float(os.getenv('WALL_HEADING_NOISE', '0')) * (1 if scan_number % 2 else -1)
         values = []
         for i in range(721):
-            a = scan.angle_min + i * scan.angle_increment + pose[2] + math.pi
+            a = scan.angle_min + i * scan.angle_increment + pose[2] + math.pi + noise
             dx, dy = math.cos(a), math.sin(a)
             candidates = []
             if abs(dx) > 1e-8:
@@ -97,7 +100,7 @@ def row(name, kind, value, follow='none', stop='distance', offset=0.0, bound=0.7
 
 
 def run(name, rows, commands, prepare=False, stale=False, front=0.55):
-    pose[:] = [0.0, 0.0, 0.0]
+    pose[:] = [0.0, 0.0, float(os.getenv('WALL_START_YAW', '0'))]
     velocity[:] = [0.0, 0.0, 0.0]
     directory = OUT / name
     directory.mkdir()

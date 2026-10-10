@@ -26,3 +26,31 @@ TEST(RobustWall, RejectShortCluster)
   for (int i = 0; i < 40; ++i) points.emplace_back(i * .001, .3);
   EXPECT_TRUE(distance_controller::dominant_wall(points, .18).empty());
 }
+
+#include "distance_controller/wall_heading_window.hpp"
+
+TEST(WallWindow, NoiseAcrossPiAndExpiry)
+{
+  distance_controller::WallHeadingWindow window;
+  for (int i = 0; i < 12; ++i) {
+    const double a = 3.14 + (i % 2 ? .013 : -.013);
+    window.add(i * .08, std::atan2(std::sin(a), std::cos(a)));
+  }
+  double angle = 0;
+  ASSERT_TRUE(window.estimate(.9, angle));
+  EXPECT_NEAR(angle, 3.14, .001);
+  EXPECT_FALSE(window.estimate(1.3, angle));
+  window.clear();
+  EXPECT_FALSE(window.estimate(1.3, angle));
+}
+
+TEST(WallWindow, RejectUnstableAndTooFew)
+{
+  distance_controller::WallHeadingWindow window;
+  double angle = 0;
+  for (int i = 0; i < 7; ++i) window.add(i * .1, .1);
+  EXPECT_FALSE(window.estimate(.65, angle));
+  window.clear();
+  for (int i = 0; i < 12; ++i) window.add(i * .08, i % 2 ? .1 : -.1);
+  EXPECT_FALSE(window.estimate(.9, angle));
+}

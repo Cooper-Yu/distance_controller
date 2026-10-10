@@ -98,6 +98,7 @@ bool DistanceController::handle_initial_alignment(const rclcpp::Time & current_t
       right_heading_stable_ ? "true" : "false", right_wall_angle_ * 180.0 / 3.141592653589793,
       right_wall_rms_, right_wall_span_);
   }
+  if (robust_wall_heading_) return handle_frozen_alignment(current_time);
   if (!right_heading_valid_ || !right_heading_stable_) {
     alignment_settling_ = false;
     publish_stop();

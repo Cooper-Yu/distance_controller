@@ -23,6 +23,7 @@ add_executable(distance_controller_node
   src/distance_controller.cpp
   src/initial_centering.cpp
   src/right_wall_heading.cpp
+  src/frozen_wall_alignment.cpp
   src/route.cpp
   src/route_execution.cpp
   src/preparation_guard.cpp
