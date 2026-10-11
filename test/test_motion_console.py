@@ -94,6 +94,24 @@ class MotionConsoleTest(unittest.TestCase):
         self.assertIsNone(runner.velocity_pub)
         self.assertEqual(commands, [(0.0, 0.0, 0.0)])
 
+    def test_shared_pid_for_move_turn_and_disabled_heading(self):
+        from motion_model import HeadingPid
+
+        start, actual = Pose(0, 0, 0), Pose(0, 0, 0.02)
+        pid = HeadingPid()
+        move, _ = feedback(start, actual, Motion('move', x=0.02), 0.12, 0.6, pid, 0.05, 0.04)
+        turn, _ = feedback(
+            start, actual, Motion('turn', angle=0), 0.12, 0.6, HeadingPid(), 0.05, 0.04
+        )
+        self.assertAlmostEqual(move[2], turn[2])
+        self.assertAlmostEqual(turn[2], -0.036 - 0.00003 - 0.014)
+        self.assertAlmostEqual(math.hypot(*move[:2]), 0.03)
+        disabled, _ = feedback(
+            start, actual, Motion('move', x=0.02, heading=False), 0.12, 0.6, pid, 0.05, 0.04
+        )
+        self.assertEqual(disabled[2], 0)
+        self.assertEqual(pid.integral, 0)
+
     def test_book_persistence_and_delta(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'points.json'

@@ -122,14 +122,42 @@ def target_pose(start, motion):
     )
 
 
-def feedback(start, actual, motion, speed, turn_speed):
+TRANSLATION_KP = 1.5
+
+
+class HeadingPid:
+    """Task5 angular gains, signed measured-rate damping and conditional integration."""
+
+    def __init__(self):
+        self.integral = 0.0
+
+    def reset(self):
+        self.integral = 0.0
+
+    def update(self, error, rate, dt, limit):
+        if not all(math.isfinite(v) for v in (error, rate, dt, limit)) or not 0 < dt <= 0.2:
+            self.reset()
+            raise RuntimeError('Invalid PID timing or feedback')
+        candidate = max(-0.5, min(0.5, self.integral + error * dt))
+        requested = 1.8 * error + 0.03 * candidate - 0.35 * rate
+        if abs(requested) <= limit or error * requested < 0:
+            self.integral = candidate
+        return max(-limit, min(limit, 1.8 * error + 0.03 * self.integral - 0.35 * rate))
+
+
+def feedback(start, actual, motion, speed, turn_speed, pid=None, dt=0.05, yaw_rate=0.0):
     """Track a line in frozen start axes; lateral-off checks along-track arrival only.
 
     Heading-off disables angular correction, not the transformation to the current
     body frame. Turns retain signed continuous yaw, including turns over 180 deg.
     """
     yaw_error = start.yaw + motion.angle - actual.yaw
-    wz = max(-turn_speed, min(turn_speed, 1.5 * yaw_error))
+    pid = pid if pid is not None else HeadingPid()
+    if motion.kind == 'turn' or motion.heading:
+        wz = pid.update(yaw_error, yaw_rate, dt, turn_speed)
+    else:
+        pid.reset()
+        wz = 0.0
     if motion.kind == 'turn':
         if math.hypot(actual.x - start.x, actual.y - start.y) > 0.04:
             raise RuntimeError('Turn center drift exceeds 4 cm')
@@ -139,8 +167,8 @@ def feedback(start, actual, motion, speed, turn_speed):
     delta = local_delta(start, actual)
     along = delta['x_m'] * ux + delta['y_m'] * uy
     cross = -delta['x_m'] * uy + delta['y_m'] * ux
-    forward = 0.8 * (length - along)
-    sideways = -1.2 * cross if motion.lateral else 0.0
+    forward = TRANSLATION_KP * (length - along)
+    sideways = -TRANSLATION_KP * cross if motion.lateral else 0.0
     vx, vy = ux * forward - uy * sideways, uy * forward + ux * sideways
     scale = min(1.0, speed / max(math.hypot(vx, vy), 1e-12))
     angle = start.yaw - actual.yaw

@@ -300,7 +300,9 @@ the requested cruise speed is reachable; interpolation spacing stays at most
 error below 5 mm, heading error below 0.01 rad and a 1 s stopped hold.
 These are odometry acceptance criteria, not guaranteed physical accuracy.
 
-### Task5 gains for path P02
-Path translation uses Kp=1.5, Ki=Kd=0. Heading uses Kp=1.8, Ki=0.03, Kd=0.35 with signed odom angular velocity damping and conditional integration bounded to +/-0.5. Path acceleration limits are 0.4 m/s^2 and 0.6 rad/s^2. Start at initialized P01 with `--speed 0.08` for 8 cm/s; the default remains 0.04. Angular speed remains the console `--turn-speed` cap (default 0.10 rad/s). Ordinary move/turn commands retain their existing controller. Endpoint tolerance and stopped hold are unchanged. Gains match Task5, but the path tracker and vector speed limits are not the complete Task5 controller.
+### Task5 gains for all motion_console commands
+Path translation uses Kp=1.5, Ki=Kd=0. Heading uses Kp=1.8, Ki=0.03, Kd=0.35 with signed odom angular velocity damping and conditional integration bounded to +/-0.5. Path acceleration limits are 0.4 m/s^2 and 0.6 rad/s^2. Start at initialized P01 with `--speed 0.08` for 8 cm/s; the default remains 0.04. Angular speed remains the console `--turn-speed` cap (default 0.10 rad/s). Ordinary move/turn commands now share the Task5 translation gain and heading PID. Endpoint tolerance and stopped hold are unchanged. Gains match Task5, but the path tracker and vector speed limits are not the complete Task5 controller.
 
 Explicit speed selection: use --speed 0.12 --turn-speed 0.6 for 12 cm/s translation and 0.6 rad/s angular cap. Accepted CLI ranges are .01-.12 m/s and .02-.60 rad/s; defaults remain .04/.10. These are caps, not constant commanded speeds. The angular cap also applies to path heading correction. No gain or endpoint changes accompany this limit expansion.
+
+All console move, turn and path commands share translation Kp=1.5 and HeadingPid (1.8/.03/.35), with .4/.6 linear/angular acceleration limits. Each command starts with fresh integral state; settling clears integral. Heading-off resets/disables angular PID; lateral-off disables cross-track correction. Signed multi-revolution turns, fixed P01 path reference and existing acceptance/stop checks are preserved. Legacy action_session/initialization nodes are outside this console change.

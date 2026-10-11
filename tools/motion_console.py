@@ -14,7 +14,7 @@ import threading
 import time
 import uuid
 
-from motion_model import Motion, feedback, local_delta, parse_batch, target_pose
+from motion_model import HeadingPid, Motion, feedback, local_delta, parse_batch, target_pose
 from odom_path import limited_velocity
 from teaching_path import PathTracker, load_p02, path_ready
 from wall_runtime import WallRunner
@@ -211,6 +211,7 @@ class Console:
         deadline, previous = time.monotonic() + budget, time.monotonic()
         command, held, logged = (0.0, 0.0, 0.0), None, 0.0
         tracker = PathTracker(start, motion.points) if motion.kind == 'path' else None
+        heading_pid = HeadingPid()
         while time.monotonic() < deadline:
             r.pump()
             self.cancel_input()
@@ -224,15 +225,21 @@ class Console:
             requested, ready = (
                 tracker.feedback(actual, r.max_speed, self.turn_speed, dt, r.body_velocity[2])
                 if tracker
-                else feedback(start, actual, motion, r.max_speed, self.turn_speed)
+                else feedback(
+                    start,
+                    actual,
+                    motion,
+                    r.max_speed,
+                    self.turn_speed,
+                    heading_pid,
+                    dt,
+                    r.body_velocity[2],
+                )
             )
-            command = (
-                limited_velocity(command, requested, dt, linear=0.4, angular=0.6)
-                if tracker
-                else limited_velocity(command, requested, dt)
-            )
+            command = limited_velocity(command, requested, dt, linear=0.4, angular=0.6)
             previous = now
             if ready:
+                heading_pid.reset()
                 command = (0.0, 0.0, 0.0)
             r.send(command)
             if ready and r.latest[2] < 0.005 and r.latest[3] < 0.015:

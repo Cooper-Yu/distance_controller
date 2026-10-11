@@ -72,7 +72,7 @@ class TeachingPathTests(unittest.TestCase):
         self.assertAlmostEqual(command[2], -1.8 * 0.02 - 0.03 * 0.001 - 0.35 * 0.04)
         for _ in range(100):
             tracker.feedback(Pose(0.3, 0, 0.5), 0.08, 0.1, 0.05, 0)
-        self.assertAlmostEqual(tracker.heading_integral, -0.001)
+        self.assertAlmostEqual(tracker.heading_pid.integral, -0.001)
         with self.assertRaises(RuntimeError):
             tracker.feedback(Pose(0.3, 0, 0), 0.08, 0.1, 0.3, 0)
 
