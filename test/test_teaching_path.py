@@ -98,7 +98,7 @@ class TeachingPathTests(unittest.TestCase):
     def test_forward_and_right_extensions_hold_rotated_heading(self):
         p3 = (1.773003723416002, 0.017908841631131794)
         p4 = (1.781439293373129, -0.5239300031759923)
-        p5 = (1.3821754778962125, -0.5250984301851296)
+        p5 = (1.3921754778962125, -0.5250984301851296)
         origin = Pose(3, 7, 2.1)
         for a, b, count, direction in ((p3, p4, 12, 'forward'), (p4, p5, 9, 'right')):
             motion = fixed_segment(a, b, -math.pi / 2)

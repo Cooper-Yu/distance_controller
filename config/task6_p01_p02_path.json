@@ -32,8 +32,8 @@
     "source": "User confirmed P04_candidate, 2026-10-11"
   },
   "p05_candidate": {
-    "x": 1.3821754778962125,
+    "x": 1.3921754778962125,
     "y": -0.5250984301851296,
-    "source": "User P05_candidate, 2026-10-11; right clearance approx .028m; physical repeatability unverified"
+    "source": "User requested 0.01m less right travel, 2026-10-11; original P01 x=1.3821754778962125; adjusted clearance unverified"
   }
 }

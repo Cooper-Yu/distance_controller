@@ -317,7 +317,7 @@ P03 stop, right turn to P01 yaw minus 90 degrees, then P04 stop and optionally
 P05 stop. These commands do not resume at the current waypoint.
 
 Fixed P01 targets (meters): P04=(1.781439293373129,-0.5239300031759923),
-P05=(1.3821754778962125,-0.5250984301851296). P03-P04 has 12 points;
+P05=(1.3921754778962125,-0.5250984301851296). P03-P04 has 12 points;
 P04-P05 has 9 points, including endpoints; spacing remains <=5cm. Both legs
 hold P01 yaw minus 90 degrees. The P04-P05 leg is a right strafe, not a turn
 followed by forward travel. Geometry remains in P01 axes; body commands rotate
@@ -329,7 +329,11 @@ stale odom, failed recording or arrival prevents later legs; there is no partial
 resume. Endpoints use 5mm planar / .01rad heading acceptance and the 1s stopped
 hold. The existing speed selection .12m/s and .6rad/s and unified PID remain.
 
-P05 comes from the user's candidate sample, with right body gap about .0282m;
+The original P05 sample had right body gap about .0282m; a route replay
+measured only .0077-.0105m before the 1cm endpoint adjustment;
 this is an experimental endpoint, not demonstrated collision margin. The new
 endpoint chords are not a replay of the sampled manual trajectory. Hardware
 repeatability and swept clearances remain unverified; laser is observation-only.
+2026-10-11 trial adjustment: reduce P04-P05 right travel by 0.01 m (about
+0.39926 to 0.38926 m along P01 x). P04, P05 y, heading, PID and speed limits
+are unchanged. The new endpoint has not yet been verified on the robot.
