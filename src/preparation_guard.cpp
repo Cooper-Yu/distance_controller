@@ -169,6 +169,8 @@ void DistanceController::begin_odom_recovery(const std::chrono::steady_clock::ti
 {
   if (odom_recovering_ || fault_latched_) return;
   odom_recovering_ = true;
+  precision_collecting_ = precision_stationary_ = false;
+  precision_samples_.clear();
   odom_recovery_stable_ = false;
   recovery_start_ = receipt;
   recovery_anchor_ = last_odom_;

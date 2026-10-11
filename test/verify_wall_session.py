@@ -86,6 +86,23 @@ def inject_turn_obstacle(values, now):
             values[0:3] = [0.165] * 3
 
 
+def inject_start_noise(values, scan):
+    """Perturb only stationary verification scans, after the controller announces its hold."""
+    mode = os.getenv('PRECISE_NOISE')
+    if not mode or not hasattr(node, 'test_log'):
+        return
+    log = node.test_log.read_text()
+    if 'START_VERIFY: stopped hold' not in log:
+        return
+    offset = 0.03 if mode == 'spikes' and scan_number % 7 == 0 else 0.0
+    if mode == 'unstable':
+        offset = 0.008 if scan_number % 2 else -0.008
+    for i in range(len(values)):
+        bearing = math.remainder(scan.angle_min + i * scan.angle_increment + math.pi, 2 * math.pi)
+        if abs(bearing + math.pi / 2) < 0.7 and math.isfinite(values[i]):
+            values[i] += offset / (-math.sin(bearing))
+
+
 def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - one fixture sensor tick with explicit fault injections
     global last_scan, scan_number, bad_scan_start
     rclpy.spin_once(node, timeout_sec=0.008)
@@ -167,6 +184,7 @@ def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - o
                     or (failed == 'rear' and abs(abs(bearing) - math.pi) < 0.3)
                 ):
                     values[i] = float('inf')
+        inject_start_noise(values, scan)
         scan.ranges = values
         scan_pub.publish(scan)
         last_scan = now
@@ -193,6 +211,7 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
     velocity[:] = [0.0, 0.0, 0.0]
     directory = OUT / name
     directory.mkdir()
+    node.test_log = directory / 'runtime.log'
     config = directory / 'route.json'
     odom_trial = os.getenv('WALL_CASE', '').startswith('odom_trial')
     config.write_text(json.dumps(rows if odom_trial else {'actions': rows}))
@@ -203,6 +222,7 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
                 str(ROOT / ('tools/odom_trial.py' if odom_trial else 'tools/action_session.py')),
                 *(['--laser-log-only', '--alignment-wall', 'right'] if odom_trial else []),
                 *(['--until', until] if until else []),
+                *(['--precise-start'] if os.getenv('PRECISE_START') else []),
                 *(
                     ['--positioning-wall', 'right', '--right-target-distance', '0.26']
                     if os.getenv('WALL_CASE') == 'odom_trial_right_only'
@@ -232,6 +252,11 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
             if proc.poll() is None:
                 os.killpg(proc.pid, signal.SIGINT)
                 proc.wait(timeout=10)
+        if os.getenv('PRECISE_NOISE') == 'unstable':
+            text = node.test_log.read_text()
+            assert proc.returncode == 2 and 'START_VERIFY_TIMEOUT' in text, text[-4000:]
+            assert 'START_VERIFIED:' not in text and sum(abs(v) for v in velocity) < 1e-6
+            return [], text
         if os.getenv('WALL_CASE') == 'odom_trial_right_only' and os.getenv('PREP_FAIL'):
             text = (directory / 'runtime.log').read_text()
             assert proc.returncode == 2 and 'SCAN_INVALID' in text, text[-3500:]
@@ -256,9 +281,18 @@ try:
     if os.getenv('WALL_CASE') == 'odom_trial_right_only':
         data = json.loads((ROOT / 'config/task6_odom_p01_p05.json').read_text())
         events, log = run('right_only', data, 'quit\n'.replace('\\n', '\n'), prepare=True)
-        if os.getenv('PREP_FAIL'):
+        if os.getenv('PRECISE_NOISE') == 'unstable':
+            print('PASS unstable batch stops without handoff', OUT, flush=True)
+        elif os.getenv('PREP_FAIL'):
             print('PASS required wall loss stops:', os.getenv('PREP_FAIL'), OUT, flush=True)
         else:
+            if os.getenv('PRECISE_START'):
+                assert 'START_VERIFIED' in log and 'retained=' in log, log[-4000:]
+                if os.getenv('PRECISE_NOISE') == 'spikes':
+                    assert (
+                        'retained=13/15 stable=true' in log or 'retained=12/15 stable=true' in log
+                    ), log[-4000:]
+                assert abs(pose[1] + 0.24) <= 0.0055 and abs(pose[0] + 0.02) <= 0.0055, pose
             assert 'position_basis=right' in log and 'left_valid=false' in log
             assert abs(pose[1] + 0.24) < 0.015 and abs(pose[0] + 0.02) < 0.015, pose
             assert any(e['event'] == 'origin' for e in events)

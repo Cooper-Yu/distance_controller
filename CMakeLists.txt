@@ -22,6 +22,7 @@ add_executable(distance_controller_node
   src/main.cpp
   src/distance_controller.cpp
   src/initial_centering.cpp
+  src/precise_start.cpp
   src/right_wall_heading.cpp
   src/frozen_wall_alignment.cpp
   src/route.cpp
@@ -67,6 +68,8 @@ if(BUILD_TESTING)
   target_include_directories(test_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   ament_add_gtest(test_robust_wall test/test_robust_wall.cpp)
   target_include_directories(test_robust_wall PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  ament_add_gtest(test_start_verification test/test_start_verification.cpp)
+  target_include_directories(test_start_verification PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files

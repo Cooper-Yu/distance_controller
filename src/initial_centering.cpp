@@ -35,6 +35,9 @@ void DistanceController::configure_centering()
     throw std::invalid_argument("positioning_wall must be center or right");
   if (positioning_wall_ == "right" && alignment_wall_ != "right")
     throw std::invalid_argument("right positioning requires right heading alignment");
+  precise_start_ = declare_parameter<bool>("precise_start", false);
+  if (precise_start_ && (positioning_wall_ != "right" || !robust_wall_heading_))
+    throw std::invalid_argument("precise_start requires right positioning and robust heading");
   right_target_distance_ = positive("right_target_distance", right_target_distance_);
   wall_heading_half_angle_ = positive("wall_heading_half_angle", wall_heading_half_angle_);
   wall_heading_min_span_ = positive("wall_heading_min_span", wall_heading_min_span_);
@@ -45,6 +48,11 @@ void DistanceController::configure_centering()
   centering_gain_ = positive("centering_gain", centering_gain_);
   centering_max_speed_ = positive("centering_max_speed", centering_max_speed_);
   centering_tolerance_ = positive("centering_tolerance", centering_tolerance_);
+  if (precise_start_) {
+    centering_tolerance_ = std::min(centering_tolerance_, 0.005);
+    heading_tolerance_ = std::min(heading_tolerance_, 0.008726646);
+    centering_max_speed_ = std::min(centering_max_speed_, 0.02);
+  }
   rear_target_distance_ = positive("rear_target_distance", rear_target_distance_);
   rear_min_distance_ = positive("rear_min_distance", rear_min_distance_);
   rear_window_half_angle_ = positive("rear_window_half_angle", rear_window_half_angle_);
@@ -132,6 +140,7 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
 bool DistanceController::handle_initial_positioning(const rclcpp::Time & current_time)
 {
   if (!heading_control_enabled_ || centering_complete_) return false;
+  if (precise_start_ && precision_collecting_) return verify_precise_start();
   const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
   const double yaw_error = heading_error(yaw);
   const double error = positioning_error();
@@ -147,7 +156,9 @@ bool DistanceController::handle_initial_positioning(const rclcpp::Time & current
     std::abs(yaw_error) > heading_tolerance_) {
     centering_settling_ = false;
     geometry_msgs::msg::Twist cmd;
-    const double cap = std::min(centering_max_speed_, max_speed_);
+    double cap = std::min(centering_max_speed_, max_speed_);
+    if (precise_start_ && std::max(std::abs(error), std::abs(rear_error)) < .02)
+      cap = std::min(cap, .008);
     cmd.linear.x = compute_rear_position_velocity();
     cmd.linear.y = compute_centering_velocity();
     const double speed = std::hypot(cmd.linear.x, cmd.linear.y);
@@ -159,6 +170,7 @@ bool DistanceController::handle_initial_positioning(const rclcpp::Time & current
     cmd_pub_->publish(cmd);
     return true;
   }
+  if (precise_start_) return verify_precise_start();
   publish_stop();
   if (
     std::hypot(velocity.linear.x, velocity.linear.y) >= 0.01 ||
@@ -276,7 +288,7 @@ void DistanceController::measure_wall_windows(
     const bool valid_range =
       std::isfinite(range) && range >= scan.range_min && range <= scan.range_max;
     if (
-      !initial_alignment_complete_ &&
+      (!initial_alignment_complete_ || (precise_start_ && !centering_complete_)) &&
       std::abs(
         body_angle - (alignment_wall_ == "left" ? 1.5707963267948966 : -1.5707963267948966)) <=
         wall_heading_half_angle_) {
@@ -311,7 +323,8 @@ void DistanceController::measure_wall_windows(
       (is_left ? left : right).push_back(std::abs(y));
     }
   }
-  if (!initial_alignment_complete_) estimate_right_heading(wall_points, wall_samples);
+  if (!initial_alignment_complete_ || (precise_start_ && !centering_complete_))
+    estimate_right_heading(wall_points, wall_samples);
   wall_observation_time_ = std::chrono::steady_clock::now();
   front_wall_valid_ = estimate_front(front, front_samples, front_wall_);
   left_wall_valid_ = estimate_side(left, left_samples, left_wall_);

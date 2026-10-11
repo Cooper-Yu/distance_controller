@@ -166,6 +166,7 @@ def arguments():
     parser.add_argument('--until', help='After initialization execute in order to this waypoint')
     parser.add_argument('--start', choices=['prepare', 'current'])
     parser.add_argument('--alignment-wall', choices=['left', 'right'], default='left')
+    parser.add_argument('--precise-start', action='store_true')
     parser.add_argument('--positioning-wall', choices=['center', 'right'], default='center')
     parser.add_argument(
         '--right-target-distance',
@@ -187,6 +188,8 @@ def arguments():
         args.alignment_wall != 'right' or args.start != 'prepare'
     ):
         parser.error('right positioning requires --start prepare --alignment-wall right')
+    if args.precise_start and (args.start != 'prepare' or args.positioning_wall != 'right'):
+        parser.error('--precise-start requires --start prepare --positioning-wall right')
     return args, parser
 
 
@@ -220,6 +223,8 @@ def main():
             f'positioning_wall:={args.positioning_wall}',
             '-p',
             f'right_target_distance:={args.right_target_distance}',
+            '-p',
+            f'precise_start:={str(args.precise_start).lower()}',
         ]
         old = signal.signal(signal.SIGINT, lambda *_: r.request_cancel())
         path = Path(f'odom_trial_{time.time_ns()}.jsonl')

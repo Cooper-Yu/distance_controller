@@ -166,3 +166,50 @@ WALL_CASE=odom_trial_prepare python3 test/verify_wall_session.py
 ```
 These checks verify required-wall selection, correction direction, stopped
 handoff and fault stops; hardware placement accuracy remains unverified.
+
+## Precise P01 preparation (experimental measurement acceptance)
+
+Add `--precise-start` to the right-wall preparation command:
+
+```bash
+ros2 run distance_controller odom_trial \
+  --start prepare --alignment-wall right \
+  --positioning-wall right --right-target-distance 0.26 \
+  --precise-start --laser-log-only
+```
+
+This opts into 5 mm distance and 0.5 degree heading tolerances (or tighter C++
+parameter overrides), caps positioning at 0.02 m/s and at 0.008 m/s within 2 cm
+of both distance targets. It does not alter the default route or legacy mode.
+
+On entering tolerance, command zero; require measured translation below 0.003 m/s,
+rotation below 0.01 rad/s, and a 0.5 s hold. Then collect 15 distinct post-hold
+scans. More than 3 mm odom displacement or 0.005 rad heading drift during this
+window discards the evidence and starts a new hold. Existing stale-data, required
+right/rear validity, preparation travel and overall time limits remain active.
+
+Each frame contains base-origin right/rear distances and a fresh right-wall angle.
+Joint samples more than 2 cm or 2 degrees from the batch medians are discarded;
+invalid heading fits count against consensus. Require at least 12/15 retained,
+right/rear retained ranges each at most 1 cm, and angle range at most 2 degrees.
+Only then compare the retained medians with 0.26/0.28 m and zero wall angle.
+Stability and target accuracy are separate checks. Sensor bias or a consistently
+wrong wall cannot be detected by these statistics alone.
+
+An unstable batch keeps zero velocity while another batch is collected. Each
+verification attempt has a 5 s budget; at most three stable-but-off-target
+refinements are allowed. Heading refinement reacquires the wall direction.
+`START_VERIFY_TIMEOUT` or `START_REFINEMENT_LIMIT` fails without recording P01;
+no tolerance is widened automatically. Valid completion prints `START_VERIFIED`
+and the usual `preparation complete` handoff. `START_VERIFY` reports medians,
+spreads and retained counts; the legacy `Centered A` distances are the latest
+single scan and can differ from the accepted median.
+
+This is initialization-only. `motion_console record` has not yet been converted
+to this batch policy. The tool still captures its own current stopped P01 after
+handoff. Save the preparation terminal output as the multi-frame evidence.
+These are measurement acceptance targets, not a claim of 5 mm physical accuracy.
+
+Synthetic checks additionally support `PRECISE_START=1`, `PRECISE_NOISE=spikes`
+or `PRECISE_NOISE=unstable` with `WALL_CASE=odom_trial_right_only` in the existing
+fixture. No real hardware is driven by these localhost-domain tests.

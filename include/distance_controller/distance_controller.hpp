@@ -12,6 +12,7 @@
 #include "distance_controller/route.hpp"
 #include "distance_controller/route_history.hpp"
 #include "distance_controller/srv/execute_step.hpp"
+#include "distance_controller/start_verification.hpp"
 #include "distance_controller/wall_heading_window.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -349,6 +350,19 @@ private:
   std::string base_frame_{"base_link"};
   /// True after centered pose and standstill acceptance; disables initial scan gating thereafter.
   bool centering_complete_{false};
+  /// Optional right/rear precision mode; separate from legacy centering.
+  bool precise_start_{false};
+  /// Verify only after a stopped hold, with unique post-hold scans and bounded retries.
+  bool verify_precise_start();
+  void finish_precise_batch(const distance_controller::StartSummary & summary);
+  bool precision_collecting_{false};
+  bool precision_stationary_{false};
+  unsigned precision_refinements_{0};
+  int64_t precision_stamp_{0};
+  std::chrono::steady_clock::time_point precision_begin_{}, precision_hold_{};
+  double precision_x_{0}, precision_y_{0}, precision_yaw_{0};
+  std::vector<distance_controller::StartSample> precision_samples_;
+
   /// True only when the latest scan passed transform, timestamp and window checks.
   bool scan_valid_{false};
   /// True after at least one valid scan; subsequent loss during preparation latches stop.
