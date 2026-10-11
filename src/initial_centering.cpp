@@ -55,7 +55,13 @@ void DistanceController::configure_centering()
   }
   rear_target_distance_ = positive("rear_target_distance", rear_target_distance_);
   rear_min_distance_ = positive("rear_min_distance", rear_min_distance_);
-  rear_window_half_angle_ = positive("rear_window_half_angle", rear_window_half_angle_);
+  // The wider precise-start window reduces rear median switching in the P01 scan.
+  // Keep legacy defaults and explicit ROS parameter overrides.
+  const double rear_window_default = precise_start_ ? 0.17453292519943295 : rear_window_half_angle_;
+  rear_window_half_angle_ = positive("rear_window_half_angle", rear_window_default);
+  RCLCPP_INFO(
+    get_logger(), "Preparation rear window: half_angle=%.3f deg precise_start=%s",
+    rear_window_half_angle_ * 180.0 / 3.141592653589793, precise_start_ ? "true" : "false");
   side_window_half_angle_ = positive("side_window_half_angle", side_window_half_angle_);
   side_min_distance_ = positive("side_min_distance", side_min_distance_);
   side_max_distance_ = positive("side_max_distance", side_max_distance_);

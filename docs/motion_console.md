@@ -182,6 +182,16 @@ This opts into 5 mm distance and 0.5 degree heading tolerances (or tighter C++
 parameter overrides), caps positioning at 0.02 m/s and at 0.008 m/s within 2 cm
 of both distance targets. It does not alter the default route or legacy mode.
 
+Precise preparation defaults to a rear sampling half-angle of 10 degrees; legacy
+preparation retains 5 degrees. An explicit C++ ROS parameter
+`rear_window_half_angle` (radians) overrides either default. The startup log prints
+the effective window. This changes the estimator, not the acceptance tolerances.
+The stationary P01 bag showed a rear median range of 14.95 mm at 5 degrees and
+5.08 mm at 10 degrees, with a 3.59 mm median shift. The sensor transform was
+confirmed as translation (0.020, 0, 0.173) m and yaw pi. Reduced variation is
+offline evidence only; physical accuracy and repeated initialization remain
+to be validated on the robot.
+
 On entering tolerance, command zero; require measured translation below 0.003 m/s,
 rotation below 0.01 rad/s, and a 0.5 s hold. Then collect 15 distinct post-hold
 scans. More than 3 mm odom displacement or 0.005 rad heading drift during this
