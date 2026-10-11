@@ -23,8 +23,8 @@
   ],
   "p03_candidate": {
     "x": 1.773003723416002,
-    "y": -0.0026000285269909117,
-    "source": "2026-10-12 user approved removing P02-P03 left offset; y matches P02; original sample y=0.017908841631131794; hardware verification pending"
+    "y": -0.012600028526990912,
+    "source": "2026-10-12 user approved P03 0.01m right of P02 after removing original left offset; original sample y=0.017908841631131794; revised hardware verification pending"
   },
   "p04": {
     "x": 1.781439293373129,
