@@ -308,7 +308,7 @@ Explicit speed selection: use --speed 0.12 --turn-speed 0.6 for 12 cm/s translat
 All console move, turn and path commands share translation Kp=1.5 and HeadingPid (1.8/.03/.35), with .4/.6 linear/angular acceleration limits. Each command starts with fresh integral state; settling clears integral. Heading-off resets/disables angular PID; lateral-off disables cross-track correction. Signed multi-revolution turns, fixed P01 path reference and existing acceptance/stop checks are preserved. Legacy action_session/initialization nodes are outside this console change.
 
 ### P01 to P03 and right turn
-Use path_plan P03_turn for a read-only preview; path P03_turn runs P01-P02, stops and records P02, follows 20 interpolated P02-P03 points (at most 5 cm apart), stops and records P03, then turns to fixed P01 heading minus 90 degrees and records P03_after_turn. P03=(1.773003723416002,0.017908841631131794) in P01 axes. This is endpoint-based straight interpolation, not reconstruction of the manual trajectory. All targets use the same session P01; arrival error is not added to the second leg. Cancellation/failure aborts the remaining route; no automatic restart/resume from partial motion. A fresh initialized P01 session is required for another complete trial. Laser remains observation-only; this interpolated route has not yet been verified on hardware.
+Use path_plan P03_turn for a read-only preview; path P03_turn runs P01-P02, stops and records P02, follows 20 interpolated P02-P03 points (at most 5 cm apart), stops and records P03, then turns to fixed P01 heading minus 90 degrees and records P03_after_turn. P03=(1.773003723416002,-0.0026000285269909117) in P01 axes. This is endpoint-based straight interpolation, not reconstruction of the manual trajectory. All targets use the same session P01; arrival error is not added to the second leg. Cancellation/failure aborts the remaining route; no automatic restart/resume from partial motion. A fresh initialized P01 session is required for another complete trial. Laser remains observation-only; this interpolated route has not yet been verified on hardware.
 
 ### P01 to P04 / P05 trial extensions
 `path_plan P04` / `path_plan P05` preview without motion. `path P04` / `path P05`
@@ -337,3 +337,8 @@ repeatability and swept clearances remain unverified; laser is observation-only.
 2026-10-11 trial adjustment: reduce P04-P05 right travel by 0.01 m (about
 0.39926 to 0.38926 m along P01 x). P04, P05 y, heading, PID and speed limits
 are unchanged. The new endpoint has not yet been verified on the robot.
+
+2026-10-12: P03 y now equals P02 y, removing the 0.02050887m left
+component from P02-P03. P03 x is unchanged. The P03-P04 chord automatically
+starts at the revised P03; P04/P05 endpoints remain unchanged. Reinitialize
+P01 and verify P03 clearance before accepting the revised route.

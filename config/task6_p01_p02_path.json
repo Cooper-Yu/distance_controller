@@ -23,8 +23,8 @@
   ],
   "p03_candidate": {
     "x": 1.773003723416002,
-    "y": 0.017908841631131794,
-    "source": "P03_candidate recorded by user; endpoint-only straight interpolation, not a measured trajectory"
+    "y": -0.0026000285269909117,
+    "source": "2026-10-12 user approved removing P02-P03 left offset; y matches P02; original sample y=0.017908841631131794; hardware verification pending"
   },
   "p04": {
     "x": 1.781439293373129,

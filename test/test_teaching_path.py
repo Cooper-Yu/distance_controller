@@ -79,7 +79,7 @@ class TeachingPathTests(unittest.TestCase):
     def test_p03_fixed_segment_interpolation(self):
         a, b = (
             (0.8402388396167952, -0.0026000285269909117),
-            (1.773003723416002, 0.017908841631131794),
+            (1.773003723416002, -0.0026000285269909117),
         )
         relative = interpolate([(0, 0), (b[0] - a[0], b[1] - a[1])])
         points = tuple((a[0] + x, a[1] + y) for x, y in relative)
@@ -96,7 +96,7 @@ class TeachingPathTests(unittest.TestCase):
         )
 
     def test_forward_and_right_extensions_hold_rotated_heading(self):
-        p3 = (1.773003723416002, 0.017908841631131794)
+        p3 = (1.773003723416002, -0.0026000285269909117)
         p4 = (1.781439293373129, -0.5239300031759923)
         p5 = (1.3921754778962125, -0.5250984301851296)
         origin = Pose(3, 7, 2.1)

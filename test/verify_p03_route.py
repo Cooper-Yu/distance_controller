@@ -24,7 +24,7 @@ def run(mode):
             data = json.loads(f.path.read_text())['points']
             for label, x, y in [
                 ('P02', 0.8402388396167952, -0.0026000285269909117),
-                ('P03', 1.773003723416002, 0.017908841631131794),
+                ('P03', 1.773003723416002, -0.0026000285269909117),
             ]:
                 p = data[label]['relative_to_p01']
                 assert math.hypot(p['x_m'] - x, p['y_m'] - y) < 0.005, p
