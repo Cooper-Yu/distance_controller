@@ -81,3 +81,6 @@ endif()
 ament_package()
 
 install(PROGRAMS tools/odom_trial.py DESTINATION lib/${PROJECT_NAME} RENAME odom_trial)
+
+install(FILES tools/motion_model.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS tools/motion_console.py DESTINATION lib/${PROJECT_NAME} RENAME motion_console)

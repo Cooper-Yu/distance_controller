@@ -638,3 +638,7 @@ target is provisional and independent of the left-follow reference.
 See [wall session endpoint adjustment](docs/wall_session.md#completed-p04-front-clearance-adjustment-2026-10-10).
 
 P01-P05 supervised odom/interpolation trial: [commands and boundaries](docs/odom_trial.md).
+
+## Supervised motion and teaching console
+
+Relative moves, optional heading/cross-track correction, signed turns, laser-only observations, and named point recording: [motion console guide](docs/motion_console.md).

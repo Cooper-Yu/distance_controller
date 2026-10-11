@@ -16,3 +16,7 @@ node_modules/
 /action_session_*.jsonl
 /return_step_*.json
 /laser_observation_*.json
+
+motion_points_*.json
+motion_points_*.jsonl
+motion_points_*.json.tmp

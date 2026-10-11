@@ -107,3 +107,10 @@ The manual fixture also verifies stale required scans and active cancellation: b
 ## History return verification
 
 `test_history.cpp` covers return order, recorded endpoints, repeated names/visit IDs, branches, policy conversion and rejection without consumption. `verify_manual_steps.py` adds return_chain, repeated_visits, waiting_displacement, return_failure, return_laser_conversion, return_replaces_pending and independent_yaml cases. The displacement fault is intentional; the older side-policy fixture now introduces its disturbance during active motion instead of moving an idle robot. These localhost fixtures do not certify physical collision clearance or restart recovery.
+
+## Motion console
+
+`test_motion_console.py` covers parsing, rotated frames, correction flags, turns,
+cancellation and JSON persistence. `verify_motion_console.py` runs the installed
+executable against a synthetic ROS odometry plant on an isolated localhost domain;
+see [usage](../docs/motion_console.md). Physical clearance/accuracy is not tested.
