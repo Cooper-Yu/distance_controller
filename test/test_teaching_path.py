@@ -55,6 +55,17 @@ class TeachingPathTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             tracker.feedback(Pose(0.84, 0.06, 0), 0.04, 0.1)
 
+    def test_requested_cruise_speed_and_unchanged_endpoint(self):
+        points = interpolate([(0.0, 0.0), (0.84, 0.0)])
+        for speed in (0.04, 0.06, 0.08):
+            tracker = PathTracker(Pose(0, 0, 0), points)
+            command, _ = tracker.feedback(Pose(0.3, 0, 0), speed, 0.1)
+            self.assertAlmostEqual(command[0], speed)
+            command, ready = tracker.feedback(Pose(0.83, 0, 0), speed, 0.1)
+            self.assertAlmostEqual(command[0], 0.008)
+            self.assertFalse(ready)
+            self.assertTrue(tracker.feedback(Pose(0.839, 0, 0), speed, 0.1)[1])
+
     def test_reject_unreviewed_paths_and_batch(self):
         for points in [
             [(0, 0), (math.nan, 0)],

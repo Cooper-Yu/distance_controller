@@ -56,7 +56,7 @@ def path_ready(origin, actual, points):
 
 
 class PathTracker:
-    """Monotonic arc progress and 5 cm lookahead; interpolation points are not stops."""
+    """Monotonic arc progress and speed-scaled lookahead; interpolation points are not stops."""
 
     def __init__(self, origin, points):
         self.origin, self.points, self.progress = origin, points, 0.0
@@ -77,8 +77,8 @@ class PathTracker:
         self.progress = max(self.progress, best[1])
         return best[0]
 
-    def ahead(self):
-        distance = min(self.arc[-1], self.progress + 0.05)
+    def ahead(self, lookahead=0.05):
+        distance = min(self.arc[-1], self.progress + lookahead)
         for i in range(len(self.points) - 1):
             if distance <= self.arc[i + 1]:
                 fraction = (distance - self.arc[i]) / (self.arc[i + 1] - self.arc[i])
@@ -89,7 +89,7 @@ class PathTracker:
     def feedback(self, actual, speed, turn_speed):
         p = local_delta(self.origin, actual)
         self.project((p['x_m'], p['y_m']))
-        tx, ty = self.ahead()
+        tx, ty = self.ahead(max(0.05, speed / 0.8))
         vx, vy = 0.8 * (tx - p['x_m']), 0.8 * (ty - p['y_m'])
         scale = min(1.0, speed / max(math.hypot(vx, vy), 1e-12))
         yaw = math.radians(p['yaw_deg'])

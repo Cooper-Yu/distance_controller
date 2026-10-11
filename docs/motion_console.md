@@ -290,3 +290,12 @@ No prior partial batch survives the gap. Existing stage, total-time and travel
 limits remain in force. Persistent loss or old frames yield
 `SCAN_RECOVERY_TIMEOUT`; required-wall invalidity outside recovery still fails.
 Legacy preparation and path execution do not acquire this recovery behavior.
+
+### P01-P02 speed selection
+
+Start a new console at the initialized P01 using `--speed 0.06` for 6 cm/s.
+The default remains 0.04 m/s. Path lookahead is max(0.05 m, speed / 0.8), so
+the requested cruise speed is reachable; interpolation spacing stays at most
+5 cm. The endpoint remains fixed, with proportional deceleration, position
+error below 5 mm, heading error below 0.01 rad and a 1 s stopped hold.
+These are odometry acceptance criteria, not guaranteed physical accuracy.

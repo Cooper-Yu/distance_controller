@@ -42,6 +42,8 @@ class Fixture:
                 'distance_controller',
                 'motion_console',
                 '--laser-log-only',
+                '--speed',
+                os.getenv('MOTION_TEST_SPEED', '0.04'),
                 '--output',
                 str(self.path),
             ],

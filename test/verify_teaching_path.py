@@ -35,6 +35,10 @@ def run(directory, mode):
             assert len([e for e in events if e['event'] == 'completed']) == 1
             running = [e for e in events if e['event'] == 'progress']
             assert all(math.hypot(*e['command'][:2]) > 0.001 for e in running[2:-3])
+            peak = max(math.hypot(*v[:2]) for v in f.commands)
+            speed = float(os.getenv('MOTION_TEST_SPEED', '0.04'))
+            assert 0.95 * speed <= peak <= speed + 1e-6, peak
+            print('Verified peak command speed:', peak)
             count = len(f.commands)
             f.send('path P02')
             f.wait(lambda: 'already recorded' in f.text())
