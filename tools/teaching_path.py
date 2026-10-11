@@ -63,20 +63,56 @@ def load_p03():
     return Motion('path', x=end['x'], y=end['y'], points=points)
 
 
-def path_ready(origin, actual, points):
+def fixed_segment(a, b, heading):
+    """Straight interpolation in fixed P01 axes; heading is independent of travel direction."""
+    distance = math.dist(a, b)
+    relative = interpolate([(0.0, 0.0), (distance, 0.0)])
+    points = tuple(
+        (a[0] + (b[0] - a[0]) * x / distance, a[1] + (b[1] - a[1]) * x / distance)
+        for x, _ in relative
+    )
+    points = (tuple(a), *points[1:-1], tuple(b))
+    return Motion('path', x=b[0], y=b[1], angle=heading, points=points)
+
+
+def load_extensions():
+    """Reviewed P03-P04 forward and P04-P05 right strafe, both holding P01 yaw-90."""
+    from ament_index_python.packages import get_package_share_directory
+
+    data = json.loads(
+        (
+            Path(get_package_share_directory('distance_controller'))
+            / 'config/task6_p01_p02_path.json'
+        ).read_text()
+    )
+    points = [
+        tuple(data[label][axis] for axis in ('x', 'y'))
+        for label in ('p03_candidate', 'p04', 'p05_candidate')
+    ]
+    return tuple(fixed_segment(a, b, -math.pi / 2) for a, b in zip(points, points[1:]))
+
+
+def path_ready(origin, actual, points, heading=0.0):
     """Endpoint and heading acceptance use the fixed P01, not the last interpolation point."""
     p = local_delta(origin, actual)
     return (
         math.hypot(p['x_m'] - points[-1][0], p['y_m'] - points[-1][1]) < 0.005
-        and abs(math.radians(p['yaw_deg'])) < 0.01
+        and abs(
+            math.atan2(
+                math.sin(math.radians(p['yaw_deg']) - heading),
+                math.cos(math.radians(p['yaw_deg']) - heading),
+            )
+        )
+        < 0.01
     )
 
 
 class PathTracker:
     """Monotonic arc progress and speed-scaled lookahead; interpolation points are not stops."""
 
-    def __init__(self, origin, points):
+    def __init__(self, origin, points, heading=0.0):
         self.origin, self.points, self.progress = origin, points, 0.0
+        self.heading = heading
         self.heading_pid = HeadingPid()
         self.arc = [0.0]
         for a, b in zip(points, points[1:]):
@@ -113,9 +149,10 @@ class PathTracker:
         yaw = math.radians(p['yaw_deg'])
         c, s = math.cos(yaw), math.sin(yaw)
         vx, vy = scale * (c * vx + s * vy), scale * (-s * vx + c * vy)
-        if abs(yaw) > 0.08:
+        error = math.atan2(math.sin(self.heading - yaw), math.cos(self.heading - yaw))
+        if abs(error) > 0.08:
             vx = vy = 0.0
-        wz = self.heading_pid.update(-yaw, yaw_rate, dt, turn_speed)
-        if path_ready(self.origin, actual, self.points):
+        wz = self.heading_pid.update(error, yaw_rate, dt, turn_speed)
+        if path_ready(self.origin, actual, self.points, self.heading):
             self.heading_pid.reset()
-        return (vx, vy, wz), path_ready(self.origin, actual, self.points)
+        return (vx, vy, wz), path_ready(self.origin, actual, self.points, self.heading)

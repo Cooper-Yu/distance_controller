@@ -16,13 +16,13 @@ import uuid
 
 from motion_model import HeadingPid, Motion, feedback, local_delta, parse_batch, target_pose
 from odom_path import limited_velocity
-from teaching_path import PathTracker, load_p02, load_p03, path_ready
+from teaching_path import PathTracker, load_extensions, load_p02, load_p03, path_ready
 from wall_runtime import WallRunner
 
 HELP = """move forward|backward|left|right METERS [--heading on|off] [--lateral on|off]
 move xy FORWARD_METERS LEFT_METERS [--heading on|off] [--lateral on|off]
 turn left|right DEGREES
-path_plan [P03_turn] | path P02 | path P03_turn (fixed P01; P03 route ends right 90)
+path_plan [P03_turn|P04|P05] | path P02|P03_turn|P04|P05 (full route from fixed P01)
 record NAME | delta FROM TO | points | status | measure | stop | quit
 Use ; for sequential commands. Each motion anchors at its own actual start.
 During motion: stop + Enter, quit + Enter, or Ctrl+C cancels the entire batch.
@@ -165,11 +165,14 @@ class Console:
         start = r.pose()
         if motion.kind == 'path':
             delta = local_delta(self.book.origin, start)
-            if (
-                math.hypot(delta['x_m'] - motion.points[0][0], delta['y_m'] - motion.points[0][1])
-                > 0.01
-                or abs(delta['yaw_deg']) > 1
-            ):
+            if math.hypot(
+                delta['x_m'] - motion.points[0][0], delta['y_m'] - motion.points[0][1]
+            ) > 0.01 or abs(
+                math.atan2(
+                    math.sin(math.radians(delta['yaw_deg']) - motion.angle),
+                    math.cos(math.radians(delta['yaw_deg']) - motion.angle),
+                )
+            ) > math.radians(1):
                 raise RuntimeError(
                     'Path requires current pose within 1 cm / 1 deg of fixed segment start'
                 )
@@ -188,7 +191,7 @@ class Console:
             self.stop_motion()
         actual = r.pose()
         ready = (
-            path_ready(start, actual, motion.points)
+            path_ready(start, actual, motion.points, motion.angle)
             if motion.kind == 'path'
             else feedback(start, actual, motion, r.max_speed, self.turn_speed)[1]
         )
@@ -216,7 +219,7 @@ class Console:
         r = self.runner
         deadline, previous = time.monotonic() + budget, time.monotonic()
         command, held, logged = (0.0, 0.0, 0.0), None, 0.0
-        tracker = PathTracker(start, motion.points) if motion.kind == 'path' else None
+        tracker = PathTracker(start, motion.points, motion.angle) if motion.kind == 'path' else None
         heading_pid = HeadingPid()
         while time.monotonic() < deadline:
             r.pump()
@@ -283,6 +286,8 @@ class Console:
             print(HELP, flush=True)
 
     def path_command(self, name, destination='P02'):
+        if destination in ('P04', 'P05'):
+            return self.extended_route(name, destination)
         if destination == 'P03_turn':
             return self.p03_route(name)
 
@@ -337,6 +342,31 @@ class Console:
         self.move(Motion('turn', angle=self.book.origin.yaw - math.pi / 2 - actual.yaw))
         self.record('P03_after_turn')
         print('P03 route completed; stopped', flush=True)
+
+    def extended_route(self, name, destination):
+        """Execute reviewed fixed-origin segments; any failure cancels remaining legs."""
+        motions = load_extensions()
+        legs = list(zip(('P04', 'P05'), motions))[: 1 if destination == 'P04' else 2]
+        for label, motion in legs:
+            print(
+                label,
+                'path:',
+                len(motion.points),
+                'points; endpoint=',
+                (motion.x, motion.y),
+                'hold P01 yaw -90 deg',
+                flush=True,
+            )
+            self.emit('extension_plan', waypoint=label, motion=asdict(motion))
+        if name == 'path_plan':
+            return self.p03_route(name)
+        if any(label in self.book.data['points'] for label in ('P04', 'P05')):
+            raise ValueError('Route already recorded; start a fresh initialized P01 session')
+        self.p03_route('path')
+        for label, motion in legs:
+            self.move(motion)
+            self.record(label)
+        print(destination, 'route completed; stopped', flush=True)
 
     def run(self):
         print(HELP, '\nmotion> ', end='', flush=True)

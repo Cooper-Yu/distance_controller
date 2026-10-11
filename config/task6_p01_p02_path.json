@@ -25,5 +25,15 @@
     "x": 1.773003723416002,
     "y": 0.017908841631131794,
     "source": "P03_candidate recorded by user; endpoint-only straight interpolation, not a measured trajectory"
+  },
+  "p04": {
+    "x": 1.781439293373129,
+    "y": -0.5239300031759923,
+    "source": "User confirmed P04_candidate, 2026-10-11"
+  },
+  "p05_candidate": {
+    "x": 1.3821754778962125,
+    "y": -0.5250984301851296,
+    "source": "User P05_candidate, 2026-10-11; right clearance approx .028m; physical repeatability unverified"
   }
 }

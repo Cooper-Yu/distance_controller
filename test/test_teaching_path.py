@@ -8,7 +8,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from action_plan import Pose
 from motion_model import Motion, parse_batch, target_pose
-from teaching_path import PathTracker, interpolate, path_ready
+from teaching_path import PathTracker, fixed_segment, interpolate, path_ready
 
 
 class TeachingPathTests(unittest.TestCase):
@@ -93,6 +93,41 @@ class TeachingPathTests(unittest.TestCase):
         self.assertEqual(
             parse_batch('path_plan P03_turn; path P03_turn'),
             [('path_plan', 'P03_turn'), ('path', 'P03_turn')],
+        )
+
+    def test_forward_and_right_extensions_hold_rotated_heading(self):
+        p3 = (1.773003723416002, 0.017908841631131794)
+        p4 = (1.781439293373129, -0.5239300031759923)
+        p5 = (1.3821754778962125, -0.5250984301851296)
+        origin = Pose(3, 7, 2.1)
+        for a, b, count, direction in ((p3, p4, 12, 'forward'), (p4, p5, 9, 'right')):
+            motion = fixed_segment(a, b, -math.pi / 2)
+            self.assertEqual(len(motion.points), count)
+            self.assertEqual(motion.points[0], a)
+            self.assertEqual(motion.points[-1], b)
+            self.assertTrue(
+                all(
+                    math.dist(x, y) <= 0.05 + 1e-12
+                    for x, y in zip(motion.points, motion.points[1:])
+                )
+            )
+            actual = target_pose(origin, Motion('move', x=a[0], y=a[1], angle=-math.pi / 2))
+            tracker = PathTracker(origin, motion.points, motion.angle)
+            command, ready = tracker.feedback(actual, 0.12, 0.6)
+            self.assertFalse(ready)
+            self.assertAlmostEqual(command[2], 0)
+            if direction == 'forward':
+                self.assertGreater(command[0], 0.11)
+            else:
+                self.assertLess(command[1], -0.11)
+                self.assertLess(abs(command[0]), 0.001)
+            end = target_pose(origin, motion)
+            self.assertTrue(path_ready(origin, end, motion.points, motion.angle))
+            self.assertFalse(
+                path_ready(origin, Pose(end.x, end.y, origin.yaw), motion.points, motion.angle)
+            )
+        self.assertEqual(
+            parse_batch('path_plan P05; path P05'), [('path_plan', 'P05'), ('path', 'P05')]
         )
 
     def test_reject_unreviewed_paths_and_batch(self):

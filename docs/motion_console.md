@@ -309,3 +309,27 @@ All console move, turn and path commands share translation Kp=1.5 and HeadingPid
 
 ### P01 to P03 and right turn
 Use path_plan P03_turn for a read-only preview; path P03_turn runs P01-P02, stops and records P02, follows 20 interpolated P02-P03 points (at most 5 cm apart), stops and records P03, then turns to fixed P01 heading minus 90 degrees and records P03_after_turn. P03=(1.773003723416002,0.017908841631131794) in P01 axes. This is endpoint-based straight interpolation, not reconstruction of the manual trajectory. All targets use the same session P01; arrival error is not added to the second leg. Cancellation/failure aborts the remaining route; no automatic restart/resume from partial motion. A fresh initialized P01 session is required for another complete trial. Laser remains observation-only; this interpolated route has not yet been verified on hardware.
+
+### P01 to P04 / P05 trial extensions
+`path_plan P04` / `path_plan P05` preview without motion. `path P04` / `path P05`
+always start a complete trial from a fresh initialized session P01: P02 stop,
+P03 stop, right turn to P01 yaw minus 90 degrees, then P04 stop and optionally
+P05 stop. These commands do not resume at the current waypoint.
+
+Fixed P01 targets (meters): P04=(1.781439293373129,-0.5239300031759923),
+P05=(1.3821754778962125,-0.5250984301851296). P03-P04 has 12 points;
+P04-P05 has 9 points, including endpoints; spacing remains <=5cm. Both legs
+hold P01 yaw minus 90 degrees. The P04-P05 leg is a right strafe, not a turn
+followed by forward travel. Geometry remains in P01 axes; body commands rotate
+using current odom heading. No measured turn drift is added to later targets.
+
+Each leg requires its fixed start within 1cm / 1degree. Excess turn displacement
+therefore stops before P04 instead of silently rebasing the route. Cancellation,
+stale odom, failed recording or arrival prevents later legs; there is no partial
+resume. Endpoints use 5mm planar / .01rad heading acceptance and the 1s stopped
+hold. The existing speed selection .12m/s and .6rad/s and unified PID remain.
+
+P05 comes from the user's candidate sample, with right body gap about .0282m;
+this is an experimental endpoint, not demonstrated collision margin. The new
+endpoint chords are not a replay of the sampled manual trajectory. Hardware
+repeatability and swept clearances remain unverified; laser is observation-only.
