@@ -30,6 +30,12 @@ void DistanceController::configure_centering()
   alignment_wall_ = declare_parameter<std::string>("alignment_wall", "right");
   if (alignment_wall_ != "left" && alignment_wall_ != "right")
     throw std::invalid_argument("alignment_wall must be left or right");
+  positioning_wall_ = declare_parameter<std::string>("positioning_wall", "center");
+  if (positioning_wall_ != "center" && positioning_wall_ != "right")
+    throw std::invalid_argument("positioning_wall must be center or right");
+  if (positioning_wall_ == "right" && alignment_wall_ != "right")
+    throw std::invalid_argument("right positioning requires right heading alignment");
+  right_target_distance_ = positive("right_target_distance", right_target_distance_);
   wall_heading_half_angle_ = positive("wall_heading_half_angle", wall_heading_half_angle_);
   wall_heading_min_span_ = positive("wall_heading_min_span", wall_heading_min_span_);
   wall_heading_max_rms_ = positive("wall_heading_max_rms", wall_heading_max_rms_);
@@ -58,8 +64,11 @@ void DistanceController::configure_centering()
     side_window_half_angle_ >= 0.7853981633974483 || side_min_distance_ >= side_max_distance_ ||
     rear_window_half_angle_ >= 0.7853981633974483 ||
     rear_target_distance_ <= rear_min_distance_ + centering_tolerance_ ||
-    rear_target_distance_ >= side_max_distance_ - centering_tolerance_ || base_frame_.empty() ||
-    topic.empty()) {
+    rear_target_distance_ >= side_max_distance_ - centering_tolerance_ ||
+    (positioning_wall_ == "right" &&
+     (right_target_distance_ <= side_min_distance_ + centering_tolerance_ ||
+      right_target_distance_ >= side_max_distance_ - centering_tolerance_)) ||
+    base_frame_.empty() || topic.empty()) {
     throw std::invalid_argument("Invalid side window, wall distance interval or scan/body frame");
   }
   scan_tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
@@ -125,7 +134,7 @@ bool DistanceController::handle_initial_positioning(const rclcpp::Time & current
   if (!heading_control_enabled_ || centering_complete_) return false;
   const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
   const double yaw_error = heading_error(yaw);
-  const double error = (left_wall_ - right_wall_) * 0.5;
+  const double error = positioning_error();
   const double rear_error = rear_target_distance_ - rear_wall_;
   const auto & velocity = last_odom_.twist.twist;
   if (std::abs(yaw_error) > translation_pause_angle_) {
@@ -192,9 +201,16 @@ void DistanceController::log_route_wall_observation()
     heading_error(yaw));
 }
 
+double DistanceController::positioning_error() const
+{
+  // Positive body y moves away from the right wall.
+  return positioning_wall_ == "right" ? right_target_distance_ - right_wall_
+                                      : (left_wall_ - right_wall_) * 0.5;
+}
+
 double DistanceController::compute_centering_velocity() const
 {
-  const double error = (left_wall_ - right_wall_) * 0.5;
+  const double error = positioning_error();
   return std::abs(error) > centering_tolerance_ ? centering_gain_ * error : 0.0;
 }
 
@@ -302,9 +318,10 @@ void DistanceController::measure_wall_windows(
   right_wall_valid_ = estimate_side(right, right_samples, right_wall_);
   const bool rear_valid =
     estimate_side(rear, rear_samples, rear_wall_) && rear_wall_ >= rear_min_distance_;
-  if (!left_wall_valid_ || !right_wall_valid_ || !rear_valid) {
+  const bool require_left = positioning_wall_ == "center";
+  if ((require_left && !left_wall_valid_) || !right_wall_valid_ || !rear_valid) {
     scan_rejection_reason_ = "wall window invalid:";
-    if (!left_wall_valid_) scan_rejection_reason_ += " left";
+    if (require_left && !left_wall_valid_) scan_rejection_reason_ += " left";
     if (!right_wall_valid_) scan_rejection_reason_ += " right";
     if (!rear_valid) scan_rejection_reason_ += " rear";
     return;

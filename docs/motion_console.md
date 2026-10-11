@@ -135,3 +135,34 @@ See `motion_model.py` for frame conversion and correction logic and
 `motion_console.py` for ownership, cancellation, observation and persistence.
 The integration fixture verifies the installed ROS executable; it is not a maze
 simulation and does not validate wheel slip, braking distance or obstacle clearance.
+## Optional right-wall start preparation
+
+Before starting the console, prepare the stopped origin with:
+
+```bash
+ros2 run distance_controller odom_trial \
+  --start prepare --alignment-wall right \
+  --positioning-wall right --right-target-distance 0.26 \
+  --laser-log-only
+```
+
+At the `odom>` prompt, enter `quit`, then start `motion_console`. Do not enter
+`next` or `run` when only preparing the origin.
+
+`alignment-wall` selects heading alignment. `positioning-wall right` additionally
+uses the right wall for lateral positioning instead of left/right centering.
+The 0.26 m target is measured from the base_link origin, not the body edge or
+laser origin. Rear positioning retains its 0.28 m target. Missing left returns
+are observed but do not invalidate this preparation mode. Missing right/rear
+returns still stop preparation, as do stale data and existing travel limits.
+The default `positioning-wall center` preserves the two-side centering behavior.
+
+Local synthetic verification (no hardware):
+```bash
+WALL_CASE=odom_trial_right_only python3 test/verify_wall_session.py
+WALL_CASE=odom_trial_right_only PREP_FAIL=right python3 test/verify_wall_session.py
+WALL_CASE=odom_trial_right_only PREP_FAIL=rear python3 test/verify_wall_session.py
+WALL_CASE=odom_trial_prepare python3 test/verify_wall_session.py
+```
+These checks verify required-wall selection, correction direction, stopped
+handoff and fault stops; hardware placement accuracy remains unverified.

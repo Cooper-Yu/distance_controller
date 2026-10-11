@@ -101,6 +101,13 @@ private:
    * @note Reads left_wall_/right_wall_; no state changes.
    */
   double compute_centering_velocity() const;
+
+  /**
+   * @brief Compute signed lateral error from the selected preparation reference.
+   * @return Meters; positive requests left motion, negative requests right motion.
+   * @note Reads current wall distances and positioning_wall_; no state changes.
+   */
+  double positioning_error() const;
   /**
    * @brief Calculate rear-distance positioning velocity without publishing.
    * @par Rear positioning
@@ -311,9 +318,13 @@ private:
   /// @param yaw Current odom yaw in radians.
   /// @return True while initialization owns the control tick.
   bool verify_frozen_alignment(double yaw);
-  bool robust_wall_heading_{false};          ///< Opt-in dominant-line heading selection.
+  bool robust_wall_heading_{false};  ///< Opt-in dominant-line heading selection.
   std::string alignment_wall_{
     "right"};  ///< Initial heading-fit side; left is used by wall sessions.
+  /// Preparation lateral reference: legacy two-wall center or fixed right-wall distance.
+  std::string positioning_wall_{"center"};
+  /// Target base_link-origin distance to the right wall (m), not body-edge clearance.
+  double right_target_distance_{0.26};
   /// Selected-wall fitting half-width (rad) around body +pi/2 or -pi/2.
   double wall_heading_half_angle_{0.5235987755982988};
   /// Minimum observed tangent extent (m); prevents a short cluster defining heading.

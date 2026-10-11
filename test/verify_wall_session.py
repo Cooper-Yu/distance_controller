@@ -155,6 +155,18 @@ def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - o
             values[0:3] = [0.165] * 3
         inject_turn_obstacle(values, now)
         inject_narrow_patch(values, scan, now)
+        if os.getenv('WALL_CASE') == 'odom_trial_right_only':
+            for i in range(len(values)):
+                bearing = math.remainder(
+                    scan.angle_min + i * scan.angle_increment + math.pi, 2 * math.pi
+                )
+                failed = os.getenv('PREP_FAIL', '') if pose[1] < -0.13 else ''
+                if (
+                    abs(bearing - math.pi / 2) < 0.7
+                    or (failed == 'right' and abs(bearing + math.pi / 2) < 0.7)
+                    or (failed == 'rear' and abs(abs(bearing) - math.pi) < 0.3)
+                ):
+                    values[i] = float('inf')
         scan.ranges = values
         scan_pub.publish(scan)
         last_scan = now
@@ -175,7 +187,7 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
     if resume is None:
         pose[:] = [
             float(os.getenv('WALL_START_X', '0')),
-            0.0,
+            -0.1 if os.getenv('WALL_CASE') == 'odom_trial_right_only' else 0.0,
             float(os.getenv('WALL_START_YAW', '0')),
         ]
     velocity[:] = [0.0, 0.0, 0.0]
@@ -191,6 +203,11 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
                 str(ROOT / ('tools/odom_trial.py' if odom_trial else 'tools/action_session.py')),
                 *(['--laser-log-only', '--alignment-wall', 'right'] if odom_trial else []),
                 *(['--until', until] if until else []),
+                *(
+                    ['--positioning-wall', 'right', '--right-target-distance', '0.26']
+                    if os.getenv('WALL_CASE') == 'odom_trial_right_only'
+                    else []
+                ),
                 *(
                     ['--resume', str(resume)]
                     if resume
@@ -215,6 +232,12 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
             if proc.poll() is None:
                 os.killpg(proc.pid, signal.SIGINT)
                 proc.wait(timeout=10)
+        if os.getenv('WALL_CASE') == 'odom_trial_right_only' and os.getenv('PREP_FAIL'):
+            text = (directory / 'runtime.log').read_text()
+            assert proc.returncode == 2 and 'SCAN_INVALID' in text, text[-3500:]
+            assert sum(abs(v) for v in velocity) < 1e-6
+            assert 'Centered A recorded=' not in text
+            return [], text
         assert proc.returncode == 0, (directory / 'runtime.log').read_text()[-3500:]
     events = [
         json.loads(line)
@@ -230,6 +253,18 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
 
 
 try:
+    if os.getenv('WALL_CASE') == 'odom_trial_right_only':
+        data = json.loads((ROOT / 'config/task6_odom_p01_p05.json').read_text())
+        events, log = run('right_only', data, 'quit\n'.replace('\\n', '\n'), prepare=True)
+        if os.getenv('PREP_FAIL'):
+            print('PASS required wall loss stops:', os.getenv('PREP_FAIL'), OUT, flush=True)
+        else:
+            assert 'position_basis=right' in log and 'left_valid=false' in log
+            assert abs(pose[1] + 0.24) < 0.015 and abs(pose[0] + 0.02) < 0.015, pose
+            assert any(e['event'] == 'origin' for e in events)
+            assert not any(e['event'] == 'started' for e in events)
+            print('PASS right/rear positioning with no left returns', OUT, flush=True)
+        raise SystemExit(0)
     if os.getenv('WALL_CASE') == 'odom_trial_taught':
         data = json.loads((ROOT / 'config/task6_taught_p01_p09.json').read_text())
         events, log = run('taught_p01_p09', data, 'status\nnext\nquit\n', until='P09', stale=True)

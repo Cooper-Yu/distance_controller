@@ -160,17 +160,38 @@ def interact(trial):
             return
 
 
-def main():
+def arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--route', type=Path)
     parser.add_argument('--until', help='After initialization execute in order to this waypoint')
     parser.add_argument('--start', choices=['prepare', 'current'])
     parser.add_argument('--alignment-wall', choices=['left', 'right'], default='left')
+    parser.add_argument('--positioning-wall', choices=['center', 'right'], default='center')
+    parser.add_argument(
+        '--right-target-distance',
+        type=float,
+        default=0.26,
+        help='base_link origin to right wall, meters; not body clearance',
+    )
     parser.add_argument('--laser-log-only', action='store_true')
     parser.add_argument('--speed', type=float, default=0.06)
     args = parser.parse_args()
     if not math.isfinite(args.speed) or not 0.02 <= args.speed <= 0.08:
         parser.error('speed must be .02-.08 m/s')
+    if (
+        not math.isfinite(args.right_target_distance)
+        or not 0.20 <= args.right_target_distance <= 0.50
+    ):
+        parser.error('right-target-distance must be .20-.50 m')
+    if args.positioning_wall == 'right' and (
+        args.alignment_wall != 'right' or args.start != 'prepare'
+    ):
+        parser.error('right positioning requires --start prepare --alignment-wall right')
+    return args, parser
+
+
+def main():
+    args, parser = arguments()
     if args.route is None:
         from ament_index_python.packages import get_package_share_directory
 
@@ -194,6 +215,12 @@ def main():
     with open('/tmp/distance_controller_survey_return.lock', 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         r = WallRunner(args.speed, args.alignment_wall)
+        r.prepare_options += [
+            '-p',
+            f'positioning_wall:={args.positioning_wall}',
+            '-p',
+            f'right_target_distance:={args.right_target_distance}',
+        ]
         old = signal.signal(signal.SIGINT, lambda *_: r.request_cancel())
         path = Path(f'odom_trial_{time.time_ns()}.jsonl')
         try:

@@ -130,7 +130,7 @@ bool DistanceController::handle_centering_guard(
 void DistanceController::log_preparation_progress()
 {
   const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
-  const double lateral_error = (left_wall_ - right_wall_) * 0.5;
+  const double lateral_error = positioning_error();
   const double rear_error = rear_target_distance_ - rear_wall_;
   const bool frozen = robust_wall_heading_ && wall_target_frozen_ && !initial_alignment_complete_;
   const double yaw_error =
@@ -142,11 +142,13 @@ void DistanceController::log_preparation_progress()
     get_logger(),
     "Initialization progress: stage=%s | pose: x=%.6f y=%.6f yaw=%.6f rad | "
     "left=%.3f right=%.3f rear=%.3f rear_target=%.3f m | "
+    "position_basis=%s right_target=%.3f left_valid=%s | "
     "center_error=%.4f rear_error=%.4f tolerance=%.4f m | "
     "heading_error=%.4f tolerance=%.4f rad heading_basis=%s | "
     "position_ready=%s heading_ready=%s settling=%s required_hold=%.2f s",
     preparation_stage_name(), last_odom_.pose.pose.position.x, last_odom_.pose.pose.position.y, yaw,
-    left_wall_, right_wall_, rear_wall_, rear_target_distance_, lateral_error, rear_error,
+    left_wall_, right_wall_, rear_wall_, rear_target_distance_, positioning_wall_.c_str(),
+    right_target_distance_, left_wall_valid_ ? "true" : "false", lateral_error, rear_error,
     centering_tolerance_, yaw_error, heading_tolerance_,
     initial_alignment_complete_
       ? "held_odom_heading"
