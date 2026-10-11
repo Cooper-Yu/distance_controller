@@ -28,6 +28,7 @@ add_executable(distance_controller_node
   src/route.cpp
   src/route_execution.cpp
   src/preparation_guard.cpp
+  src/scan_recovery.cpp
   src/step_configuration.cpp
   src/manual_steps.cpp
   src/step_feedback.cpp

@@ -89,9 +89,9 @@ bool DistanceController::handle_centering_guard(
     last_odom_.pose.pose.position.y - preparation_y_);
   const double age = std::chrono::duration<double>(now - last_scan_time_).count();
   const char * reason = nullptr;
-  if (accepted_scan_ && !scan_valid_)
+  if (accepted_scan_ && !scan_valid_ && !scan_recovering_)
     reason = "SCAN_INVALID";
-  else if (accepted_scan_ && age > scan_timeout_)
+  else if (accepted_scan_ && age > scan_timeout_ && !precise_start_)
     reason = "SCAN_STALE";
   else if (travel > preparation_max_travel_)
     reason = "PREPARATION_TRAVEL_LIMIT";
@@ -114,6 +114,8 @@ bool DistanceController::handle_centering_guard(
     fail_preparation(reason, now);
     return true;
   }
+  if (precise_start_ && accepted_scan_ && age > scan_timeout_) begin_scan_recovery(now);
+  if (scan_recovering_) return handle_scan_recovery(now);
   if (!scan_valid_ || !accepted_scan_) {
     publish_stop();
     if (should_log)

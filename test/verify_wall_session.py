@@ -109,6 +109,21 @@ def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - o
     if os.getenv('ESCAPE_LOSS_MODE') == 'stale' and pose[1] < -0.01:
         scan_enabled = False
     now = time.monotonic()
+    scan_fault = os.getenv('PREP_SCAN_FAULT', '')
+    if scan_fault and hasattr(node, 'test_log'):
+        log = node.test_log.read_text()
+        trigger = 'START_VERIFY: stopped hold' if scan_fault == 'hold' else 'stage=positioning'
+        if trigger in log and not hasattr(node, 'scan_fault_start'):
+            node.scan_fault_start = now
+        if hasattr(node, 'scan_fault_start'):
+            elapsed = now - node.scan_fault_start
+            if scan_fault != 'old' and (scan_fault == 'permanent' or elapsed < 0.85):
+                scan_enabled = False
+            if 'SCAN_RECOVERING:' in log and 'SCAN_RECOVERED:' not in log:
+                if not hasattr(node, 'scan_stop_checked'):
+                    node.scan_stop_checked = now
+                if now - node.scan_stop_checked > 0.1:
+                    assert sum(abs(v) for v in velocity) < 1e-6, velocity
     dt = min(now - previous, 0.03)
     c, s = math.cos(pose[2]), math.sin(pose[2])
     pose[0] += (c * velocity[0] - s * velocity[1]) * dt
@@ -124,11 +139,18 @@ def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - o
     )
     msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.angular.z = velocity
     for _ in range(int(os.getenv('WALL_ODOM_BURST', '1'))):
-        if not (os.getenv('ODOM_TRIAL_STALE') and pose[0] > 0.025):
+        combined_gap = (
+            scan_fault == 'combined'
+            and hasattr(node, 'scan_fault_start')
+            and now - node.scan_fault_start < 0.75
+        )
+        if not combined_gap and not (os.getenv('ODOM_TRIAL_STALE') and pose[0] > 0.025):
             odom_pub.publish(msg)
     if scan_enabled and now - last_scan > float(os.getenv('WALL_SCAN_PERIOD', '0.07')):
         scan = LaserScan()
         scan.header.frame_id, scan.header.stamp = 'laser', msg.header.stamp
+        if scan_fault == 'old' and hasattr(node, 'scan_fault_start'):
+            scan.header.stamp.sec -= 1
         scan.angle_min, scan.angle_increment, scan.angle_max = -math.pi, math.pi / 360, math.pi
         scan.range_min, scan.range_max = 0.15, 40.0
         x, y = pose[0] + 0.02 * c, pose[1] + 0.02 * s
@@ -252,6 +274,12 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
             if proc.poll() is None:
                 os.killpg(proc.pid, signal.SIGINT)
                 proc.wait(timeout=10)
+        if os.getenv('PREP_SCAN_FAULT') in ('permanent', 'old'):
+            text = node.test_log.read_text()
+            assert proc.returncode == 2 and 'SCAN_RECOVERY_TIMEOUT' in text, text[-4000:]
+            assert 'START_VERIFIED:' not in text and 'SCAN_RECOVERED:' not in text
+            assert sum(abs(v) for v in velocity) < 1e-6
+            return [], text
         if os.getenv('PRECISE_NOISE') == 'unstable':
             text = node.test_log.read_text()
             assert proc.returncode == 2 and 'START_VERIFY_TIMEOUT' in text, text[-4000:]
@@ -281,11 +309,17 @@ try:
     if os.getenv('WALL_CASE') == 'odom_trial_right_only':
         data = json.loads((ROOT / 'config/task6_odom_p01_p05.json').read_text())
         events, log = run('right_only', data, 'quit\n'.replace('\\n', '\n'), prepare=True)
-        if os.getenv('PRECISE_NOISE') == 'unstable':
+        if os.getenv('PREP_SCAN_FAULT') in ('permanent', 'old'):
+            print('PASS bounded scan recovery failure', os.getenv('PREP_SCAN_FAULT'), OUT)
+        elif os.getenv('PRECISE_NOISE') == 'unstable':
             print('PASS unstable batch stops without handoff', OUT, flush=True)
         elif os.getenv('PREP_FAIL'):
             print('PASS required wall loss stops:', os.getenv('PREP_FAIL'), OUT, flush=True)
         else:
+            if os.getenv('PREP_SCAN_FAULT'):
+                assert 'SCAN_RECOVERING:' in log and 'SCAN_RECOVERED:' in log, log[-4000:]
+                assert log.index('SCAN_RECOVERED:') < log.index('START_VERIFIED:')
+                assert hasattr(node, 'scan_stop_checked')
             if os.getenv('PRECISE_START'):
                 assert 'START_VERIFIED' in log and 'retained=' in log, log[-4000:]
                 if os.getenv('PRECISE_NOISE') == 'spikes':

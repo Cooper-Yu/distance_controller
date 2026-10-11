@@ -277,3 +277,16 @@ scale discrepancy. Ordinary `record` still uses a snapshot, not 15-frame accepta
 # Local isolated synthetic test only, no robot domain:
 ROS_LOCALHOST_ONLY=1 ROS_DOMAIN_ID=197 python3 test/verify_teaching_path.py
 ```
+
+### Short scan gaps during precise preparation
+
+With `--precise-start`, a scan gap longer than 0.5 s immediately commands zero
+and prints `SCAN_RECOVERING`. Recovery has a fixed 2 s budget. Pre-stop, duplicate
+and queued scans older than 0.2 s cannot establish recovery. Require at least
+three distinct valid post-stop scans spanning 0.3 s, fresh odometry, and measured
+speed below 0.003 m/s / 0.01 rad/s. Then `SCAN_RECOVERED` starts wall-heading
+acquisition and positioning again, including the full 15-frame final verification.
+No prior partial batch survives the gap. Existing stage, total-time and travel
+limits remain in force. Persistent loss or old frames yield
+`SCAN_RECOVERY_TIMEOUT`; required-wall invalidity outside recovery still fails.
+Legacy preparation and path execution do not acquire this recovery behavior.

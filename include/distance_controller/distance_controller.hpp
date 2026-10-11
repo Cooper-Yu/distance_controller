@@ -352,6 +352,15 @@ private:
   bool centering_complete_{false};
   /// Optional right/rear precision mode; separate from legacy centering.
   bool precise_start_{false};
+  /// Bounded stopped recovery applies only to precise preparation, never route motion.
+  void begin_scan_recovery(const std::chrono::steady_clock::time_point & receipt);
+  bool handle_scan_recovery(const std::chrono::steady_clock::time_point & receipt);
+  bool scan_recovering_{false};
+  unsigned scan_recovery_count_{0};
+  int64_t scan_recovery_stamp_{0};
+  int64_t scan_recovery_after_{0};
+  std::chrono::steady_clock::time_point scan_recovery_start_{}, scan_recovery_since_{};
+
   /// Verify only after a stopped hold, with unique post-hold scans and bounded retries.
   bool verify_precise_start();
   void finish_precise_batch(const distance_controller::StartSummary & summary);

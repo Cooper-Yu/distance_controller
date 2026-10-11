@@ -108,6 +108,21 @@ bool DistanceController::estimate_side(
 void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg)
 {
   if (fault_latched_) return;
+  const auto receipt = std::chrono::steady_clock::now();
+  const rclcpp::Time incoming(msg->header.stamp, get_clock()->get_clock_type());
+  const double incoming_age = (now() - incoming).seconds();
+  if (precise_start_ && !centering_complete_ && accepted_scan_) {
+    if (
+      std::chrono::duration<double>(receipt - last_scan_time_).count() > scan_timeout_ ||
+      incoming_age > scan_timeout_)
+      begin_scan_recovery(receipt);
+    // Queued or repeated frames must not overwrite accepted wall data or count as recovery.
+    if (
+      incoming.nanoseconds() <= observation_stamp_ns_ ||
+      (scan_recovering_ && (incoming.nanoseconds() <= scan_recovery_after_ || incoming_age > 0.2 ||
+                            incoming_age < -0.1)))
+      return;
+  }
   left_wall_valid_ = false;
   right_wall_valid_ = false;
   scan_valid_ = false;
