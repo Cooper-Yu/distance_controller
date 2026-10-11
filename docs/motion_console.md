@@ -294,8 +294,11 @@ Legacy preparation and path execution do not acquire this recovery behavior.
 ### P01-P02 speed selection
 
 Start a new console at the initialized P01 using `--speed 0.06` for 6 cm/s.
-The default remains 0.04 m/s. Path lookahead is max(0.05 m, speed / 0.8), so
+The default remains 0.04 m/s. Path lookahead is max(0.05 m, speed / 1.5), so
 the requested cruise speed is reachable; interpolation spacing stays at most
 5 cm. The endpoint remains fixed, with proportional deceleration, position
 error below 5 mm, heading error below 0.01 rad and a 1 s stopped hold.
 These are odometry acceptance criteria, not guaranteed physical accuracy.
+
+### Task5 gains for path P02
+Path translation uses Kp=1.5, Ki=Kd=0. Heading uses Kp=1.8, Ki=0.03, Kd=0.35 with signed odom angular velocity damping and conditional integration bounded to +/-0.5. Path acceleration limits are 0.4 m/s^2 and 0.6 rad/s^2. Start at initialized P01 with `--speed 0.08` for 8 cm/s; the default remains 0.04. Angular speed remains the console `--turn-speed` cap (default 0.10 rad/s). Ordinary move/turn commands retain their existing controller. Endpoint tolerance and stopped hold are unchanged. Gains match Task5, but the path tracker and vector speed limits are not the complete Task5 controller.

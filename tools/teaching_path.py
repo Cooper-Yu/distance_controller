@@ -60,6 +60,7 @@ class PathTracker:
 
     def __init__(self, origin, points):
         self.origin, self.points, self.progress = origin, points, 0.0
+        self.heading_integral = 0.0
         self.arc = [0.0]
         for a, b in zip(points, points[1:]):
             self.arc.append(self.arc[-1] + math.dist(a, b))
@@ -86,16 +87,28 @@ class PathTracker:
                 return a[0] + fraction * (b[0] - a[0]), a[1] + fraction * (b[1] - a[1])
         return self.points[-1]
 
-    def feedback(self, actual, speed, turn_speed):
+    def feedback(self, actual, speed, turn_speed, dt=0.05, yaw_rate=0.0):
         p = local_delta(self.origin, actual)
         self.project((p['x_m'], p['y_m']))
-        tx, ty = self.ahead(max(0.05, speed / 0.8))
-        vx, vy = 0.8 * (tx - p['x_m']), 0.8 * (ty - p['y_m'])
+        tx, ty = self.ahead(max(0.05, speed / 1.5))
+        vx, vy = 1.5 * (tx - p['x_m']), 1.5 * (ty - p['y_m'])
         scale = min(1.0, speed / max(math.hypot(vx, vy), 1e-12))
         yaw = math.radians(p['yaw_deg'])
         c, s = math.cos(yaw), math.sin(yaw)
         vx, vy = scale * (c * vx + s * vy), scale * (-s * vx + c * vy)
         if abs(yaw) > 0.08:
             vx = vy = 0.0
-        wz = max(-turn_speed, min(turn_speed, -1.5 * yaw))
+        if not math.isfinite(dt) or not 0 < dt <= 0.2 or not math.isfinite(yaw_rate):
+            self.heading_integral = 0.0
+            raise RuntimeError('Invalid path PID timing or yaw rate')
+        candidate = max(-0.5, min(0.5, self.heading_integral - yaw * dt))
+        requested = -1.8 * yaw + 0.03 * candidate - 0.35 * yaw_rate
+        if abs(requested) <= turn_speed or -yaw * requested < 0:
+            self.heading_integral = candidate
+        wz = max(
+            -turn_speed,
+            min(turn_speed, -1.8 * yaw + 0.03 * self.heading_integral - 0.35 * yaw_rate),
+        )
+        if path_ready(self.origin, actual, self.points):
+            self.heading_integral = 0.0
         return (vx, vy, wz), path_ready(self.origin, actual, self.points)

@@ -76,12 +76,12 @@ def track(actual, segment, index, speed):
     return index, (vx, vy, wz), ready
 
 
-def limited_velocity(previous, requested, dt):
+def limited_velocity(previous, requested, dt, linear=0.12, angular=0.4):
     """Bound vector linear acceleration and angular acceleration."""
     dt = max(0.0, min(dt, 0.1))
     dx, dy = requested[0] - previous[0], requested[1] - previous[1]
-    scale = min(1.0, 0.12 * dt / max(math.hypot(dx, dy), 1e-9))
-    dw = max(-0.4 * dt, min(0.4 * dt, requested[2] - previous[2]))
+    scale = min(1.0, linear * dt / max(math.hypot(dx, dy), 1e-9))
+    dw = max(-angular * dt, min(angular * dt, requested[2] - previous[2]))
     return previous[0] + scale * dx, previous[1] + scale * dy, previous[2] + dw
 
 

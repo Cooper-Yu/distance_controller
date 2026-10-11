@@ -48,7 +48,7 @@ class TeachingPathTests(unittest.TestCase):
         self.assertLess(command[2], 0)
         self.assertFalse(ready)
         command, ready = tracker.feedback(Pose(0.83, 0, 0), 0.04, 0.1)
-        self.assertLess(command[0], 0.015)
+        self.assertAlmostEqual(command[0], 0.015)
         self.assertFalse(ready)
         self.assertTrue(tracker.feedback(Pose(0.839, 0, 0), 0.04, 0.1)[1])
         self.assertFalse(tracker.feedback(Pose(0.84, 0, 0.02), 0.04, 0.1)[1])
@@ -62,9 +62,19 @@ class TeachingPathTests(unittest.TestCase):
             command, _ = tracker.feedback(Pose(0.3, 0, 0), speed, 0.1)
             self.assertAlmostEqual(command[0], speed)
             command, ready = tracker.feedback(Pose(0.83, 0, 0), speed, 0.1)
-            self.assertAlmostEqual(command[0], 0.008)
+            self.assertAlmostEqual(command[0], 0.015)
             self.assertFalse(ready)
             self.assertTrue(tracker.feedback(Pose(0.839, 0, 0), speed, 0.1)[1])
+
+    def test_task5_heading_damping_and_saturation(self):
+        tracker = PathTracker(Pose(0, 0, 0), interpolate([(0, 0), (0.84, 0)]))
+        command, _ = tracker.feedback(Pose(0.3, 0, 0.02), 0.08, 0.1, 0.05, 0.04)
+        self.assertAlmostEqual(command[2], -1.8 * 0.02 - 0.03 * 0.001 - 0.35 * 0.04)
+        for _ in range(100):
+            tracker.feedback(Pose(0.3, 0, 0.5), 0.08, 0.1, 0.05, 0)
+        self.assertAlmostEqual(tracker.heading_integral, -0.001)
+        with self.assertRaises(RuntimeError):
+            tracker.feedback(Pose(0.3, 0, 0), 0.08, 0.1, 0.3, 0)
 
     def test_reject_unreviewed_paths_and_batch(self):
         for points in [

@@ -219,13 +219,18 @@ class Console:
                 raise RuntimeError('Odom child frame changed')
             if len(r.node.get_publishers_info_by_topic('/cmd_vel')) > 1:
                 raise RuntimeError('Competing cmd_vel publisher; stop the other controller')
+            now = time.monotonic()
+            dt = now - previous
             requested, ready = (
-                tracker.feedback(actual, r.max_speed, self.turn_speed)
+                tracker.feedback(actual, r.max_speed, self.turn_speed, dt, r.body_velocity[2])
                 if tracker
                 else feedback(start, actual, motion, r.max_speed, self.turn_speed)
             )
-            now = time.monotonic()
-            command = limited_velocity(command, requested, now - previous)
+            command = (
+                limited_velocity(command, requested, dt, linear=0.4, angular=0.6)
+                if tracker
+                else limited_velocity(command, requested, dt)
+            )
             previous = now
             if ready:
                 command = (0.0, 0.0, 0.0)
