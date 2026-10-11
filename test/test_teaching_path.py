@@ -57,7 +57,7 @@ class TeachingPathTests(unittest.TestCase):
 
     def test_requested_cruise_speed_and_unchanged_endpoint(self):
         points = interpolate([(0.0, 0.0), (0.84, 0.0)])
-        for speed in (0.04, 0.06, 0.08):
+        for speed in (0.04, 0.06, 0.08, 0.12):
             tracker = PathTracker(Pose(0, 0, 0), points)
             command, _ = tracker.feedback(Pose(0.3, 0, 0), speed, 0.1)
             self.assertAlmostEqual(command[0], speed)

@@ -328,10 +328,10 @@ def arguments():
     parser.add_argument('--turn-speed', type=float, default=0.10)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
-    if not math.isfinite(args.speed) or not 0.01 <= args.speed <= 0.08:
-        parser.error('speed must be .01-.08 m/s')
-    if not math.isfinite(args.turn_speed) or not 0.02 <= args.turn_speed <= 0.20:
-        parser.error('turn-speed must be .02-.20 rad/s')
+    if not math.isfinite(args.speed) or not 0.01 <= args.speed <= 0.12:
+        parser.error('speed must be .01-.12 m/s')
+    if not math.isfinite(args.turn_speed) or not 0.02 <= args.turn_speed <= 0.60:
+        parser.error('turn-speed must be .02-.60 rad/s')
     return args
 
 

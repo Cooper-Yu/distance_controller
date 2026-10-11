@@ -44,6 +44,8 @@ class Fixture:
                 '--laser-log-only',
                 '--speed',
                 os.getenv('MOTION_TEST_SPEED', '0.04'),
+                '--turn-speed',
+                os.getenv('MOTION_TEST_TURN_SPEED', '0.10'),
                 '--output',
                 str(self.path),
             ],
