@@ -357,3 +357,14 @@ recorded -90.701deg heading is not baked into the route. P05-P06 has
 12 points at <=5cm spacing, holding P01 yaw-90. Earlier endpoints remain
 unchanged. The expected front clearance reduction is approximate; the new
 endpoint and clearance past the wall end need hardware verification.
+
+### P01 to P08 trial
+Use path_plan P08 then path P08 from a fresh initialized P01. P07 is
+(1.823473683378812,-1.0444770488254893); adjusted P08 is
+(1.8030806164410214,-1.5875291803742129). P06-P07 interpolates
+10 points leftward; P07-P08 interpolates 12 points forward and gradually
+right, both holding P01 yaw-90. Spacing <=5cm, earlier stops/endpoints
+are retained. path P07 is also available as a complete route prefix.
+The old P08 near-wall sample is only a reference, not an accepted endpoint.
+The 2cm right adjustment is not a guaranteed wall clearance; validate on
+hardware before accepting the new path. Laser remains observation-only.

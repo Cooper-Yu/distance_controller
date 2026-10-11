@@ -93,14 +93,22 @@ def parse_batch(line):
         if (
             words[0] == 'path_plan'
             and len(words) == 2
-            and words[1] in ('P03_turn', 'P04', 'P05', 'P06')
+            and words[1] in ('P03_turn', 'P04', 'P05', 'P06', 'P07', 'P08')
         ):
             result.append(tuple(words))
             continue
         if words[0] not in arity or len(words) != arity[words[0]]:
             raise ValueError('Unknown command or wrong arguments; type help')
-        if words[0] == 'path' and words[1] not in ('P02', 'P03_turn', 'P04', 'P05', 'P06'):
-            raise ValueError('Supported: path P02, P03_turn, P04, P05 or P06')
+        if words[0] == 'path' and words[1] not in (
+            'P02',
+            'P03_turn',
+            'P04',
+            'P05',
+            'P06',
+            'P07',
+            'P08',
+        ):
+            raise ValueError('Supported: path P02, P03_turn, P04, P05, P06, P07 or P08')
         result.append(tuple(words))
     if len(result) > 32:
         raise ValueError('At most 32 commands per batch')

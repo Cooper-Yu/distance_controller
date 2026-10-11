@@ -76,7 +76,7 @@ def fixed_segment(a, b, heading):
 
 
 def load_extensions():
-    """Reviewed P04/P05/P06 extensions, all holding P01 yaw-90."""
+    """Reviewed P04 through P08 extensions, all holding P01 yaw-90."""
     from ament_index_python.packages import get_package_share_directory
 
     data = json.loads(
@@ -87,7 +87,14 @@ def load_extensions():
     )
     points = [
         tuple(data[label][axis] for axis in ('x', 'y'))
-        for label in ('p03_candidate', 'p04', 'p05_candidate', 'p06_candidate')
+        for label in (
+            'p03_candidate',
+            'p04',
+            'p05_candidate',
+            'p06_candidate',
+            'p07_candidate',
+            'p08_candidate',
+        )
     ]
     return tuple(fixed_segment(a, b, -math.pi / 2) for a, b in zip(points, points[1:]))
 

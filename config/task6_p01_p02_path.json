@@ -40,5 +40,15 @@
     "x": 1.39160830299739,
     "y": -1.0484010154349044,
     "source": "User requested 0.02m forward along planned P01 yaw-90 from measured P06 y=-1.0284010154349044; clearance unverified"
+  },
+  "p07_candidate": {
+    "x": 1.823473683378812,
+    "y": -1.0444770488254893,
+    "source": "User recorded P07_candidate; P06-P07 observed without wall contact"
+  },
+  "p08_candidate": {
+    "x": 1.8030806164410214,
+    "y": -1.5875291803742129,
+    "source": "User approved 0.02m right adjustment from P08_near_wall x=1.8230806164410214; new chord and clearance unverified"
   }
 }
