@@ -17,6 +17,7 @@ class Motion:
     angle: float = 0.0
     heading: bool = True
     lateral: bool = True
+    points: tuple = ()
 
 
 def number(text):
@@ -78,6 +79,8 @@ def parse_batch(line):
             result.append(parse_motion(words))
             continue
         arity = {
+            'path': 2,
+            'path_plan': 1,
             'record': 2,
             'delta': 3,
             'measure': 1,
@@ -89,6 +92,8 @@ def parse_batch(line):
         }
         if words[0] not in arity or len(words) != arity[words[0]]:
             raise ValueError('Unknown command or wrong arguments; type help')
+        if words[0] == 'path' and words[1] != 'P02':
+            raise ValueError('Only path P02 is currently supported')
         result.append(tuple(words))
     if len(result) > 32:
         raise ValueError('At most 32 commands per batch')

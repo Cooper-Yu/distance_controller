@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "frame": "P01",
+  "heading": "hold_p01",
+  "max_spacing_m": 0.05,
+  "source": "User recorded motion_points_1791715278367975585.json; relative odom estimates",
+  "points": [
+    {
+      "name": "P01",
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "name": "P01_F10",
+      "x": 0.10072840197800961,
+      "y": 0.0009291673467439842
+    },
+    {
+      "name": "P02",
+      "x": 0.8402388396167952,
+      "y": -0.0026000285269909117
+    }
+  ]
+}

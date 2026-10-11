@@ -213,3 +213,57 @@ These are measurement acceptance targets, not a claim of 5 mm physical accuracy.
 Synthetic checks additionally support `PRECISE_START=1`, `PRECISE_NOISE=spikes`
 or `PRECISE_NOISE=unstable` with `WALL_CASE=odom_trial_right_only` in the existing
 fixture. No real hardware is driven by these localhost-domain tests.
+
+## Continuous P01 to P02 repeatability trial
+
+After successful precise initialization, quit `odom_trial` and start a **new**
+`motion_console --laser-log-only` session without moving or resetting odom in between.
+Then enter these commands separately:
+
+```text
+path_plan
+path P02
+```
+
+`path_plan` is read-only. `path P02` loads the installed
+`config/task6_p01_p02_path.json`, transforms its relative coordinates using this
+session's recorded P01, and follows one continuous path. It does not reuse old
+absolute odom coordinates. Input evidence is the user's measured P01, P01_F10
+(0.100728402, 0.000929167 m), and P02 (0.840238840, -0.002600029 m).
+Each measured edge is subdivided into <=5 cm edges, preserving P01_F10 exactly:
+19 points total, including start and end. The heading stays at this session's
+P01 heading; the taught P02 yaw error of -1.467 degrees is deliberately excluded.
+
+The tracker projects onto the polyline, advances monotonic arc progress, and aims
+5 cm ahead. It never stops at intermediate points or returns to a passed one.
+Tracking uses a fixed P01 reference, body-frame velocity conversion and existing
+acceleration limits; endpoint approach slows proportionally. At P02 require
+Euclidean position error <5 mm, heading error <0.01 rad, and stopped feedback for
+1 s; a further stopped check precedes reporting success. This is an odom criterion.
+After success, record actual P02 with the existing stopped laser snapshot and print
+`P02 comparison`. The JSON/JSONL contain actual points, full interpolated path,
+current origin and transformed target, progress, completion/failure and observations.
+
+Start requires the current pose within 1 cm / 1 degree of this session's P01.
+A second `path P02` after P02 is recorded is rejected. After partial movement or
+failure there is no automatic path resume: return near physical P01 under operator
+control, reinitialize, then start a new console session. Off-path distance >5 cm,
+odom continuity/freshness faults, conflicting velocity publishers and timeouts stop
+motion. `stop`, Ctrl+C, quit/EOF and SIGTERM retain existing cancellation behavior.
+Laser remains observation-only; interpolation does not certify free space.
+
+This first entry supports only a reviewed forward near-straight P01-P02 path
+(each edge within 10 degrees of P01 forward, total <=2 m). Do not edit it into
+corners, reversals or a general maze route. Endpoint-only teaching cannot recover
+an unrecorded avoidance maneuver. No automatic return to P01 is implemented.
+
+For three independent trials, repeat initialization and create a new point file
+each time; retain all console output and JSON/JSONL. Compare P02-relative endpoint,
+heading, available wall observations and visual location. A small odom residual
+alone does not establish physical repeatability or correct the earlier laser/odom
+scale discrepancy. Ordinary `record` still uses a snapshot, not 15-frame acceptance.
+
+```bash
+# Local isolated synthetic test only, no robot domain:
+ROS_LOCALHOST_ONLY=1 ROS_DOMAIN_ID=197 python3 test/verify_teaching_path.py
+```

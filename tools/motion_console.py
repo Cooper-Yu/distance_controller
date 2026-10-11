@@ -16,11 +16,13 @@ import uuid
 
 from motion_model import Motion, feedback, local_delta, parse_batch, target_pose
 from odom_path import limited_velocity
+from teaching_path import PathTracker, load_p02, path_ready
 from wall_runtime import WallRunner
 
 HELP = """move forward|backward|left|right METERS [--heading on|off] [--lateral on|off]
 move xy FORWARD_METERS LEFT_METERS [--heading on|off] [--lateral on|off]
 turn left|right DEGREES
+path_plan | path P02 (fixed session P01, continuous tracking, hold P01 heading)
 record NAME | delta FROM TO | points | status | measure | stop | quit
 Use ; for sequential commands. Each motion anchors at its own actual start.
 During motion: stop + Enter, quit + Enter, or Ctrl+C cancels the entire batch.
@@ -36,7 +38,8 @@ class ConsoleInput:
 
     def read(self):
         for line in sys.stdin:
-            self.lines.put(line.strip())
+            if line.strip():
+                self.lines.put(line.strip())
         self.lines.put(None)
 
     def poll(self):
@@ -160,6 +163,11 @@ class Console:
         r = self.runner
         r.exclusive()
         start = r.pose()
+        if motion.kind == 'path':
+            delta = local_delta(self.book.origin, start)
+            if delta['distance_m'] > 0.01 or abs(delta['yaw_deg']) > 1:
+                raise RuntimeError('Path requires current pose within 1 cm / 1 deg of session P01')
+            start = self.book.origin
         if r.frame != 'odom' or r.twist_frame != 'base_link':
             raise RuntimeError('Requires odom frame and base_link child frame')
         self.cancel_input()
@@ -173,7 +181,12 @@ class Console:
         finally:
             self.stop_motion()
         actual = r.pose()
-        if not feedback(start, actual, motion, r.max_speed, self.turn_speed)[1]:
+        ready = (
+            path_ready(start, actual, motion.points)
+            if motion.kind == 'path'
+            else feedback(start, actual, motion, r.max_speed, self.turn_speed)[1]
+        )
+        if not ready:
             raise RuntimeError('Final stopped pose outside enabled tolerances')
         self.emit('completed', actual=asdict(actual), displacement=local_delta(start, actual))
         print('Reached (odom estimate):', actual, flush=True)
@@ -197,6 +210,7 @@ class Console:
         r = self.runner
         deadline, previous = time.monotonic() + budget, time.monotonic()
         command, held, logged = (0.0, 0.0, 0.0), None, 0.0
+        tracker = PathTracker(start, motion.points) if motion.kind == 'path' else None
         while time.monotonic() < deadline:
             r.pump()
             self.cancel_input()
@@ -205,14 +219,20 @@ class Console:
                 raise RuntimeError('Odom child frame changed')
             if len(r.node.get_publishers_info_by_topic('/cmd_vel')) > 1:
                 raise RuntimeError('Competing cmd_vel publisher; stop the other controller')
-            requested, ready = feedback(start, actual, motion, r.max_speed, self.turn_speed)
+            requested, ready = (
+                tracker.feedback(actual, r.max_speed, self.turn_speed)
+                if tracker
+                else feedback(start, actual, motion, r.max_speed, self.turn_speed)
+            )
             now = time.monotonic()
             command = limited_velocity(command, requested, now - previous)
             previous = now
-            r.send((0.0, 0.0, 0.0) if ready else command)
+            if ready:
+                command = (0.0, 0.0, 0.0)
+            r.send(command)
             if ready and r.latest[2] < 0.005 and r.latest[3] < 0.015:
                 held = held or now
-                if now - held >= 0.5:
+                if now - held >= (1.0 if tracker else 0.5):
                     return
             else:
                 held = None
@@ -226,6 +246,8 @@ class Console:
         if isinstance(command, Motion):
             return self.move(command)
         name, *args = command
+        if name in ('path', 'path_plan'):
+            return self.path_command(name)
         if name == 'record':
             self.record(args[0])
         elif name == 'delta':
@@ -241,6 +263,33 @@ class Console:
             raise KeyboardInterrupt
         else:
             print(HELP, flush=True)
+
+    def path_command(self, name):
+        motion = load_p02()
+        print(
+            'P01 path:',
+            len(motion.points),
+            'points; max spacing 0.05 m; hold P01 yaw;',
+            'endpoint=',
+            (motion.x, motion.y),
+            flush=True,
+        )
+        self.emit(
+            'path_plan',
+            origin=asdict(self.book.origin),
+            points=motion.points,
+            heading='hold_p01',
+            target=asdict(target_pose(self.book.origin, motion)),
+        )
+        if name == 'path_plan':
+            return
+        if 'P02' in self.book.data['points']:
+            raise ValueError(
+                'P02 already recorded; use a fresh initialized session for another trial'
+            )
+        self.move(motion)
+        self.record('P02')
+        print('P02 comparison:', json.dumps(self.book.delta('P01', 'P02')), flush=True)
 
     def run(self):
         print(HELP, '\nmotion> ', end='', flush=True)
