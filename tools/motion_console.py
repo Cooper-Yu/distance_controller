@@ -16,13 +16,13 @@ import uuid
 
 from motion_model import HeadingPid, Motion, feedback, local_delta, parse_batch, target_pose
 from odom_path import limited_velocity
-from teaching_path import PathTracker, load_p02, path_ready
+from teaching_path import PathTracker, load_p02, load_p03, path_ready
 from wall_runtime import WallRunner
 
 HELP = """move forward|backward|left|right METERS [--heading on|off] [--lateral on|off]
 move xy FORWARD_METERS LEFT_METERS [--heading on|off] [--lateral on|off]
 turn left|right DEGREES
-path_plan | path P02 (fixed session P01, continuous tracking, hold P01 heading)
+path_plan [P03_turn] | path P02 | path P03_turn (fixed P01; P03 route ends right 90)
 record NAME | delta FROM TO | points | status | measure | stop | quit
 Use ; for sequential commands. Each motion anchors at its own actual start.
 During motion: stop + Enter, quit + Enter, or Ctrl+C cancels the entire batch.
@@ -165,8 +165,14 @@ class Console:
         start = r.pose()
         if motion.kind == 'path':
             delta = local_delta(self.book.origin, start)
-            if delta['distance_m'] > 0.01 or abs(delta['yaw_deg']) > 1:
-                raise RuntimeError('Path requires current pose within 1 cm / 1 deg of session P01')
+            if (
+                math.hypot(delta['x_m'] - motion.points[0][0], delta['y_m'] - motion.points[0][1])
+                > 0.01
+                or abs(delta['yaw_deg']) > 1
+            ):
+                raise RuntimeError(
+                    'Path requires current pose within 1 cm / 1 deg of fixed segment start'
+                )
             start = self.book.origin
         if r.frame != 'odom' or r.twist_frame != 'base_link':
             raise RuntimeError('Requires odom frame and base_link child frame')
@@ -259,7 +265,7 @@ class Console:
             return self.move(command)
         name, *args = command
         if name in ('path', 'path_plan'):
-            return self.path_command(name)
+            return self.path_command(name, args[0] if args else 'P02')
         if name == 'record':
             self.record(args[0])
         elif name == 'delta':
@@ -276,7 +282,10 @@ class Console:
         else:
             print(HELP, flush=True)
 
-    def path_command(self, name):
+    def path_command(self, name, destination='P02'):
+        if destination == 'P03_turn':
+            return self.p03_route(name)
+
         motion = load_p02()
         print(
             'P01 path:',
@@ -302,6 +311,32 @@ class Console:
         self.move(motion)
         self.record('P02')
         print('P02 comparison:', json.dumps(self.book.delta('P01', 'P02')), flush=True)
+
+    def p03_route(self, name):
+        """Stop at P02, follow fixed P01-frame interpolation, then turn to P01 yaw-90."""
+        second = load_p03()
+        print(
+            'P01 -> P02 -> P03 -> right 90; P02-P03:',
+            len(second.points),
+            'points; endpoint=',
+            (second.x, second.y),
+            'heading: hold P01; final yaw: P01 - 90 deg',
+            flush=True,
+        )
+        self.emit(
+            'p03_route_plan', points=second.points, final_yaw=self.book.origin.yaw - math.pi / 2
+        )
+        if name == 'path_plan':
+            return
+        if any(label in self.book.data['points'] for label in ('P02', 'P03', 'P03_after_turn')):
+            raise ValueError('Route already recorded; start a fresh initialized P01 session')
+        self.path_command('path', 'P02')
+        self.move(second)
+        self.record('P03')
+        actual = self.runner.pose()
+        self.move(Motion('turn', angle=self.book.origin.yaw - math.pi / 2 - actual.yaw))
+        self.record('P03_after_turn')
+        print('P03 route completed; stopped', flush=True)
 
     def run(self):
         print(HELP, '\nmotion> ', end='', flush=True)

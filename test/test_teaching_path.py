@@ -76,6 +76,25 @@ class TeachingPathTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             tracker.feedback(Pose(0.3, 0, 0), 0.08, 0.1, 0.3, 0)
 
+    def test_p03_fixed_segment_interpolation(self):
+        a, b = (
+            (0.8402388396167952, -0.0026000285269909117),
+            (1.773003723416002, 0.017908841631131794),
+        )
+        relative = interpolate([(0, 0), (b[0] - a[0], b[1] - a[1])])
+        points = tuple((a[0] + x, a[1] + y) for x, y in relative)
+        self.assertEqual(len(points), 20)
+        self.assertTrue(all(math.dist(x, y) <= 0.05 for x, y in zip(points, points[1:])))
+        tracker = PathTracker(Pose(0, 0, 0), points)
+        command, ready = tracker.feedback(Pose(a[0] - 0.003, a[1], 0), 0.12, 0.6)
+        self.assertGreater(command[0], 0)
+        self.assertFalse(ready)
+        self.assertTrue(path_ready(Pose(0, 0, 0), Pose(*b, 0), points))
+        self.assertEqual(
+            parse_batch('path_plan P03_turn; path P03_turn'),
+            [('path_plan', 'P03_turn'), ('path', 'P03_turn')],
+        )
+
     def test_reject_unreviewed_paths_and_batch(self):
         for points in [
             [(0, 0), (math.nan, 0)],

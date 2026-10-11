@@ -20,5 +20,10 @@
       "x": 0.8402388396167952,
       "y": -0.0026000285269909117
     }
-  ]
+  ],
+  "p03_candidate": {
+    "x": 1.773003723416002,
+    "y": 0.017908841631131794,
+    "source": "P03_candidate recorded by user; endpoint-only straight interpolation, not a measured trajectory"
+  }
 }

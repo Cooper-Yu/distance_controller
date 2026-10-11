@@ -46,6 +46,23 @@ def load_p02():
     return Motion('path', x=points[-1][0], y=points[-1][1], points=points)
 
 
+def load_p03():
+    """Fixed P01-frame P02-P03 chord, subdivided without rebasing on arrival error."""
+    from ament_index_python.packages import get_package_share_directory
+
+    data = json.loads(
+        (
+            Path(get_package_share_directory('distance_controller'))
+            / 'config/task6_p01_p02_path.json'
+        ).read_text()
+    )
+    p02 = load_p02()
+    end = data['p03_candidate']
+    relative = interpolate([(0.0, 0.0), (end['x'] - p02.x, end['y'] - p02.y)])
+    points = tuple((p02.x + x, p02.y + y) for x, y in relative)
+    return Motion('path', x=end['x'], y=end['y'], points=points)
+
+
 def path_ready(origin, actual, points):
     """Endpoint and heading acceptance use the fixed P01, not the last interpolation point."""
     p = local_delta(origin, actual)
