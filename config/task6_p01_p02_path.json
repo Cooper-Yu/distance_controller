@@ -35,5 +35,10 @@
     "x": 1.3921754778962125,
     "y": -0.5250984301851296,
     "source": "User requested 0.01m less right travel, 2026-10-11; original P01 x=1.3821754778962125; adjusted clearance unverified"
+  },
+  "p06_candidate": {
+    "x": 1.39160830299739,
+    "y": -1.0484010154349044,
+    "source": "User requested 0.02m forward along planned P01 yaw-90 from measured P06 y=-1.0284010154349044; clearance unverified"
   }
 }

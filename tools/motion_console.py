@@ -22,7 +22,7 @@ from wall_runtime import WallRunner
 HELP = """move forward|backward|left|right METERS [--heading on|off] [--lateral on|off]
 move xy FORWARD_METERS LEFT_METERS [--heading on|off] [--lateral on|off]
 turn left|right DEGREES
-path_plan [P03_turn|P04|P05] | path P02|P03_turn|P04|P05 (full route from fixed P01)
+path_plan [P03_turn|P04|P05|P06] | path P02|P03_turn|P04|P05|P06 (full route from fixed P01)
 record NAME | delta FROM TO | points | status | measure | stop | quit
 Use ; for sequential commands. Each motion anchors at its own actual start.
 During motion: stop + Enter, quit + Enter, or Ctrl+C cancels the entire batch.
@@ -286,7 +286,7 @@ class Console:
             print(HELP, flush=True)
 
     def path_command(self, name, destination='P02'):
-        if destination in ('P04', 'P05'):
+        if destination in ('P04', 'P05', 'P06'):
             return self.extended_route(name, destination)
         if destination == 'P03_turn':
             return self.p03_route(name)
@@ -346,7 +346,9 @@ class Console:
     def extended_route(self, name, destination):
         """Execute reviewed fixed-origin segments; any failure cancels remaining legs."""
         motions = load_extensions()
-        legs = list(zip(('P04', 'P05'), motions))[: 1 if destination == 'P04' else 2]
+        legs = list(zip(('P04', 'P05', 'P06'), motions))[
+            : ('P04', 'P05', 'P06').index(destination) + 1
+        ]
         for label, motion in legs:
             print(
                 label,
@@ -360,7 +362,7 @@ class Console:
             self.emit('extension_plan', waypoint=label, motion=asdict(motion))
         if name == 'path_plan':
             return self.p03_route(name)
-        if any(label in self.book.data['points'] for label in ('P04', 'P05')):
+        if any(label in self.book.data['points'] for label in ('P04', 'P05', 'P06')):
             raise ValueError('Route already recorded; start a fresh initialized P01 session')
         self.p03_route('path')
         for label, motion in legs:

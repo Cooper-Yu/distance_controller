@@ -347,3 +347,13 @@ P01 and verify P03 clearance before accepting the revised route.
 y=-0.012600028526990912. This supersedes the equal-y trial above. P02-P03
 now interpolates 1cm right while moving forward; P03-P04 follows the revised
 start automatically. P04/P05 endpoints and controller settings are unchanged.
+
+### P01 to adjusted P06 trial
+Use path_plan P06 then path P06 from a fresh initialized P01 session.
+The route stops and records P02, P03, P03_after_turn, P04, P05, P06.
+P06=(1.39160830299739,-1.0484010154349044) in P01 axes: 2cm forward
+along the planned -90deg heading from the measured P06 candidate. Its
+recorded -90.701deg heading is not baked into the route. P05-P06 has
+12 points at <=5cm spacing, holding P01 yaw-90. Earlier endpoints remain
+unchanged. The expected front clearance reduction is approximate; the new
+endpoint and clearance past the wall end need hardware verification.
