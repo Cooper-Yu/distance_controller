@@ -75,6 +75,19 @@ def fixed_segment(a, b, heading):
     return Motion('path', x=b[0], y=b[1], angle=heading, points=points)
 
 
+def reconnect_after_turn(motion, origin, actual):
+    """Reconnect only a reviewed post-turn leg; retain its fixed endpoint and yaw."""
+    delta = local_delta(origin, actual)
+    position = (delta['x_m'], delta['y_m'])
+    error = math.atan2(
+        math.sin(math.radians(delta['yaw_deg']) - motion.angle),
+        math.cos(math.radians(delta['yaw_deg']) - motion.angle),
+    )
+    if math.dist(position, motion.points[0]) > 0.02 or abs(error) > math.radians(1):
+        raise RuntimeError('Post-turn reconnect requires start within 2 cm / 1 deg')
+    return fixed_segment(position, motion.points[-1], motion.angle)
+
+
 def load_extensions():
     """Reviewed P04 through P08 extensions, all holding P01 yaw-90."""
     from ament_index_python.packages import get_package_share_directory

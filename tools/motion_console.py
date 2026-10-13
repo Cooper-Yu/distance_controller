@@ -16,7 +16,14 @@ import uuid
 
 from motion_model import HeadingPid, Motion, feedback, local_delta, parse_batch, target_pose
 from odom_path import limited_velocity
-from teaching_path import PathTracker, load_extensions, load_p02, load_p03, path_ready
+from teaching_path import (
+    PathTracker,
+    load_extensions,
+    load_p02,
+    load_p03,
+    path_ready,
+    reconnect_after_turn,
+)
 from wall_runtime import WallRunner
 
 HELP = """move forward|backward|left|right METERS [--heading on|off] [--lateral on|off]
@@ -159,10 +166,17 @@ class Console:
         self.emit('record', name=name, point=row)
         print('Recorded:', name, 'P01-relative:', row['relative_to_p01'], flush=True)
 
-    def move(self, motion):
+    def move(self, motion, reconnect=False):
         r = self.runner
         r.exclusive()
         start = r.pose()
+        if reconnect:
+            original = motion
+            motion = reconnect_after_turn(motion, self.book.origin, start)
+            self.emit('post_turn_reconnect', original=asdict(original), adjusted=asdict(motion))
+            print(
+                'P04 reconnected from actual post-turn pose; fixed endpoint unchanged', flush=True
+            )
         if motion.kind == 'path':
             delta = local_delta(self.book.origin, start)
             if math.hypot(
@@ -366,7 +380,7 @@ class Console:
             raise ValueError('Route already recorded; start a fresh initialized P01 session')
         self.p03_route('path')
         for label, motion in legs:
-            self.move(motion)
+            self.move(motion, reconnect=(label == 'P04'))
             self.record(label)
         print(destination, 'route completed; stopped', flush=True)
 

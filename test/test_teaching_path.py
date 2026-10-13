@@ -8,10 +8,36 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from action_plan import Pose
 from motion_model import Motion, parse_batch, target_pose
-from teaching_path import PathTracker, fixed_segment, interpolate, path_ready
+from teaching_path import PathTracker, fixed_segment, interpolate, path_ready, reconnect_after_turn
 
 
 class TeachingPathTests(unittest.TestCase):
+    def test_post_turn_reconnect_preserves_endpoint(self):
+        origin = Pose(4, -3, 2.1)
+        motion = fixed_segment((1.773, -0.0126), (1.7814, -0.5239), -math.pi / 2)
+        actual = target_pose(origin, Motion('move', x=1.771637, y=-0.023587))
+        actual = Pose(actual.x, actual.y, origin.yaw + math.radians(-89.6792))
+        adjusted = reconnect_after_turn(motion, origin, actual)
+        self.assertAlmostEqual(adjusted.points[0][0], 1.771637)
+        self.assertAlmostEqual(adjusted.points[0][1], -0.023587)
+        self.assertEqual(adjusted.points[-1], motion.points[-1])
+        self.assertEqual(adjusted.angle, motion.angle)
+        self.assertTrue(
+            all(
+                math.dist(a, b) <= 0.05 + 1e-12
+                for a, b in zip(adjusted.points, adjusted.points[1:])
+            )
+        )
+
+    def test_post_turn_reconnect_rejects_large_position_or_heading(self):
+        motion = fixed_segment((0, 0), (0, -0.5), -math.pi / 2)
+        for actual in (
+            Pose(0.0201, 0, -math.pi / 2),
+            Pose(0, 0, -math.pi / 2 + math.radians(1.01)),
+        ):
+            with self.assertRaises(RuntimeError):
+                reconnect_after_turn(motion, Pose(0, 0, 0), actual)
+
     def test_measured_anchors_and_spacing(self):
         anchors = [(0.0, 0.0), (0.100728401978, 0.000929167347), (0.840238839617, -0.002600028527)]
         points = interpolate(anchors)

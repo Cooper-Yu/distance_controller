@@ -368,3 +368,7 @@ are retained. path P07 is also available as a complete route prefix.
 The old P08 near-wall sample is only a reference, not an accepted endpoint.
 The 2cm right adjustment is not a guaranteed wall clearance; validate on
 hardware before accepting the new path. Laser remains observation-only.
+
+### P03 post-turn connection
+
+Only the P04 leg reconnects from the actual stopped pose after P03 rotation, within 2 cm of its nominal start and 1 degree of its heading. The fixed P04 endpoint and later waypoints remain unchanged. Larger discrepancies stop the route. Other starts retain the 1 cm gate. This is bounded odometry-based interpolation, not laser avoidance or collision validation. Restart testing from initialized P01; no mid-route resume is provided.
