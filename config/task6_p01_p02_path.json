@@ -52,9 +52,9 @@
     "source": "User approved 0.02m right adjustment from P08_near_wall x=1.8230806164410214; new chord and clearance unverified"
   },
   "p09_candidate": {
-    "x": 1.4065502783181423,
+    "x": 1.3765502783181423,
     "y": -1.5878885984779116,
-    "source": "motion_points_1791868992949070655.json: P09_candidate; user reported no visible contact; odom estimate, not clearance certification"
+    "source": "2026-10-13 user requested P09 0.03m body-right (P01 x minus), y unchanged; original taught x=1.4065502783181423. P10 unchanged; revised hardware clearance pending."
   },
   "p10_candidate": {
     "x": 1.3849013479064716,

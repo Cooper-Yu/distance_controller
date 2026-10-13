@@ -435,3 +435,10 @@ The P03 supplied stopped snapshot is covered by a path regression. Its later
 status angle exceeded acceptance, but the old audit omitted the exact final pose,
 so the physical cause and exact failure-time error remain unconfirmed. Hardware
 validation is pending; retain the P10 2 cm rightward adjustment and restart at P01.
+2026-10-13 P09 adjustment: user requested 3 cm toward the body-right wall.
+At the planned P01 heading -90 degrees this changes P09 x from
+1.4065502783181423 to 1.3765502783181423 m, with y unchanged at
+-1.5878885984779116 m. P08-P09 and P09-P10 are reinterpolated automatically;
+P10 and all other targets remain unchanged. P09-P10 now has about 8.35 mm
+of leftward displacement while advancing. This does not establish actual
+right-wall clearance; verify the revised P09 stop before replaying onward.
