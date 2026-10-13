@@ -442,3 +442,11 @@ At the planned P01 heading -90 degrees this changes P09 x from
 P10 and all other targets remain unchanged. P09-P10 now has about 8.35 mm
 of leftward displacement while advancing. This does not establish actual
 right-wall clearance; verify the revised P09 stop before replaying onward.
+2026-10-13 follow-up adjustment (supersedes the previous P09/P10 targets):
+P09 moves another 2 cm body-right to (1.3565502783181423, -1.5878885984779116);
+P10 moves another 3 cm body-right to (1.3549013479064716, -1.8855925989094273).
+Both are now 5 cm right of their original teaching samples. All other targets,
+y coordinates and headings stay unchanged. P08-P09, P09-P10 and P10-P11
+reinterpolate from the revised endpoints; P09-P10 now advances with about
+1.65 mm rightward displacement. Test from initialized P01 using path P10;
+physical clearance and the revised P10 turning location remain unverified.

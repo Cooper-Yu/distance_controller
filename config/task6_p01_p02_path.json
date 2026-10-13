@@ -52,14 +52,14 @@
     "source": "User approved 0.02m right adjustment from P08_near_wall x=1.8230806164410214; new chord and clearance unverified"
   },
   "p09_candidate": {
-    "x": 1.3765502783181423,
+    "x": 1.3565502783181423,
     "y": -1.5878885984779116,
-    "source": "2026-10-13 user requested P09 0.03m body-right (P01 x minus), y unchanged; original taught x=1.4065502783181423. P10 unchanged; revised hardware clearance pending."
+    "source": "2026-10-13 user requested another 0.02m body-right from x=1.3765502783181423; total 0.05m right of original taught x=1.4065502783181423. P01 y unchanged; revised hardware clearance pending."
   },
   "p10_candidate": {
-    "x": 1.3849013479064716,
+    "x": 1.3549013479064716,
     "y": -1.8855925989094273,
-    "source": "2026-10-13 user reported left-wall collision during automatic P09-P10 replay; shift P10 0.02m body-right (P01 x minus), y unchanged. Original taught x=1.4049013479064716; revised hardware clearance pending."
+    "source": "2026-10-13 user requested another 0.03m body-right from x=1.3849013479064716 after earlier left-wall collision adjustment; total 0.05m right of original taught x=1.4049013479064716. P01 y unchanged; revised hardware clearance pending."
   },
   "p11_candidate": {
     "x": 0.9418674948445646,
