@@ -57,9 +57,9 @@
     "source": "motion_points_1791868992949070655.json: P09_candidate; user reported no visible contact; odom estimate, not clearance certification"
   },
   "p10_candidate": {
-    "x": 1.4049013479064716,
+    "x": 1.3849013479064716,
     "y": -1.8855925989094273,
-    "source": "motion_points_1791868992949070655.json: P10_near_wall; user reported no visible contact; odom estimate, not clearance certification"
+    "source": "2026-10-13 user reported left-wall collision during automatic P09-P10 replay; shift P10 0.02m body-right (P01 x minus), y unchanged. Original taught x=1.4049013479064716; revised hardware clearance pending."
   },
   "p11_candidate": {
     "x": 0.9418674948445646,

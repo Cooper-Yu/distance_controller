@@ -34,3 +34,14 @@ Each new post-turn translation uses the actual stopped start only within 2 cm / 
 Interpolation is at most 5 cm. These chords are not a recorded collision-checked trajectory. Laser remains observation-only.
 
 Source JSON SHA256: `8a2b7c1b37016cf6541761143499426a54b3962c60713aad7184d9b227624812`
+
+
+2026-10-13 replay correction: user reported left-wall contact on P09-P10.
+P10 target x changes from 1.4049013479064716 to 1.3849013479064716 m;
+y stays -1.8855925989094273 m. At P01 yaw-90, decreasing x is body-right.
+P09-P10 gradually shifts right; P10-P11 starts at the revised nominal P10
+and retains its fixed P11 endpoint. All other waypoint targets and headings
+are unchanged. The original teaching table remains historical evidence.
+This endpoint adjustment does not guarantee 2 cm physical clearance along
+the whole segment; collision-free replay is pending. Test `path P10` from
+initialized P01 first; it stops before the P10 turn. No mid-route resume.

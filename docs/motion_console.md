@@ -400,3 +400,14 @@ The terminal half-turn has not been observed in this teaching session and needs
 separate hardware validation. Do not equate synthetic route completion with
 collision-free hardware replay. No laser avoidance or automatic endpoint shift
 has been introduced. Keep supervision, especially at the near-wall P10 sample.
+
+
+2026-10-13 replay correction: user reported left-wall contact on P09-P10.
+P10 target x changes from 1.4049013479064716 to 1.3849013479064716 m;
+y stays -1.8855925989094273 m. At P01 yaw-90, decreasing x is body-right.
+P09-P10 gradually shifts right; P10-P11 starts at the revised nominal P10
+and retains its fixed P11 endpoint. All other waypoint targets and headings
+are unchanged. The original teaching table remains historical evidence.
+This endpoint adjustment does not guarantee 2 cm physical clearance along
+the whole segment; collision-free replay is pending. Test `path P10` from
+initialized P01 first; it stops before the P10 turn. No mid-route resume.
