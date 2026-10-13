@@ -323,8 +323,8 @@ hold P01 yaw minus 90 degrees. The P04-P05 leg is a right strafe, not a turn
 followed by forward travel. Geometry remains in P01 axes; body commands rotate
 using current odom heading. No measured turn drift is added to later targets.
 
-Each leg requires its fixed start within 1cm / 1degree. Excess turn displacement
-therefore stops before P04 instead of silently rebasing the route. Cancellation,
+Ordinary legs require their fixed start within 1cm / 1degree. Post-turn legs use
+the bounded actual-start connection described below. Cancellation,
 stale odom, failed recording or arrival prevents later legs; there is no partial
 resume. Endpoints use 5mm planar / .01rad heading acceptance and the 1s stopped
 hold. The existing speed selection .12m/s and .6rad/s and unified PID remain.
@@ -371,4 +371,32 @@ hardware before accepting the new path. Laser remains observation-only.
 
 ### P03 post-turn connection
 
-Only the P04 leg reconnects from the actual stopped pose after P03 rotation, within 2 cm of its nominal start and 1 degree of its heading. The fixed P04 endpoint and later waypoints remain unchanged. Larger discrepancies stop the route. Other starts retain the 1 cm gate. This is bounded odometry-based interpolation, not laser avoidance or collision validation. Restart testing from initialized P01; no mid-route resume is provided.
+The P04 leg and the P11-P15 legs reconnect from the actual stopped pose after their preceding rotation, within 2 cm of its nominal start and 1 degree of its heading. The fixed P04 endpoint and later waypoints remain unchanged. Larger discrepancies stop the route. Other starts retain the 1 cm gate. This is bounded odometry-based interpolation, not laser avoidance or collision validation. Restart testing from initialized P01; no mid-route resume is provided.
+
+
+### Complete P01-P15 trial (no terminal half-turn)
+
+After updating/building and completing P01 initialization, open a new console:
+
+```bash
+ros2 run distance_controller motion_console --laser-log-only --speed 0.12 --turn-speed 0.6
+```
+
+Run `path_plan P15` first, then `path P15`. Destination prefixes P09-P14 are
+also supported; each starts at P01 and stops on arrival at that destination,
+before its following turn. Never start a fresh console at a later point and
+call a full route: the current startup pose becomes its P01 reference.
+
+P09-P15 use the same-session xy samples in
+[evidence](evidence/task6_p09_p15_teaching.md). Turns target fixed P01 headings:
+P10 right 90, P11 right 90, P12 left 90, P13 right 90, P14 left 90.
+Nominal P15 heading is P01-180 degrees. Small teaching yaw errors are not copied.
+Every waypoint and successful turn is stopped and recorded. A failed turn,
+stale odom, excessive deviation, recording failure or operator stop cancels
+remaining actions. There is no mid-route resume or relaxed arrival tolerance.
+
+P15 arrival prints `P15 route completed; stopped`; it does not rotate 180 degrees.
+The terminal half-turn has not been observed in this teaching session and needs
+separate hardware validation. Do not equate synthetic route completion with
+collision-free hardware replay. No laser avoidance or automatic endpoint shift
+has been introduced. Keep supervision, especially at the near-wall P10 sample.

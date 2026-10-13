@@ -68,6 +68,10 @@ def parse_motion(words):
     return Motion('move', x=x, y=y, **options)
 
 
+LATE_DESTINATIONS = tuple(f'P{i:02d}' for i in range(9, 16))
+PATH_DESTINATIONS = ('P02', 'P03_turn', 'P04', 'P05', 'P06', 'P07', 'P08') + LATE_DESTINATIONS
+
+
 def parse_batch(line):
     """Semicolons mean sequential stopped actions, never shell execution."""
     result = []
@@ -90,25 +94,13 @@ def parse_batch(line):
             'quit': 1,
             'help': 1,
         }
-        if (
-            words[0] == 'path_plan'
-            and len(words) == 2
-            and words[1] in ('P03_turn', 'P04', 'P05', 'P06', 'P07', 'P08')
-        ):
+        if words[0] == 'path_plan' and len(words) == 2 and words[1] in PATH_DESTINATIONS:
             result.append(tuple(words))
             continue
         if words[0] not in arity or len(words) != arity[words[0]]:
             raise ValueError('Unknown command or wrong arguments; type help')
-        if words[0] == 'path' and words[1] not in (
-            'P02',
-            'P03_turn',
-            'P04',
-            'P05',
-            'P06',
-            'P07',
-            'P08',
-        ):
-            raise ValueError('Supported: path P02, P03_turn, P04, P05, P06, P07 or P08')
+        if words[0] == 'path' and words[1] not in PATH_DESTINATIONS:
+            raise ValueError('Supported path destinations: ' + ', '.join(PATH_DESTINATIONS))
         result.append(tuple(words))
     if len(result) > 32:
         raise ValueError('At most 32 commands per batch')

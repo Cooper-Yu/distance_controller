@@ -112,6 +112,52 @@ def load_extensions():
     return tuple(fixed_segment(a, b, -math.pi / 2) for a, b in zip(points, points[1:]))
 
 
+def load_late_route(destination):
+    """P08-P15 fixed targets with absolute P01 headings and explicit intermediate turns."""
+    from ament_index_python.packages import get_package_share_directory
+    from motion_model import LATE_DESTINATIONS
+
+    if destination not in LATE_DESTINATIONS:
+        raise ValueError('Expected P09-P15 destination')
+    data = json.loads(
+        (
+            Path(get_package_share_directory('distance_controller'))
+            / 'config/task6_p01_p02_path.json'
+        ).read_text()
+    )
+    return late_route(data, destination)
+
+
+def late_route(data, destination):
+    """Build a bounded route prefix from reviewed teaching data."""
+    from motion_model import LATE_DESTINATIONS
+
+    if destination not in LATE_DESTINATIONS:
+        raise ValueError('Expected P09-P15 destination')
+    # These headings encode R90 at P10/P11/P13 and L90 at P12/P14.
+    headings = (-90, -90, -180, -270, -180, -270, -180)
+    previous = tuple(data['p08_candidate'][axis] for axis in ('x', 'y'))
+    old_heading, actions = -90, []
+    for number, heading in zip(range(9, 16), headings):
+        label = f'P{number:02d}'
+        end = tuple(data[f'p{number:02d}_candidate'][axis] for axis in ('x', 'y'))
+        if heading != old_heading:
+            actions.append(
+                (f'P{number - 1:02d}_after_turn', Motion('turn', angle=math.radians(heading)))
+            )
+        actions.append((label, fixed_segment(previous, end, math.radians(heading))))
+        if label == destination:
+            return actions
+        previous, old_heading = end, heading
+    raise ValueError('Incomplete route')
+
+
+def turn_to_heading(origin, actual, heading):
+    """Shortest signed correction to a fixed P01 heading, independent of yaw wrapping."""
+    error = origin.yaw + heading - actual.yaw
+    return Motion('turn', angle=math.atan2(math.sin(error), math.cos(error)))
+
+
 def path_ready(origin, actual, points, heading=0.0):
     """Endpoint and heading acceptance use the fixed P01, not the last interpolation point."""
     p = local_delta(origin, actual)

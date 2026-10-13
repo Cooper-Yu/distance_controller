@@ -14,11 +14,21 @@ import threading
 import time
 import uuid
 
-from motion_model import HeadingPid, Motion, feedback, local_delta, parse_batch, target_pose
+from motion_model import (
+    LATE_DESTINATIONS,
+    HeadingPid,
+    Motion,
+    feedback,
+    local_delta,
+    parse_batch,
+    target_pose,
+)
 from odom_path import limited_velocity
 from teaching_path import (
     PathTracker,
     load_extensions,
+    load_late_route,
+    turn_to_heading,
     load_p02,
     load_p03,
     path_ready,
@@ -29,7 +39,7 @@ from wall_runtime import WallRunner
 HELP = """move forward|backward|left|right METERS [--heading on|off] [--lateral on|off]
 move xy FORWARD_METERS LEFT_METERS [--heading on|off] [--lateral on|off]
 turn left|right DEGREES
-path_plan [P03_turn|P04|P05|P06|P07|P08] | path P02|P03_turn|P04|P05|P06|P07|P08 (full route from fixed P01)
+path_plan [P02|P03_turn|P04..P15] | path P02|P03_turn|P04..P15 (full route from fixed P01)
 record NAME | delta FROM TO | points | status | measure | stop | quit
 Use ; for sequential commands. Each motion anchors at its own actual start.
 During motion: stop + Enter, quit + Enter, or Ctrl+C cancels the entire batch.
@@ -175,7 +185,7 @@ class Console:
             motion = reconnect_after_turn(motion, self.book.origin, start)
             self.emit('post_turn_reconnect', original=asdict(original), adjusted=asdict(motion))
             print(
-                'P04 reconnected from actual post-turn pose; fixed endpoint unchanged', flush=True
+                'Path reconnected from actual post-turn pose; fixed endpoint unchanged', flush=True
             )
         if motion.kind == 'path':
             delta = local_delta(self.book.origin, start)
@@ -300,6 +310,8 @@ class Console:
             print(HELP, flush=True)
 
     def path_command(self, name, destination='P02'):
+        if destination in LATE_DESTINATIONS:
+            return self.late_route(name, destination)
         if destination in ('P04', 'P05', 'P06', 'P07', 'P08'):
             return self.extended_route(name, destination)
         if destination == 'P03_turn':
@@ -381,6 +393,37 @@ class Console:
         self.p03_route('path')
         for label, motion in legs:
             self.move(motion, reconnect=(label == 'P04'))
+            self.record(label)
+        print(destination, 'route completed; stopped', flush=True)
+
+    def late_route(self, name, destination):
+        """Full P01 prefix then reviewed P09-P15; no implicit P15 half-turn or resume."""
+        actions = load_late_route(destination)
+        self.extended_route('path_plan', 'P08')
+        for label, motion in actions:
+            self.emit('late_route_plan', waypoint=label, motion=asdict(motion))
+            print(
+                label,
+                motion.kind,
+                'P01 heading=',
+                math.degrees(motion.angle),
+                'endpoint=',
+                (motion.x, motion.y) if motion.kind == 'path' else 'in place',
+                flush=True,
+            )
+        if name == 'path_plan':
+            return
+        if any(label in self.book.data['points'] for label, _ in actions):
+            raise ValueError('Route already recorded; start a fresh initialized P01 session')
+        self.extended_route('path', 'P08')
+        reconnect = False
+        for label, motion in actions:
+            if motion.kind == 'turn':
+                self.move(turn_to_heading(self.book.origin, self.runner.pose(), motion.angle))
+                reconnect = True
+            else:
+                self.move(motion, reconnect=reconnect)
+                reconnect = False
             self.record(label)
         print(destination, 'route completed; stopped', flush=True)
 

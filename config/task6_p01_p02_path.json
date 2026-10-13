@@ -50,5 +50,40 @@
     "x": 1.8030806164410214,
     "y": -1.5875291803742129,
     "source": "User approved 0.02m right adjustment from P08_near_wall x=1.8230806164410214; new chord and clearance unverified"
+  },
+  "p09_candidate": {
+    "x": 1.4065502783181423,
+    "y": -1.5878885984779116,
+    "source": "motion_points_1791868992949070655.json: P09_candidate; user reported no visible contact; odom estimate, not clearance certification"
+  },
+  "p10_candidate": {
+    "x": 1.4049013479064716,
+    "y": -1.8855925989094273,
+    "source": "motion_points_1791868992949070655.json: P10_near_wall; user reported no visible contact; odom estimate, not clearance certification"
+  },
+  "p11_candidate": {
+    "x": 0.9418674948445646,
+    "y": -1.9058474122860602,
+    "source": "motion_points_1791868992949070655.json: P11_candidate; user reported no visible contact; odom estimate, not clearance certification"
+  },
+  "p12_candidate": {
+    "x": 0.9221371725514836,
+    "y": -1.0915868730786444,
+    "source": "motion_points_1791868992949070655.json: P12_candidate; user reported no visible contact; odom estimate, not clearance certification"
+  },
+  "p13_candidate": {
+    "x": 0.4258019547712687,
+    "y": -1.0819099009985675,
+    "source": "motion_points_1791868992949070655.json: P13_candidate; user reported no visible contact; odom estimate, not clearance certification"
+  },
+  "p14_candidate": {
+    "x": 0.42248777781822894,
+    "y": -0.5732626964522145,
+    "source": "motion_points_1791868992949070655.json: P14_candidate; user reported no visible contact; odom estimate, not clearance certification"
+  },
+  "p15_candidate": {
+    "x": 0.02899960878708014,
+    "y": -0.5596575672149936,
+    "source": "motion_points_1791868992949070655.json: P15_candidate; user reported no visible contact; odom estimate, not clearance certification"
   }
 }
