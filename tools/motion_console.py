@@ -208,22 +208,77 @@ class Console:
         self.emit('started', motion=asdict(motion), start=asdict(start), target=asdict(target))
         length = math.hypot(motion.x, motion.y)
         budget = 30 + 3 * (length / r.max_speed + abs(motion.angle) / self.turn_speed)
-        r.velocity_pub = r.node.create_publisher(r.twist, '/cmd_vel', 10)
         try:
-            self.follow(start, motion, budget)
+            actual = self.finish_motion(start, motion, budget)
         finally:
             self.stop_motion()
-        actual = r.pose()
-        ready = (
-            path_ready(start, actual, motion.points, motion.angle)
-            if motion.kind == 'path'
-            else feedback(start, actual, motion, r.max_speed, self.turn_speed)[1]
-        )
-        if not ready:
-            raise RuntimeError('Final stopped pose outside enabled tolerances')
         self.emit('completed', actual=asdict(actual), displacement=local_delta(start, actual))
         print('Reached (odom estimate):', actual, flush=True)
         self.measure()
+
+    def stopped_check(self, start, actual, motion, attempt):
+        """Audit final errors; retry gates are separate from unchanged acceptance limits."""
+        p = local_delta(start, actual)
+        dx, dy = motion.x - p['x_m'], motion.y - p['y_m']
+        yaw_error = start.yaw + motion.angle - actual.yaw
+        if motion.kind == 'path':
+            yaw_error = math.atan2(math.sin(yaw_error), math.cos(yaw_error))
+            ready = path_ready(start, actual, motion.points, motion.angle)
+            position_error = math.hypot(dx, dy)
+        else:
+            ready = feedback(start, actual, motion, self.runner.max_speed, self.turn_speed)[1]
+            position_error = math.hypot(dx, dy)
+            if motion.kind == 'turn':
+                position_error = 0.0  # Existing feedback enforces the 4 cm center limit.
+            elif not motion.lateral:
+                position_error = abs(
+                    (dx * motion.x + dy * motion.y) / math.hypot(motion.x, motion.y)
+                )
+        if motion.kind != 'turn' and not motion.heading:
+            yaw_error = 0.0
+        self.emit(
+            'final_check',
+            attempt=attempt,
+            actual=asdict(actual),
+            target=asdict(target_pose(start, motion)),
+            displacement=p,
+            position_error_m=position_error,
+            yaw_error_rad=yaw_error,
+            ready=ready,
+        )
+        small = position_error <= 0.01 and abs(yaw_error) <= math.radians(1)
+        return ready, small
+
+    def finish_motion(self, start, motion, budget):
+        """At most two small post-stop corrections, sharing the original action deadline."""
+        r = self.runner
+        deadline = time.monotonic() + budget
+        for attempt in range(3):
+            self.cancel_input()
+            r.exclusive()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError('Motion timeout before final correction')
+            r.velocity_pub = r.node.create_publisher(r.twist, '/cmd_vel', 10)
+            try:
+                self.follow(
+                    start,
+                    motion,
+                    min(remaining, 8.0) if attempt else remaining,
+                    settling=bool(attempt),
+                )
+            finally:
+                self.stop_motion()
+            actual = r.pose()
+            self.cancel_input()
+            ready, small = self.stopped_check(start, actual, motion, attempt)
+            if ready:
+                return actual
+            if not small or attempt == 2:
+                raise RuntimeError('Final stopped pose outside enabled tolerances')
+            self.emit('settle_retry', attempt=attempt + 1)
+            print('Small stopped-pose error; bounded correction', attempt + 1, 'of 2', flush=True)
+        raise RuntimeError('Final correction limit reached')
 
     def stop_motion(self):
         """Release the publisher after zeros without clearing a pending cancel signal."""
@@ -239,10 +294,12 @@ class Console:
             r.node.destroy_publisher(r.velocity_pub)
             r.velocity_pub = None
 
-    def follow(self, start, motion, budget):
+    def follow(self, start, motion, budget, settling=False):
         r = self.runner
         deadline, previous = time.monotonic() + budget, time.monotonic()
         command, held, logged = (0.0, 0.0, 0.0), None, 0.0
+        speed = min(r.max_speed, 0.02) if settling else r.max_speed
+        turn_speed = min(self.turn_speed, 0.10) if settling else self.turn_speed
         tracker = PathTracker(start, motion.points, motion.angle) if motion.kind == 'path' else None
         heading_pid = HeadingPid()
         while time.monotonic() < deadline:
@@ -256,14 +313,14 @@ class Console:
             now = time.monotonic()
             dt = now - previous
             requested, ready = (
-                tracker.feedback(actual, r.max_speed, self.turn_speed, dt, r.body_velocity[2])
+                tracker.feedback(actual, speed, turn_speed, dt, r.body_velocity[2])
                 if tracker
                 else feedback(
                     start,
                     actual,
                     motion,
-                    r.max_speed,
-                    self.turn_speed,
+                    speed,
+                    turn_speed,
                     heading_pid,
                     dt,
                     r.body_velocity[2],

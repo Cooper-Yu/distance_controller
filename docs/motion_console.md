@@ -411,3 +411,27 @@ are unchanged. The original teaching table remains historical evidence.
 This endpoint adjustment does not guarantee 2 cm physical clearance along
 the whole segment; collision-free replay is pending. Test `path P10` from
 initialized P01 first; it stops before the P10 turn. No mid-route resume.
+
+### Bounded correction after stopping
+
+Arrival thresholds remain 5 mm and 0.01 rad for enabled axes. After publishing
+zeros, the console checks the stopped pose again. If it is outside acceptance
+but within 1 cm / 1 degree, it can make at most two corrections toward the same
+target. Each correction has at most 8 seconds of control time within the original
+action deadline, with speed caps 0.02 m/s and 0.10 rad/s. Zero-command cleanup and
+pose acquisition retain their own bounded waits. Existing turn-center and path
+deviation guards remain active. Disabled heading/lateral axes remain disabled.
+
+Larger errors, exhausted retries, stale odometry, competing command publishers
+or operator cancellation stop the action and cancel the remaining batch. This
+is part of the running action; it does not resume an already reported STOPPED
+route. Audit JSONL adds final_check (actual, target, displacement, enabled-axis
+errors and readiness) and settle_retry events. Laser remains observation-only.
+
+2026-10-13 validation: 33 focused unit tests, Ruff, Humble colcon build and five
+isolated synthetic ROS scenarios passed: one correction succeeds; repeated drift
+exhausts two retries; large error, operator stop and stale odometry do not retry.
+The P03 supplied stopped snapshot is covered by a path regression. Its later
+status angle exceeded acceptance, but the old audit omitted the exact final pose,
+so the physical cause and exact failure-time error remain unconfirmed. Hardware
+validation is pending; retain the P10 2 cm rightward adjustment and restart at P01.
