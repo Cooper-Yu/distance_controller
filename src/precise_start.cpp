@@ -84,6 +84,9 @@ void DistanceController::finish_precise_batch(const distance_controller::StartSu
   }
   precision_collecting_ = false;
   if (!heading_ok) {
+    // A bounded precise-start retry begins a new alignment cycle. Scan recovery
+    // alone must not refresh this budget; the total preparation deadline remains.
+    wall_refinements_ = 0;
     initial_alignment_complete_ = false;
     wall_target_frozen_ = wall_verifying_ = alignment_settling_ = false;
     wall_direction_window_.clear();

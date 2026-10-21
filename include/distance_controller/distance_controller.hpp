@@ -310,7 +310,8 @@ private:
   bool wall_target_frozen_{false};  ///< Odom turn target no longer follows individual scans.
   bool wall_verifying_{false};      ///< Post-turn fresh scan verification phase.
   double frozen_wall_yaw_{0.0};     ///< Frozen odom heading in radians.
-  unsigned wall_refinements_{0};    ///< At most two verified target refinements.
+  /// Two refinements per alignment cycle; scan recovery retains the count.
+  unsigned wall_refinements_{0};
   /// @brief Run multi-scan alignment.
   /// @param current_time ROS time used for stopped dwell.
   /// @return True while initialization owns the control tick.

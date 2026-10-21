@@ -103,6 +103,33 @@ def inject_start_noise(values, scan):
             values[i] += offset / (-math.sin(bearing))
 
 
+def heading_reentry_noise():
+    """Force two refinements, a successful alignment, then one precise-start reentry.
+
+    Change the synthetic wall direction only when a new stopped phase begins;
+    keep it fixed during motion so the controller always has a reachable target.
+    """
+    if not os.getenv('HEADING_REENTRY') or not hasattr(node, 'test_log'):
+        return None
+    log = node.test_log.read_text()
+    checks = log.count('Wall heading verification: collecting new stopped scans')
+    phase = f'wall_{checks}'
+    if checks == 3 and 'START_VERIFY: stopped hold' in log:
+        phase = 'precise_reentry'
+    if phase != getattr(node, 'heading_noise_phase', None):
+        node.heading_noise_phase = phase
+        residual = {
+            'wall_1': 0.020,
+            'wall_2': -0.020,
+            'wall_3': 0.0,
+            'precise_reentry': 0.015,
+            'wall_4': 0.012,
+        }.get(phase)
+        if residual is not None:
+            node.heading_noise = -pose[2] - residual
+    return getattr(node, 'heading_noise', 0.0)
+
+
 def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - one fixture sensor tick with explicit fault injections
     global last_scan, scan_number, bad_scan_start
     rclpy.spin_once(node, timeout_sec=0.008)
@@ -156,6 +183,9 @@ def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - o
         x, y = pose[0] + 0.02 * c, pose[1] + 0.02 * s
         scan_number += 1
         noise = float(os.getenv('WALL_HEADING_NOISE', '0')) * (1 if scan_number % 2 else -1)
+        reentry_noise = heading_reentry_noise()
+        if reentry_noise is not None:
+            noise = reentry_noise
         values = []
         for i in range(721):
             a = scan.angle_min + i * scan.angle_increment + pose[2] + math.pi + noise
@@ -322,6 +352,11 @@ try:
                 assert hasattr(node, 'scan_stop_checked')
             if os.getenv('PRECISE_START'):
                 assert 'START_VERIFIED' in log and 'retained=' in log, log[-4000:]
+                if os.getenv('HEADING_REENTRY'):
+                    before, after = log.split('START_REFINE:', 1)
+                    assert 'refinement=2' in before, before[-4000:]
+                    assert 'refinement=0' in after and 'target refined:' in after, after[-4000:]
+                    assert 'WALL_HEADING_VERIFICATION_FAILED' not in log
                 if os.getenv('PRECISE_NOISE') == 'spikes':
                     assert (
                         'retained=13/15 stable=true' in log or 'retained=12/15 stable=true' in log

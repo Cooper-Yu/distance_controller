@@ -209,6 +209,11 @@ wrong wall cannot be detected by these statistics alone.
 An unstable batch keeps zero velocity while another batch is collected. Each
 verification attempt has a 5 s budget; at most three stable-but-off-target
 refinements are allowed. Heading refinement reacquires the wall direction.
+When a stable off-target batch explicitly starts a new heading-alignment cycle,
+that cycle receives its own allowance of two wall-target refinements. A scan
+recovery, another verification tick, or a distance-only adjustment does not reset
+that allowance. The three precise-start retries, 60 s total preparation budget,
+5 mm / 0.5 degree acceptance thresholds and all existing stop guards remain unchanged.
 `START_VERIFY_TIMEOUT` or `START_REFINEMENT_LIMIT` fails without recording P01;
 no tolerance is widened automatically. Valid completion prints `START_VERIFIED`
 and the usual `preparation complete` handoff. `START_VERIFY` reports medians,
@@ -223,6 +228,11 @@ These are measurement acceptance targets, not a claim of 5 mm physical accuracy.
 Synthetic checks additionally support `PRECISE_START=1`, `PRECISE_NOISE=spikes`
 or `PRECISE_NOISE=unstable` with `WALL_CASE=odom_trial_right_only` in the existing
 fixture. No real hardware is driven by these localhost-domain tests.
+For the alignment reentry regression, run
+`WALL_CASE=odom_trial_right_only PRECISE_START=1 HEADING_REENTRY=1 python3 test/verify_wall_session.py`
+after building and sourcing the package. It changes the synthetic wall direction
+only at stopped verification phases, exercises two initial target refinements,
+then requires another refinement after `START_REFINE` and a successful stopped handoff.
 
 ## Continuous P01 to P02 repeatability trial
 
