@@ -102,3 +102,29 @@ push was performed by this implementation agent. The existing return deadline
 uses 30 + 3 * (polyline_length / speed + abs(path_heading) / turn_speed);
 the absolute path-heading term can make the allowance conservative but only
 adds time. Feedback and 4 cm drift stops remain independently active.
+
+### Import repair: separately sampled turn anchor (2026-10-22)
+
+The cloud P12 source first failed import at `Recorded action heading differs
+from fixed route`. The outward runner computes a relative turn from one pose;
+Console records a fresh start pose before executing that relative angle.
+Consequently the recorded target is exactly `recorded_start.yaw + motion.angle`,
+but need not equal the nominal P01-relative heading to 1e-8 rad. Reported cloud
+turn differences were +0.000146269, +0.000054571 and -0.000074318 rad; paths had
+no difference. The old exact nominal-heading rule was an importer error.
+
+The importer now checks turn targets against the actual recorded start exactly
+(1e-8), and separately bounds nominal heading difference by the original
+0.01 rad heading acceptance. Path nominal headings remain exact. Turns must
+have zero translation and a shortest relative angle within pi. Source stopped
+pose acceptance, 4 cm turn drift, return continuity and motion control are
+unchanged. A future single-sample/absolute-target controller repair is separate.
+
+The old importer failed a deterministic 0.0002 rad two-sample reproduction;
+12 return tests now pass, including forged-target rejection, +/-0.0101 rad
+nominal-error rejection, invalid turn geometry and unchanged path exactness.
+`bash /tmp/route_return_final_checks.bash` rebuilt the installed package, passed
+both registered CTests (14 session + 12 return cases), 13 existing backend
+cases, Ruff and diff checks, and re-imported all five earlier ROS source audits.
+No new physical motion or new ROS motion fixture was run for this parser-only
+repair. Cloud re-import and actual return remain separate acceptance gates.

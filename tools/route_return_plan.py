@@ -132,13 +132,20 @@ def validate_completed(action, block, book, previous):
     start = pose(started['start']) if action.kind == 'turn' else previous
     anchor = pose(book['origin']) if action.kind == 'path' else start
     expected = target_pose(anchor, motion)
+    # Turns calculate their relative angle before Console samples the actual start.
+    # Audit that recorded start exactly below; retain the original heading acceptance.
+    heading_limit = 0.01 if action.kind == 'turn' else 1e-8
+    if action.kind == 'turn' and (
+        motion.x != 0 or motion.y != 0 or abs(motion.angle) > math.pi + 1e-8
+    ):
+        raise ValueError('Unsupported source turn geometry')
     if (
         abs(
             math.remainder(
                 expected.yaw - pose(book['origin']).yaw - action.heading_rad, 2 * math.pi
             )
         )
-        > 1e-8
+        > heading_limit
     ):
         raise ValueError('Recorded action heading differs from fixed route')
     if action.kind == 'path' and (

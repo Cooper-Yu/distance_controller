@@ -140,6 +140,53 @@ class ReturnPlanTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_source(book, rows)
 
+    def test_turn_uses_second_stopped_pose_as_actual_anchor(self):
+        from teaching_path import turn_to_heading
+
+        book, rows = fixture()
+        origin = Pose(**book['origin'])
+        planned_start = Pose(**rows[8]['start'])
+        measured_start = Pose(planned_start.x, planned_start.y, planned_start.yaw + 0.0002)
+        motion = turn_to_heading(origin, planned_start, 0.3)
+        actual_target = target_pose(measured_start, motion)
+        self.assertAlmostEqual(actual_target.yaw - origin.yaw - 0.3, 0.0002)
+        rows[8]['start'], rows[8]['target'] = asdict(measured_start), asdict(actual_target)
+        rows[10]['actual'] = asdict(actual_target)
+        rows[11]['point']['pose'] = asdict(actual_target)
+        book['points']['P02_turn']['pose'] = asdict(actual_target)
+        validate_source(book, rows)
+        restored = tuple(source_actions(book, rows))[1]
+        self.assertEqual(restored.start, measured_start)
+        self.assertEqual(restored.end, actual_target)
+        # A forged target still fails the exact recorded motion/anchor relationship.
+        rows[8]['target']['yaw'] += 0.0001
+        with self.assertRaisesRegex(ValueError, 'Motion target mismatch'):
+            validate_source(book, rows)
+
+    def test_turn_nominal_heading_bound_and_geometry_retained(self):
+        for delta in (0.0101, -0.0101):
+            with self.subTest(delta=delta):
+                book, rows = fixture()
+                rows[8]['start']['yaw'] += delta
+                rows[8]['target']['yaw'] += delta
+                rows[10]['actual']['yaw'] += delta
+                rows[11]['point']['pose']['yaw'] += delta
+                book['points']['P02_turn']['pose']['yaw'] += delta
+                with self.assertRaisesRegex(ValueError, 'heading differs from fixed route'):
+                    validate_source(book, rows)
+        for key, value in (('x', 0.001), ('y', 0.001), ('angle', 2 * math.pi + 0.3)):
+            with self.subTest(key=key):
+                book, rows = fixture()
+                rows[8]['motion'][key] = value
+                with self.assertRaisesRegex(ValueError, 'Unsupported source turn geometry'):
+                    validate_source(book, rows)
+
+    def test_path_nominal_heading_still_exact(self):
+        book, rows = fixture()
+        rows[3]['motion']['angle'] += 0.0001
+        with self.assertRaisesRegex(ValueError, 'heading differs from fixed route'):
+            validate_source(book, rows)
+
     def test_source_claim_is_permanent_single_attempt(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'attempt.json'
