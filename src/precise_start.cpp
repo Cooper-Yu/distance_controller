@@ -13,6 +13,7 @@ bool DistanceController::verify_precise_start()
     precision_collecting_ = true;
     precision_stationary_ = false;
     precision_begin_ = now;
+    precision_batch_log_ = {};
     precision_samples_.clear();
     precision_diagnostics_ = {};
     ++precision_diagnostic_cycle_;
@@ -60,13 +61,13 @@ bool DistanceController::verify_precise_start()
     return true;
   }
   precision_stamp_ = observation_stamp_ns_;
-  precision_samples_.push_back(
+  distance_controller::append_start_sample(
+    precision_samples_,
     {right_wall_, rear_wall_,
      right_heading_valid_ ? right_wall_angle_ : std::numeric_limits<double>::quiet_NaN()});
   ++precision_diagnostics_.accepted;
   if (precision_samples_.size() == 15) {
     const auto summary = distance_controller::summarize_start(precision_samples_);
-    precision_samples_.clear();
     finish_precise_batch(summary);
   }
   return true;
@@ -75,12 +76,17 @@ bool DistanceController::verify_precise_start()
 void DistanceController::finish_precise_batch(const distance_controller::StartSummary & summary)
 {
   precision_diagnostics_.observe_batch(summary);
-  RCLCPP_INFO(
-    get_logger(),
-    "START_VERIFY: retained=%u/15 stable=%s right=%.6f rear=%.6f angle=%.6f "
-    "spread_right=%.6f spread_rear=%.6f spread_angle=%.6f",
-    summary.retained, summary.stable ? "true" : "false", summary.median[0], summary.median[1],
-    summary.median[2], summary.spread[0], summary.spread[1], summary.spread[2]);
+  const auto receipt = std::chrono::steady_clock::now();
+  if (
+    summary.stable || std::chrono::duration<double>(receipt - precision_batch_log_).count() >= .5) {
+    precision_batch_log_ = receipt;
+    RCLCPP_INFO(
+      get_logger(),
+      "START_VERIFY: retained=%u/15 stable=%s right=%.6f rear=%.6f angle=%.6f "
+      "spread_right=%.6f spread_rear=%.6f spread_angle=%.6f",
+      summary.retained, summary.stable ? "true" : "false", summary.median[0], summary.median[1],
+      summary.median[2], summary.spread[0], summary.spread[1], summary.spread[2]);
+  }
   if (!summary.stable) return;  // Remain stopped; never move based on an unstable batch.
   const bool distances_ok =
     std::abs(summary.median[0] - right_target_distance_) <= centering_tolerance_ &&
@@ -101,6 +107,9 @@ void DistanceController::finish_precise_batch(const distance_controller::StartSu
   }
   precision_collecting_ = false;
   log_precise_diagnostics("refine", std::chrono::steady_clock::now());
+  precision_samples_.clear();
+  precision_stationary_ = false;
+  precision_reverify_required_ = true;
   if (!heading_ok) {
     // A bounded precise-start retry begins a new alignment cycle. Scan recovery
     // alone must not refresh this budget; the total preparation deadline remains.
@@ -108,6 +117,8 @@ void DistanceController::finish_precise_batch(const distance_controller::StartSu
     initial_alignment_complete_ = false;
     wall_target_frozen_ = wall_verifying_ = alignment_settling_ = false;
     wall_direction_window_.clear();
+  } else {
+    begin_precise_correction(summary);
   }
   RCLCPP_INFO(
     get_logger(), "START_REFINE: attempt=%u; recheck after adjustment", precision_refinements_);

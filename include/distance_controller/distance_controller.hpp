@@ -12,6 +12,7 @@
 #include "distance_controller/route.hpp"
 #include "distance_controller/route_history.hpp"
 #include "distance_controller/srv/execute_step.hpp"
+#include "distance_controller/start_adjustment.hpp"
 #include "distance_controller/start_diagnostics.hpp"
 #include "distance_controller/start_verification.hpp"
 #include "distance_controller/wall_heading_window.hpp"
@@ -366,6 +367,14 @@ private:
   /// Verify only after a stopped hold, with unique post-hold scans and bounded retries.
   bool verify_precise_start();
   void finish_precise_batch(const distance_controller::StartSummary & summary);
+  /// Freeze a stable-median translation; never let later single scans rewrite its target.
+  void begin_precise_correction(const distance_controller::StartSummary & summary);
+  bool handle_precise_correction();
+  /// A sensor recovery or fault discards the entire old step and requires new stopped evidence.
+  void cancel_precise_correction(const char * reason);
+  std::optional<distance_controller::StartCorrection> precision_correction_;
+  bool precision_reverify_required_{false};
+  std::chrono::steady_clock::time_point precision_correction_begin_{}, precision_batch_log_{};
   /// Event-only diagnostics, never used by control/acceptance logic.
   void log_precise_diagnostics(
     const char * phase, const std::chrono::steady_clock::time_point & receipt);

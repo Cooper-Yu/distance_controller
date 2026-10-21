@@ -11,6 +11,13 @@ namespace distance_controller
 /// One scan: base-origin right/rear distances (m), body wall angle (rad).
 using StartSample = std::array<double, 3>;
 
+/// Keep exactly the latest fifteen accepted fresh scans; time/stop gates belong to the caller.
+inline void append_start_sample(std::vector<StartSample> & samples, const StartSample & sample)
+{
+  samples.push_back(sample);
+  if (samples.size() > 15) samples.erase(samples.begin());
+}
+
 /// At least 12 of exactly 15 scans must agree before a batch is usable.
 struct StartSummary
 {

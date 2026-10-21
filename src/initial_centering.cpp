@@ -161,7 +161,9 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
 bool DistanceController::handle_initial_positioning(const rclcpp::Time & current_time)
 {
   if (!heading_control_enabled_ || centering_complete_) return false;
-  if (precise_start_ && precision_collecting_) return verify_precise_start();
+  if (precision_correction_) return handle_precise_correction();
+  if (precise_start_ && (precision_collecting_ || precision_reverify_required_))
+    return verify_precise_start();
   const double yaw = quaternion_to_yaw(last_odom_.pose.pose.orientation);
   const double yaw_error = heading_error(yaw);
   const double error = positioning_error();

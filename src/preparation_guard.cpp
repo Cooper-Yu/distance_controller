@@ -57,6 +57,7 @@ void DistanceController::fail_preparation(
   alignment_settling_ = false;
   reset_pid();
   publish_stop();
+  cancel_precise_correction(reason);
   RCLCPP_ERROR(
     get_logger(),
     "Initial preparation fault: reason=%s stage=%s stage_elapsed=%.3f s total_elapsed=%.3f s "
@@ -170,6 +171,7 @@ void DistanceController::log_preparation_progress()
 void DistanceController::begin_odom_recovery(const std::chrono::steady_clock::time_point & receipt)
 {
   if (odom_recovering_ || fault_latched_) return;
+  cancel_precise_correction("odom_recovery");
   odom_recovering_ = true;
   const bool precision_reset = precision_collecting_;
   if (precision_reset) {
@@ -207,6 +209,7 @@ bool DistanceController::validate_odom_recovery(
   if (
     stamp.nanoseconds() <= 0 || age < -0.1 || age > (odom_recovering_ ? 0.15 : 0.5) ||
     (received_odom_ && stamp <= previous)) {
+    if (precision_correction_) fail_preparation("START_CORRECTION_ODOM_STAMP", receipt);
     odom_recovery_stable_ = false;
     return false;
   }

@@ -8,6 +8,7 @@
 void DistanceController::begin_scan_recovery(const std::chrono::steady_clock::time_point & receipt)
 {
   if (scan_recovering_ || fault_latched_) return;
+  cancel_precise_correction("scan_recovery");
   scan_recovering_ = true;
   scan_recovery_start_ = receipt;
   scan_recovery_after_ = now().nanoseconds();
