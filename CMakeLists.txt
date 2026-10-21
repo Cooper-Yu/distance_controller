@@ -64,6 +64,11 @@ install(
 )
 
 if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME test_route_session
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover
+      -s ${CMAKE_CURRENT_SOURCE_DIR}/test -p test_route_session*.py)
+  set_tests_properties(test_route_session PROPERTIES TIMEOUT 30)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_route test/test_route.cpp test/test_history.cpp src/route.cpp src/route_history.cpp)
   target_include_directories(test_route PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -88,5 +93,15 @@ install(PROGRAMS tools/odom_trial.py DESTINATION lib/${PROJECT_NAME} RENAME odom
 
 install(FILES tools/motion_model.py tools/teaching_path.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS tools/motion_console.py DESTINATION lib/${PROJECT_NAME} RENAME motion_console)
-install(FILES tools/motion_console.py tools/task6_route_model.py DESTINATION lib/${PROJECT_NAME})
+install(FILES tools/motion_console.py tools/task6_route_model.py tools/route_session_state.py tools/route_session_runtime.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS tools/task6_route_runner.py DESTINATION lib/${PROJECT_NAME} RENAME task6_route_runner)
+install(FILES tools/route_laser_guard.py tools/route_laser_runtime.py DESTINATION lib/${PROJECT_NAME})
+
+install(FILES tools/route_return_plan.py tools/task6_route_runner.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS tools/route_return_runner.py DESTINATION lib/${PROJECT_NAME} RENAME route_return_runner)
+if(BUILD_TESTING)
+  add_test(NAME test_route_return
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover
+      -s ${CMAKE_CURRENT_SOURCE_DIR}/test -p test_route_return.py)
+  set_tests_properties(test_route_return PROPERTIES TIMEOUT 30)
+endif()

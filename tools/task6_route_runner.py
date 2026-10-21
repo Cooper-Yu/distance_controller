@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Noninteractive scene-2 route backend; intermediate laser-observation-only implementation."""
+"""Scene-2 backend: default log-only route or explicit guarded supervised session."""
 
 import argparse
 from dataclasses import asdict
@@ -10,7 +10,7 @@ from pathlib import Path
 import signal
 import time
 
-from motion_console import Console, TeachingBook
+from motion_console import Console, ConsoleInput, TeachingBook
 from task6_route_model import reconnect_route, validate_manifest
 from teaching_path import turn_to_heading
 from wall_runtime import WallRunner
@@ -64,7 +64,7 @@ def run_actions(console, actions, cancellation):
     console.runner.pose()
 
 
-def prepare_and_run(runner, path, audit, actions, turn_speed, cancellation):
+def prepare_and_run(runner, path, audit, actions, turn_speed, cancellation, supervised=False):
     runner.prepare_options += [
         '-p',
         'positioning_wall:=right',
@@ -85,6 +85,12 @@ def prepare_and_run(runner, path, audit, actions, turn_speed, cancellation):
     book = TeachingBook(path, origin, runner.frame)
     console = Console(runner, book, cancellation, audit, turn_speed)
     console.record('P01')
+    if supervised:
+        from route_laser_runtime import RouteLaserGuard
+        from route_session_runtime import run_supervised
+
+        console.command_guard = RouteLaserGuard(runner, console.emit)
+        return run_supervised(console, actions, cancellation, ConsoleInput())
     run_actions(console, actions, cancellation)
 
 
@@ -106,22 +112,41 @@ def session(args, path, audit, actions):
         'route_started',
         scene=2,
         frame='P01',
-        laser_policy='observation_only',
-        implementation='intermediate_no_obstacle_avoidance',
+        laser_policy='enforced' if getattr(args, 'supervised', False) else 'observation_only',
+        implementation=(
+            'supervised_experimental'
+            if getattr(args, 'supervised', False)
+            else 'intermediate_no_obstacle_avoidance'
+        ),
         actions=[asdict(a) for a in actions],
     )
-    runner = WallRunner(args.speed, alignment_wall='right')
+    supervised = getattr(args, 'supervised', False)
+    runner = WallRunner(min(args.speed, 0.03) if supervised else args.speed, alignment_wall='right')
     cancellation = Cancellation(runner)
     handlers = {
         sig: signal.signal(sig, cancellation.request) for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
         try:
-            prepare_and_run(runner, path, audit, actions, args.turn_speed, cancellation)
+            if supervised:
+                prepare_and_run(
+                    runner,
+                    path,
+                    audit,
+                    actions,
+                    min(args.turn_speed, 0.10),
+                    cancellation,
+                    supervised=True,
+                )
+            else:
+                prepare_and_run(runner, path, audit, actions, args.turn_speed, cancellation)
         finally:
             close_runner(runner)
         cancellation.check()
-        emit(audit, 'route_completed', destination=actions[-1].name, exit_code=0)
+        if supervised:
+            emit(audit, 'supervised_stopped', exit_code=0)
+        else:
+            emit(audit, 'route_completed', destination=actions[-1].name, exit_code=0)
     finally:
         for sig, handler in handlers.items():
             signal.signal(sig, handler)
@@ -131,7 +156,13 @@ def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scene', type=int, choices=[2], required=True)
     parser.add_argument('--route-json', type=Path, required=True)
-    parser.add_argument('--laser-log-only', action='store_true', required=True)
+    policy = parser.add_mutually_exclusive_group(required=True)
+    policy.add_argument('--laser-log-only', action='store_true')
+    policy.add_argument(
+        '--supervised',
+        action='store_true',
+        help='Experimental same-process single actions with enforced laser guard',
+    )
     parser.add_argument('--speed', type=float, default=0.04)
     parser.add_argument('--turn-speed', type=float, default=0.10)
     parser.add_argument('--output', type=Path)
@@ -160,7 +191,10 @@ def main(argv=None):
                 except (Exception, KeyboardInterrupt) as error:
                     emit(audit, 'route_failed', reason=str(error) or 'Cancelled', exit_code=2)
                     raise
-        print('Route completed; stopped:', actions[-1].name, flush=True)
+        if args.supervised:
+            print('Supervised session stopped; exit0 is not route completion', flush=True)
+        else:
+            print('Route completed; stopped:', actions[-1].name, flush=True)
         return 0
     except (Exception, KeyboardInterrupt) as error:
         print('STOPPED:', str(error) or 'Cancelled', flush=True)

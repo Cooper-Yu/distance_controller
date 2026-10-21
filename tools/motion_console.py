@@ -128,9 +128,10 @@ class TeachingBook:
 class Console:
     """Single owner of velocity output; motion is bounded and cancelable."""
 
-    def __init__(self, runner, book, inputs, audit, turn_speed):
+    def __init__(self, runner, book, inputs, audit, turn_speed, command_guard=None):
         self.runner, self.book, self.inputs = runner, book, inputs
         self.audit, self.turn_speed, self.quitting = audit, turn_speed, False
+        self.command_guard = command_guard
 
     def emit(self, event, **data):
         self.audit.write(
@@ -176,7 +177,7 @@ class Console:
         self.emit('record', name=name, point=row)
         print('Recorded:', name, 'P01-relative:', row['relative_to_p01'], flush=True)
 
-    def move(self, motion, reconnect=False):
+    def move(self, motion, reconnect=False, use_path_length=False):
         r = self.runner
         r.exclusive()
         start = r.pose()
@@ -207,6 +208,8 @@ class Console:
         target = target_pose(start, motion)
         self.emit('started', motion=asdict(motion), start=asdict(start), target=asdict(target))
         length = math.hypot(motion.x, motion.y)
+        if use_path_length and motion.kind == 'path':
+            length = sum(math.dist(a, b) for a, b in zip(motion.points, motion.points[1:]))
         budget = 30 + 3 * (length / r.max_speed + abs(motion.angle) / self.turn_speed)
         try:
             actual = self.finish_motion(start, motion, budget)
@@ -331,6 +334,8 @@ class Console:
             if ready:
                 heading_pid.reset()
                 command = (0.0, 0.0, 0.0)
+            if self.command_guard is not None:
+                command = self.command_guard(command)
             r.send(command)
             if ready and r.latest[2] < 0.005 and r.latest[3] < 0.015:
                 held = held or now

@@ -70,7 +70,11 @@ class Fixture:
                 )
             )
         )
-        self.child = subprocess.Popen(
+        self.child = self.launch(source)
+
+    def launch(self, source):
+        """Launch the installed default backend; specialised fixtures may inject a test adapter."""
+        return subprocess.Popen(
             [
                 'ros2',
                 'run',
