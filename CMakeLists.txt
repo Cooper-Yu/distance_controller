@@ -88,3 +88,5 @@ install(PROGRAMS tools/odom_trial.py DESTINATION lib/${PROJECT_NAME} RENAME odom
 
 install(FILES tools/motion_model.py tools/teaching_path.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS tools/motion_console.py DESTINATION lib/${PROJECT_NAME} RENAME motion_console)
+install(FILES tools/motion_console.py tools/task6_route_model.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS tools/task6_route_runner.py DESTINATION lib/${PROJECT_NAME} RENAME task6_route_runner)
