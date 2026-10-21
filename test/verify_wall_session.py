@@ -8,7 +8,7 @@ import signal
 import subprocess
 import time
 
-os.environ['ROS_DOMAIN_ID'] = '181'
+os.environ['ROS_DOMAIN_ID'] = os.getenv('WALL_TEST_DOMAIN', '181')
 os.environ['ROS_LOCALHOST_ONLY'] = '1'
 import rclpy
 from geometry_msgs.msg import TransformStamped, Twist
@@ -165,6 +165,14 @@ def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - o
         math.cos(pose[2] / 2),
     )
     msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.angular.z = velocity
+    diagnostic_mode = os.getenv('PRECISE_DIAGNOSTIC', '')
+    verifying = (
+        diagnostic_mode
+        and hasattr(node, 'test_log')
+        and 'START_VERIFY: stopped hold' in node.test_log.read_text()
+    )
+    if verifying and diagnostic_mode == 'stop_velocity':
+        msg.twist.twist.linear.x = 0.004  # Below heading gate, above precise stopped gate.
     for _ in range(int(os.getenv('WALL_ODOM_BURST', '1'))):
         combined_gap = (
             scan_fault == 'combined'
@@ -173,7 +181,12 @@ def tick(previous, scan_enabled=True, front=0.55):  # noqa: PLR0912, PLR0915 - o
         )
         if not combined_gap and not (os.getenv('ODOM_TRIAL_STALE') and pose[0] > 0.025):
             odom_pub.publish(msg)
-    if scan_enabled and now - last_scan > float(os.getenv('WALL_SCAN_PERIOD', '0.07')):
+    scan_period = (
+        0.4
+        if verifying and diagnostic_mode == 'slow_scan'
+        else float(os.getenv('WALL_SCAN_PERIOD', '0.07'))
+    )
+    if scan_enabled and now - last_scan > scan_period:
         scan = LaserScan()
         scan.header.frame_id, scan.header.stamp = 'laser', msg.header.stamp
         if scan_fault == 'old' and hasattr(node, 'scan_fault_start'):
@@ -253,6 +266,24 @@ def row(name, kind, value, follow='none', stop='distance', offset=0.0, bound=0.7
     )
 
 
+def verify_diagnostic_failure(text, exit_code):
+    """Distinguish no stationary hold from too few fresh frames without weakening failure."""
+    assert exit_code == 2 and 'START_VERIFY_TIMEOUT' in text, text[-5000:]
+    assert 'START_VERIFIED:' not in text and sum(abs(v) for v in velocity) < 1e-6
+    diagnostic = next(
+        line for line in text.splitlines() if 'START_DIAGNOSTIC: phase=timeout' in line
+    )
+    fields = dict(word.split('=', 1) for word in diagnostic.split() if '=' in word)
+    assert fields['batches'] == '0' and float(fields['elapsed']) < 5.2, diagnostic
+    if os.getenv('PRECISE_DIAGNOSTIC') == 'stop_velocity':
+        assert fields['linear_resets'] == '1' and fields['sample_count'] == '0', diagnostic
+        assert int(fields['blocked_ticks']) > 10, diagnostic
+    else:
+        assert 0 < int(fields['sample_count']) < 15, diagnostic
+        assert int(fields['no_new_scan_ticks']) > 0, diagnostic
+    assert text.count('START_DIAGNOSTIC:') == 1, text[-5000:]
+
+
 def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=None, until=None):
     if resume is None:
         pose[:] = [
@@ -315,6 +346,10 @@ def run(name, rows, commands, prepare=False, stale=False, front=0.55, resume=Non
             assert proc.returncode == 2 and 'START_VERIFY_TIMEOUT' in text, text[-4000:]
             assert 'START_VERIFIED:' not in text and sum(abs(v) for v in velocity) < 1e-6
             return [], text
+        if os.getenv('PRECISE_DIAGNOSTIC'):
+            text = node.test_log.read_text()
+            verify_diagnostic_failure(text, proc.returncode)
+            return [], text
         if os.getenv('WALL_CASE') == 'odom_trial_right_only' and os.getenv('PREP_FAIL'):
             text = (directory / 'runtime.log').read_text()
             assert proc.returncode == 2 and 'SCAN_INVALID' in text, text[-3500:]
@@ -342,7 +377,11 @@ try:
         if os.getenv('PREP_SCAN_FAULT') in ('permanent', 'old'):
             print('PASS bounded scan recovery failure', os.getenv('PREP_SCAN_FAULT'), OUT)
         elif os.getenv('PRECISE_NOISE') == 'unstable':
+            assert 'START_DIAGNOSTIC_LAST_BATCH: phase=timeout' in log, log[-5000:]
+            assert 'odom_source_age=' in log and 'scan_receipt_age=' in log
             print('PASS unstable batch stops without handoff', OUT, flush=True)
+        elif os.getenv('PRECISE_DIAGNOSTIC'):
+            print('PASS bounded diagnostic', os.getenv('PRECISE_DIAGNOSTIC'), OUT, flush=True)
         elif os.getenv('PREP_FAIL'):
             print('PASS required wall loss stops:', os.getenv('PREP_FAIL'), OUT, flush=True)
         else:
@@ -350,8 +389,12 @@ try:
                 assert 'SCAN_RECOVERING:' in log and 'SCAN_RECOVERED:' in log, log[-4000:]
                 assert log.index('SCAN_RECOVERED:') < log.index('START_VERIFIED:')
                 assert hasattr(node, 'scan_stop_checked')
+                if os.getenv('PREP_SCAN_FAULT') == 'hold':
+                    assert 'START_DIAGNOSTIC: phase=scan_recovery_reset cycle=1' in log
+                    assert 'START_DIAGNOSTIC: phase=verified cycle=2' in log
             if os.getenv('PRECISE_START'):
                 assert 'START_VERIFIED' in log and 'retained=' in log, log[-4000:]
+                assert 'START_DIAGNOSTIC: phase=verified' in log, log[-5000:]
                 if os.getenv('HEADING_REENTRY'):
                     before, after = log.split('START_REFINE:', 1)
                     assert 'refinement=2' in before, before[-4000:]

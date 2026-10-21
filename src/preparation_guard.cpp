@@ -171,6 +171,11 @@ void DistanceController::begin_odom_recovery(const std::chrono::steady_clock::ti
 {
   if (odom_recovering_ || fault_latched_) return;
   odom_recovering_ = true;
+  const bool precision_reset = precision_collecting_;
+  if (precision_reset) {
+    ++precision_diagnostics_.odom_resets;
+    precision_diagnostics_.discarded += precision_samples_.size();
+  }
   precision_collecting_ = precision_stationary_ = false;
   precision_samples_.clear();
   odom_recovery_stable_ = false;
@@ -179,6 +184,7 @@ void DistanceController::begin_odom_recovery(const std::chrono::steady_clock::ti
   settling_ = segment_completed_ = alignment_settling_ = centering_settling_ = false;
   reset_pid();
   publish_stop();
+  if (precision_reset) log_precise_diagnostics("odom_recovery_reset", receipt);
   RCLCPP_WARN(
     get_logger(),
     "ODOM_RECOVERING: zero commands; 2 s budget, require 0.3 s fresh stopped "

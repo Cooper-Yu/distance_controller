@@ -12,6 +12,7 @@
 #include "distance_controller/route.hpp"
 #include "distance_controller/route_history.hpp"
 #include "distance_controller/srv/execute_step.hpp"
+#include "distance_controller/start_diagnostics.hpp"
 #include "distance_controller/start_verification.hpp"
 #include "distance_controller/wall_heading_window.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
@@ -365,6 +366,11 @@ private:
   /// Verify only after a stopped hold, with unique post-hold scans and bounded retries.
   bool verify_precise_start();
   void finish_precise_batch(const distance_controller::StartSummary & summary);
+  /// Event-only diagnostics, never used by control/acceptance logic.
+  void log_precise_diagnostics(
+    const char * phase, const std::chrono::steady_clock::time_point & receipt);
+  distance_controller::StartDiagnostics precision_diagnostics_;
+  unsigned precision_diagnostic_cycle_{0};
   bool precision_collecting_{false};
   bool precision_stationary_{false};
   unsigned precision_refinements_{0};

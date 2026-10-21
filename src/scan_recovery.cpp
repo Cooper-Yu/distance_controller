@@ -13,6 +13,11 @@ void DistanceController::begin_scan_recovery(const std::chrono::steady_clock::ti
   scan_recovery_after_ = now().nanoseconds();
   scan_recovery_stamp_ = observation_stamp_ns_;
   scan_recovery_count_ = 0;
+  const bool precision_reset = precision_collecting_;
+  if (precision_reset) {
+    ++precision_diagnostics_.scan_resets;
+    precision_diagnostics_.discarded += precision_samples_.size();
+  }
   precision_collecting_ = precision_stationary_ = false;
   precision_samples_.clear();
   initial_alignment_complete_ = false;
@@ -21,6 +26,7 @@ void DistanceController::begin_scan_recovery(const std::chrono::steady_clock::ti
   right_heading_stable_ = false;
   reset_pid();
   publish_stop();
+  if (precision_reset) log_precise_diagnostics("scan_recovery_reset", receipt);
   RCLCPP_WARN(
     get_logger(), "SCAN_RECOVERING: zero commands; 2 s budget; fresh stopped scans required");
 }
