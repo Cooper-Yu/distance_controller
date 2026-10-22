@@ -152,7 +152,18 @@ class HeadingPid:
         return max(-limit, min(limit, 1.8 * error + 0.03 * self.integral - 0.35 * rate))
 
 
-def feedback(start, actual, motion, speed, turn_speed, pid=None, dt=0.05, yaw_rate=0.0):
+def feedback(
+    start,
+    actual,
+    motion,
+    speed,
+    turn_speed,
+    pid=None,
+    dt=0.05,
+    yaw_rate=0.0,
+    *,
+    yaw_tolerance=0.01,
+):
     """Track a line in frozen start axes; lateral-off checks along-track arrival only.
 
     Heading-off disables angular correction, not the transformation to the current
@@ -168,7 +179,7 @@ def feedback(start, actual, motion, speed, turn_speed, pid=None, dt=0.05, yaw_ra
     if motion.kind == 'turn':
         if math.hypot(actual.x - start.x, actual.y - start.y) > 0.04:
             raise RuntimeError('Turn center drift exceeds 4 cm')
-        return (0.0, 0.0, wz), abs(yaw_error) < 0.01
+        return (0.0, 0.0, wz), abs(yaw_error) < yaw_tolerance
     length = math.hypot(motion.x, motion.y)
     ux, uy = motion.x / length, motion.y / length
     delta = local_delta(start, actual)
@@ -184,5 +195,5 @@ def feedback(start, actual, motion, speed, turn_speed, pid=None, dt=0.05, yaw_ra
     ready = abs(length - along) < 0.005 and (not motion.lateral or abs(cross) < 0.005)
     if motion.heading and abs(yaw_error) > 0.08:
         vx = vy = 0.0
-    ready = ready and (not motion.heading or abs(yaw_error) < 0.01)
+    ready = ready and (not motion.heading or abs(yaw_error) < yaw_tolerance)
     return (vx, vy, wz if motion.heading else 0.0), ready

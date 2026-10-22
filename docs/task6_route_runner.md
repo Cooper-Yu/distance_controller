@@ -103,3 +103,13 @@ entry gate was rejected before our publisher existed, with zero commands.
 Evidence `/tmp/console_exclusive/1792673486019961926/report.json`; entry waits
 2.003/2.003 seconds, total rejection times 2.014/2.014 seconds. Synthetic graph
 checks do not certify robot motion or real-world collision clearance.
+
+### Heading margin during bounded stopped-pose corrections
+
+A correction attempt now aims for a heading error below 0.006 rad before holding zero.
+Normal first-pass stopping and the final stopped-pose acceptance remain 0.01 rad;
+position acceptance remains 5 mm. Both path feedback and its heading-PID reset use the
+same correction margin. Heading-disabled translation is unchanged. The two-correction
+limit, 8 s correction budget, shared action deadline, and 4 cm turn-center protection
+remain in force. This reduces boundary-hugging corrections; it does not guarantee
+physical accuracy or change scan-freshness supervision.

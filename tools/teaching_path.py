@@ -158,7 +158,7 @@ def turn_to_heading(origin, actual, heading):
     return Motion('turn', angle=math.atan2(math.sin(error), math.cos(error)))
 
 
-def path_ready(origin, actual, points, heading=0.0):
+def path_ready(origin, actual, points, heading=0.0, *, yaw_tolerance=0.01):
     """Endpoint and heading acceptance use the fixed P01, not the last interpolation point."""
     p = local_delta(origin, actual)
     return (
@@ -169,7 +169,7 @@ def path_ready(origin, actual, points, heading=0.0):
                 math.cos(math.radians(p['yaw_deg']) - heading),
             )
         )
-        < 0.01
+        < yaw_tolerance
     )
 
 
@@ -206,7 +206,7 @@ class PathTracker:
                 return a[0] + fraction * (b[0] - a[0]), a[1] + fraction * (b[1] - a[1])
         return self.points[-1]
 
-    def feedback(self, actual, speed, turn_speed, dt=0.05, yaw_rate=0.0):
+    def feedback(self, actual, speed, turn_speed, dt=0.05, yaw_rate=0.0, *, yaw_tolerance=0.01):
         p = local_delta(self.origin, actual)
         self.project((p['x_m'], p['y_m']))
         tx, ty = self.ahead(max(0.05, speed / TRANSLATION_KP))
@@ -219,6 +219,9 @@ class PathTracker:
         if abs(error) > 0.08:
             vx = vy = 0.0
         wz = self.heading_pid.update(error, yaw_rate, dt, turn_speed)
-        if path_ready(self.origin, actual, self.points, self.heading):
+        ready = path_ready(
+            self.origin, actual, self.points, self.heading, yaw_tolerance=yaw_tolerance
+        )
+        if ready:
             self.heading_pid.reset()
-        return (vx, vy, wz), path_ready(self.origin, actual, self.points, self.heading)
+        return (vx, vy, wz), ready

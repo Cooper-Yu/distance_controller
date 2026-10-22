@@ -325,7 +325,14 @@ class Console:
             now = time.monotonic()
             dt = now - previous
             requested, ready = (
-                tracker.feedback(actual, speed, turn_speed, dt, r.body_velocity[2])
+                tracker.feedback(
+                    actual,
+                    speed,
+                    turn_speed,
+                    dt,
+                    r.body_velocity[2],
+                    yaw_tolerance=0.006 if settling else 0.01,
+                )
                 if tracker
                 else feedback(
                     start,
@@ -336,6 +343,7 @@ class Console:
                     heading_pid,
                     dt,
                     r.body_velocity[2],
+                    yaw_tolerance=0.006 if settling else 0.01,
                 )
             )
             command = limited_velocity(command, requested, dt, linear=0.4, angular=0.6)
