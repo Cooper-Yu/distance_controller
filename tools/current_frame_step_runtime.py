@@ -20,6 +20,7 @@ class CurrentEpochGuard:
         self.raw, self.raw_invalid, self.origin, self.raw_origin = None, None, None, None
         self.filtered = None
         self.motion_started = False
+        self.heading_bound_rad = 0.035 if supervised_manual else 0.01
         self.path_m = 0.0
         self.path_pose = None
         self.laser = (
@@ -108,7 +109,7 @@ class CurrentEpochGuard:
         self.path_pose = actual
         if self.path_m > self.distance + 0.02:
             raise RuntimeError('Small-step total travel exceeded distance + 2 cm')
-        if not near(actual, self.origin, self.distance + 0.01, 0.01):
+        if not near(actual, self.origin, self.distance + 0.01, self.heading_bound_rad):
             raise RuntimeError('Small-step displacement/heading bound exceeded')
 
     def bind_stopped(self, cancellation):

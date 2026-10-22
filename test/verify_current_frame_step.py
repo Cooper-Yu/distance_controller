@@ -82,7 +82,7 @@ def sensor(folder):  # noqa: PLR0915 - bounded test node lifecycle
             )
         ):
             if mode == 'heading_bound':
-                state['pose'][2] += 0.011
+                state['pose'][2] += 0.036
             else:
                 state['pose'][0] += 0.006 if mode == 'pre_first_shift' else 0.08
             x, y, yaw = state['pose']

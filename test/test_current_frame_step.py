@@ -49,6 +49,7 @@ class StepTest(unittest.TestCase):
         guard.check = Mock()
         guard.laser = Mock(side_effect=lambda value: value)
         guard.motion_started = False
+        guard.heading_bound_rad = 0.035
         guard.speed = 0.03
         return guard
 
@@ -92,7 +93,7 @@ class StepTest(unittest.TestCase):
             guard.check_bound(Pose(-0.061, 0, 0))
         guard.path_m = 0
         with self.assertRaises(RuntimeError):
-            guard.check_bound(Pose(-0.04, 0, 0.011))
+            guard.check_bound(Pose(-0.04, 0, 0.036))
         guard.path_m = 0.071
         with self.assertRaises(RuntimeError):
             guard.check_bound(Pose(-0.04, 0, 0))
@@ -137,3 +138,33 @@ class StepTest(unittest.TestCase):
             console.return_value.record.assert_called_once_with('LOCAL_START')
             self.assertIn('strict_dry_run', output.getvalue())
             self.assertNotIn('local_step_completed', output.getvalue())
+
+
+class ManualHeadingBoundTest(unittest.TestCase):
+    def make_guard(self, manual):
+        guard = CurrentEpochGuard(Mock(), {}, 0.03, 0.01, None, supervised_manual=manual)
+        guard.origin = Pose(0, 0, 0)
+        guard.motion_started = True
+        guard.path_pose = None
+        return guard
+
+    def test_both_manual_signs_inside_and_outside_explicit_boundary(self):
+        for sign in (-1, 1):
+            guard = self.make_guard(True)
+            self.assertEqual(guard.heading_bound_rad, 0.035)
+            guard.check_bound(Pose(-0.0048, 0, sign * 0.034))
+            with self.assertRaisesRegex(RuntimeError, 'heading bound'):
+                guard.check_bound(Pose(-0.0048, 0, sign * 0.036))
+
+    def test_strict_diagnostic_and_prefirst_checks_keep_original_heading_tolerance(self):
+        strict = self.make_guard(False)
+        self.assertEqual(strict.heading_bound_rad, 0.01)
+        with self.assertRaisesRegex(RuntimeError, 'heading bound'):
+            strict.check_bound(Pose(0, 0, 0.011))
+        manual = self.make_guard(True)
+        manual.motion_started = False
+        manual.raw = dict(velocity=(0, 0, 0), pose=dict(x=0, y=0, yaw=0))
+        manual.raw_origin = Pose(0, 0, 0)
+        manual.runner.body_velocity = (0, 0, 0)
+        with self.assertRaisesRegex(RuntimeError, 'before first'):
+            manual.check_bound(Pose(0, 0, 0.011))

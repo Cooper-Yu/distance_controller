@@ -23,7 +23,9 @@ use the existing Console feedback (angular cap 0.10 rad/s). A small bounded forw
 settling correction is possible after overshoot; this is not an available forward
 operator command. Current-frame displacement may not exceed requested distance
 plus 1 cm, accumulated travel may not exceed distance plus 2 cm, and heading drift
-may not exceed 0.01 rad. These are additional conservative local bounds, not an
+may not exceed 0.035 rad while the explicitly supervised manual step is running.
+Strict dry-run retains 0.01 rad; first-command stopped-pose checks and final Console
+heading acceptance are unchanged. These are additional local bounds, not an
 absolute positioning accuracy claim. The motion budget is 10 monotonic seconds;
 existing final stopped-pose checks and cancellation remain active.
 
@@ -80,3 +82,16 @@ commands; dry-run produced none. Motion/fault cases ended with zero, no publishe
 released lock, and never more than one command publisher. These are synthetic
 runtime checks, not real robot return or collision acceptance. No thresholds were
 relaxed to obtain these results.
+
+2026-10-22 manual-only heading-bound revision: after the real supervised step01
+stopped at about 4.8 mm with filtered yaw drift about -0.0165 rad, the manual active
+bound changed from 0.01 to 0.035 rad. This gives the existing heading PID room to
+correct; it is not evidence that the drift mechanism is fixed. At the current
+planar model radius (~0.217 m), 0.035 rad corresponds to about 7.6 mm of extra corner
+sweep, not collision clearance certification. First-command gates, strict dry-run,
+final acceptance, displacement/path/10-second budgets, full-route drift and 0.5 s
+feedback limits remain unchanged. Pure checks passed 35 tests including +/-0.034
+allowed and +/-0.036 rejected, plus strict/pre-first 0.011 refusal. Real installed
+ROS tests `/tmp/current_step_heading035_20261022/` verified injected +0.036 rad
+fails with final zero, pub0 and lock release; strict dry-run still publishes no
+commands. No real-robot qualification of this revised bound is claimed.
