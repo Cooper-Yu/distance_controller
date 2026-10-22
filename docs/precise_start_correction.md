@@ -29,11 +29,11 @@ in-tolerance frame without performing the required adjustment.
    silently converted into a larger move. An axis already within its original
    distance tolerance stays at zero. Otherwise target minus median defines body
    displacement (rear error is x; right error is y), with combined Euclidean norm
-   capped at 1 cm. Rotate once using the stopped odom yaw and freeze the odom target.
+   capped at 5 mm. Rotate once using the stopped odom yaw and freeze the odom target.
    Consume one of the existing maximum three refinements. Later individual wall
    measurements cannot rewrite or prematurely complete this target.
 5. **Feedback tracking:** P gain 2/s on current odom target error; body velocity norm
-   is capped by the minimum of 0.008 m/s, configured centering speed and max speed.
+   is capped by the minimum of 0.004 m/s, configured centering speed and max speed.
    Hold the frozen step-entry yaw with `wz = clamp(1.8 * wrap(anchor_yaw - yaw),`
    `-0.02, 0.02)` rad/s. Within the unchanged 0.005 rad yaw-change bound, this
    produces at most 0.009 rad/s. It does not move the yaw reference or XY target.
@@ -187,3 +187,11 @@ binary regression. This is local synthetic evidence, not real-robot acceptance.
 Fresh build, five relevant CTest targets, Ruff/clang-format/diff checks pass. Tidy23
 retains the existing verification-function size, generated-code size and diagnostics
 constant-name warnings; this is not a whole-repository lint pass.
+### Conservative microstep profile after field heading faults
+
+Planning now caps the combined step at 5 mm and translation speed at 4 mm/s.
+Each completed step still stops and requires a new stable scan batch. The original
+0.005 rad step heading fault, 3 mm cross-track, 12 mm travel, 4 s step deadline,
+three-refinement limit and total preparation deadline remain. Final P01 acceptance
+remains 5 mm / 0.5 degrees. A large initial offset can still exhaust the bounded
+refinement budget; this change does not extend that budget or imply field success.

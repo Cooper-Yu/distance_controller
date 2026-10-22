@@ -98,7 +98,7 @@ TEST(StartVerification, RollingWindowFindsStableOffsetAcrossRejectedBatchBoundar
       EXPECT_GT(summary.median[1] - .28, .005);
       const auto delta = distance_controller::start_adjustment(summary, .26, .28, .005);
       ASSERT_TRUE(delta);
-      EXPECT_NEAR((*delta)[0], -.00892674018, 1e-12);
+      EXPECT_NEAR((*delta)[0], -.005, 1e-12);
       EXPECT_DOUBLE_EQ((*delta)[1], 0.0);
     }
   }
@@ -114,7 +114,7 @@ TEST(StartAdjustment, DirectionDeadbandAndCombinedNormAreBounded)
       summarize_start(std::vector<StartSample>(15, {.26 + sign * .019, .28 + sign * .019, 0}));
     const auto delta = distance_controller::start_adjustment(summary, .26, .28, .005);
     ASSERT_TRUE(delta);
-    EXPECT_NEAR(std::hypot((*delta)[0], (*delta)[1]), .01, 1e-12);
+    EXPECT_NEAR(std::hypot((*delta)[0], (*delta)[1]), .005, 1e-12);
     EXPECT_LT(sign * (*delta)[0], 0);
     EXPECT_LT(sign * (*delta)[1], 0);
   }
@@ -131,7 +131,7 @@ TEST(StartAdjustment, FrozenOdomTargetTracksRotatedBodyWithNormCapAndZeroArrival
   const auto initial =
     distance_controller::correction_feedback(step, 1, 2, half_pi, 0, .008726646, 0, .02);
   EXPECT_FALSE(initial.fault);
-  EXPECT_NEAR(initial.vx, -.008, 1e-12);
+  EXPECT_NEAR(initial.vx, -.004, 1e-12);
   EXPECT_NEAR(initial.vy, 0, 1e-12);
   const auto done =
     distance_controller::correction_feedback(step, 1, 1.9912, half_pi, 0, .008726646, 2, .008);
@@ -202,7 +202,7 @@ TEST(StartAdjustment, HeadingHoldSuppressesSmallConstantYawBiasWithoutMovingTheT
         step, x, y, yaw, yaw, .008726646, tick * .02, .008);
       ASSERT_FALSE(result.fault);
       ASSERT_LE(std::abs(yaw), .005);
-      EXPECT_LE(std::hypot(result.vx, result.vy), .008000001);
+      EXPECT_LE(std::hypot(result.vx, result.vy), .004000001);
       EXPECT_LE(std::abs(result.wz), .02);
       if (result.arrived) {
         EXPECT_DOUBLE_EQ(result.vx, 0);
@@ -222,5 +222,46 @@ TEST(StartAdjustment, HeadingHoldSuppressesSmallConstantYawBiasWithoutMovingTheT
     EXPECT_DOUBLE_EQ(step.dx, -.009);
     EXPECT_DOUBLE_EQ(step.dy, 0);
     EXPECT_DOUBLE_EQ(step.yaw, 0);
+  }
+}
+
+TEST(StartAdjustment, ThreeRefinementsResolveObservedLateralErrorAtReducedSpeed)
+{
+  for (const double sign : {-1.0, 1.0}) {
+    double x = 0, y = 0;
+    unsigned attempts = 0;
+    while (std::abs(sign * .009501 + y) > .005 && attempts < 3) {
+      const auto summary =
+        summarize_start(std::vector<StartSample>(15, {.26 + sign * .009501 + y, .28 + x, 0}));
+      const auto delta = distance_controller::start_adjustment(summary, .26, .28, .005);
+      ASSERT_TRUE(delta);
+      ASSERT_LE(std::hypot((*delta)[0], (*delta)[1]), .005000000001);
+      const distance_controller::StartCorrection step{x,           y,      0,          (*delta)[0],
+                                                      (*delta)[1], "odom", "base_link"};
+      bool arrived = false;
+      for (int tick = 0; tick <= 200; ++tick) {
+        const auto feedback =
+          distance_controller::correction_feedback(step, x, y, 0, 0, .008726646, tick * .02, .008);
+        ASSERT_FALSE(feedback.fault);
+        EXPECT_LE(std::hypot(feedback.vx, feedback.vy), .004000000001);
+        if (feedback.arrived) {
+          EXPECT_DOUBLE_EQ(feedback.vx, 0);
+          EXPECT_DOUBLE_EQ(feedback.vy, 0);
+          EXPECT_DOUBLE_EQ(feedback.wz, 0);
+          arrived = true;
+          break;
+        }
+        x += feedback.vx * .02;
+        y += feedback.vy * .02;
+      }
+      ASSERT_TRUE(arrived);
+      EXPECT_DOUBLE_EQ(step.dx, (*delta)[0]);
+      EXPECT_DOUBLE_EQ(step.dy, (*delta)[1]);
+      ++attempts;
+    }
+    EXPECT_GT(attempts, 0u);
+    EXPECT_LE(attempts, 3u);
+    EXPECT_LE(std::abs(sign * .009501 + y), .005);
+    EXPECT_DOUBLE_EQ(x, 0);
   }
 }

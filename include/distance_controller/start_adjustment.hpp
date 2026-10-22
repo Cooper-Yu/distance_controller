@@ -21,8 +21,8 @@ inline std::optional<std::array<double, 2>> start_adjustment(
     if (std::abs(value) <= tolerance) value = 0.0;
   }
   const double length = std::hypot(delta[0], delta[1]);
-  if (length > .01)
-    for (double & value : delta) value *= .01 / length;
+  if (length > .005)
+    for (double & value : delta) value *= .005 / length;
   return delta;
 }
 
@@ -67,7 +67,7 @@ inline StartCorrectionFeedback correction_feedback(
     return {"START_CORRECTION_CROSS_TRACK"};
   const double ex = step.dx - moved_x, ey = step.dy - moved_y;
   if (std::hypot(ex, ey) <= .0005) return {nullptr, true};
-  const double scale = std::min(2.0, std::min(cap, .008) / std::hypot(ex, ey));
+  const double scale = std::min(2.0, std::min(cap, .004) / std::hypot(ex, ey));
   return {
     nullptr, false, scale * (std::cos(yaw) * ex + std::sin(yaw) * ey),
     scale * (-std::sin(yaw) * ex + std::cos(yaw) * ey),

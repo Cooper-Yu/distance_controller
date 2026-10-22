@@ -32,7 +32,7 @@ void DistanceController::begin_precise_correction(const distance_controller::Sta
   RCLCPP_INFO(
     get_logger(),
     "START_CORRECTION: attempt=%u body_dx=%.6f body_dy=%.6f odom_target=(%.6f,%.6f) "
-    "yaw=%.6f cap<=0.008 m/s heading_kp=1.8 wz_cap<=0.02 rad/s step<=0.010 m budget=4 s; require "
+    "yaw=%.6f cap<=0.004 m/s heading_kp=1.8 wz_cap<=0.02 rad/s step<=0.005 m budget=4 s; require "
     "fresh stopped verification",
     precision_refinements_, (*delta)[0], (*delta)[1], p.x + precision_correction_->dx,
     p.y + precision_correction_->dy, yaw);
