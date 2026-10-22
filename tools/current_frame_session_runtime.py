@@ -1,6 +1,7 @@
 """Fixed new-epoch reference with independently bounded, explicitly requested steps."""
 
 import math
+import re
 import uuid
 
 from action_plan import Pose
@@ -9,7 +10,7 @@ from motion_model import local_delta, target_pose
 from route_prefix_return_plan import stopped
 from route_session_state import near
 from teaching_path import fixed_segment
-from wall_runtime import WallRunner
+from wall_runtime import WallFitError, WallRunner
 
 
 def backward_path(anchor, actual, distance):
@@ -89,6 +90,7 @@ class SessionGuard(CurrentEpochGuard):
         self.anchor = self.raw_anchor = None
         self.idle_pose = self.idle_raw = None
         self.active, self.failure = False, None
+        self.scan_identity = None
         super().__init__(runner, gids, 0.05, speed, emit, supervised_manual=True)
 
     def receive_raw(self, message):
@@ -130,14 +132,33 @@ class SessionGuard(CurrentEpochGuard):
         if self.runner.node.count_publishers('/cmd_vel') != 0:
             raise RuntimeError('READY requires no cmd_vel publisher')
 
-    def check(self):
+    def check_scan_identity(self):
+        current = self.runner.cached_stamp, self.runner.observer.scan.header.frame_id
+        if self.scan_identity is not None:
+            stamp, frame = self.scan_identity
+            if current[0] < stamp or current[1] != frame:
+                raise RuntimeError('Local session scan chronology/frame changed')
+        self.scan_identity = current
+
+    def check(self, *, allow_pair_wait=False):
         if self.failure is not None:
             raise RuntimeError(self.failure)
         try:
             actual = super().check()
             self.runner.geometry()
+            self.check_scan_identity()
             self.runner.scan_pose()
             return actual
+        except WallFitError as error:
+            if (
+                allow_pair_wait
+                and not self.active
+                and self.anchor is not None
+                and pairing_gap(error)
+            ):
+                raise ReadyPairingError(str(error), self.runner.cached_stamp) from error
+            self.failure = str(error)
+            raise
         except Exception as error:
             self.failure = str(error)
             raise
@@ -193,3 +214,54 @@ class StepPermit:
             raise RuntimeError('Cannot finish an unrequested step')
         self.index += 1
         self.active = False
+
+
+class ReadyPairingError(RuntimeError):
+    """Only a fresh, released READY bracket failure may enter bounded waiting."""
+
+    def __init__(self, reason, stamp):
+        super().__init__(reason)
+        self.stamp = stamp
+
+
+def pairing_gap(error):
+    detail = error.detail
+    if not isinstance(detail, dict) or detail.get('side') != 'time_pairing':
+        return False
+    reason = detail.get('reason', '')
+    match = re.fullmatch(r'Odom bracket too wide for scan: (\d+\.\d{3}) s', reason)
+    return bool(match and float(match[1]) >= 0.150 and str(error) == 'WALL_REFERENCE: ' + reason)
+
+
+class ReadyPairingWait:
+    """One absolute two-second window; three distinct valid pairs after the last bad scan."""
+
+    def __init__(self):
+        self.started = self.deadline = None
+        self.bad_stamp = None
+        self.paired_stamps = []
+
+    def check_deadline(self, now):
+        if self.deadline is not None and now >= self.deadline:
+            raise RuntimeError('READY scan pairing wait exceeded 2 seconds')
+
+    def failed(self, stamp, now):
+        self.check_deadline(now)
+        first = self.started is None
+        if first:
+            self.started, self.deadline = now, now + 2.0
+        self.bad_stamp = stamp
+        self.paired_stamps.clear()
+        return first
+
+    def paired(self, stamp, now):
+        self.check_deadline(now)
+        if self.started is None:
+            return True
+        if (
+            len(self.paired_stamps) < 3
+            and stamp > self.bad_stamp
+            and (not self.paired_stamps or stamp > self.paired_stamps[-1])
+        ):
+            self.paired_stamps.append(stamp)
+        return len(self.paired_stamps) >= 3

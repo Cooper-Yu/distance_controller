@@ -96,7 +96,8 @@ class GuardTest(unittest.TestCase):
         ]
         self.runner.node.count_publishers.return_value = 0
         self.runner.node.get_clock().now.return_value.nanoseconds = 1_000_000_000
-        self.runner.stamp = 1_000_000_000
+        self.runner.stamp = self.runner.cached_stamp = 1_000_000_000
+        self.runner.observer.scan.header.frame_id = 'laser'
         self.runner.latest = (Pose(0, 0, 0), 10.0, 0.0, 0.0)
         self.runner.moving_pose.return_value = Pose(0, 0, 0)
         self.runner.body_velocity = (0.0, 0.0, 0.0)
@@ -236,7 +237,8 @@ class ProtocolTest(unittest.TestCase):
         permit, console, guard, cancel = StepPermit(), Mock(), Mock(), Mock()
         console.book.data = {'session_id': 'local'}
         guard.anchor = guard.check.return_value = Pose(0, 0, 0)
-        console.inputs.poll.side_effect = [
+        console.inputs.idle_poll.side_effect = [
+            (False, None),
             (True, 'step fixed'),
             (True, 'step fixed'),
             (True, 'quit'),

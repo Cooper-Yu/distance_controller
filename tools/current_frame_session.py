@@ -10,7 +10,13 @@ from pathlib import Path
 import signal
 import time
 
-from current_frame_session_runtime import SessionGuard, SessionRunner, StepPermit
+from current_frame_session_runtime import (
+    ReadyPairingError,
+    ReadyPairingWait,
+    SessionGuard,
+    SessionRunner,
+    StepPermit,
+)
 from motion_console import Console, ConsoleInput, TeachingBook
 from motion_model import local_delta
 from route_prefix_return_plan import ODOM
@@ -41,6 +47,11 @@ class CheckedInput:
 
     def __init__(self, source, cancellation, guard):
         self.source, self.cancellation, self.guard = source, cancellation, guard
+
+    def idle_poll(self):
+        """Only called immediately after the idle loop independently checks all feedback."""
+        self.cancellation.check()
+        return self.source.poll()
 
     def poll(self):
         self.cancellation.check()
@@ -107,9 +118,9 @@ def near_record(before, after):
     ) <= math.degrees(0.01)
 
 
-def publish_ready(console, guard, permit, cancellation):
+def publish_ready(console, guard, permit, cancellation, actual=None, recovered=()):
     cancellation.check()
-    actual = guard.check()
+    actual = guard.check() if actual is None else actual
     token = permit.ready()
     console.emit(
         'session_ready',
@@ -120,6 +131,7 @@ def publish_ready(console, guard, permit, cancellation):
         actual=asdict(actual),
         odom_stamp_ns=console.runner.stamp,
         cmd_publishers=0,
+        recovered_scan_stamps=list(recovered),
     )
     print(f'READY {permit.index}: step {token} | quit', flush=True)
 
@@ -146,11 +158,65 @@ def run_step(console, guard, permit, cancellation, distance):
     cancellation.step_deadline = None
 
 
+def discard_idle_commands(console, reason):
+    """Bound draining so a queued-input flood cannot starve feedback/deadline checks."""
+    for _ in range(64):
+        present, line = console.inputs.idle_poll()
+        if not present:
+            return 'empty'
+        if line is None or line in ('quit', 'stop'):
+            return 'quit'
+        console.emit('command_rejected', reason=reason)
+    return 'more'
+
+
+def idle_check(console, guard, permit, cancellation, waiting):
+    cancellation.check()
+    waiting.check_deadline(time.monotonic())
+    try:
+        actual = guard.check(allow_pair_wait=True)
+    except ReadyPairingError as error:
+        first = waiting.failed(error.stamp, time.monotonic())
+        revoked, permit.token = permit.token, None
+        if first:
+            console.emit(
+                'session_waiting',
+                session_id=console.book.data['session_id'],
+                anchor=asdict(guard.anchor),
+                next_index=permit.index,
+                reason_code='SCAN_ODOM_BRACKET_TOO_WIDE',
+                reason=str(error),
+                scan_stamp_ns=error.stamp,
+                revoked_ready_token=revoked,
+                waiting_started_mono=waiting.started,
+                waiting_deadline_mono=waiting.deadline,
+            )
+        return None
+    return actual if waiting.paired(console.runner.cached_stamp, time.monotonic()) else None
+
+
 def command_loop(console, guard, permit, cancellation, distance):
-    publish_ready(console, guard, permit, cancellation)
+    waiting = ReadyPairingWait()
     while True:
         console.runner.pump()
-        present, line = console.inputs.poll()
+        actual = idle_check(console, guard, permit, cancellation, waiting)
+        if actual is None or permit.token is None:
+            reason = (
+                'Pairing wait: no READY token; command discarded'
+                if actual is None
+                else 'Queued command discarded; no automatic next'
+            )
+            drained = discard_idle_commands(console, reason)
+            if drained == 'quit':
+                return
+            if actual is None or drained == 'more':
+                continue
+            actual = idle_check(console, guard, permit, cancellation, waiting)
+            if actual is None:
+                continue
+            publish_ready(console, guard, permit, cancellation, actual, waiting.paired_stamps)
+            waiting = ReadyPairingWait()
+        present, line = console.inputs.idle_poll()
         if not present:
             continue
         if line is None or line in ('quit', 'stop'):
@@ -159,15 +225,6 @@ def command_loop(console, guard, permit, cancellation, distance):
             console.emit('command_rejected', reason='Expected current one-use READY token')
             continue
         run_step(console, guard, permit, cancellation, distance)
-        # Discard queued commands before advertising a new unpredictable permit.
-        while True:
-            present, line = console.inputs.poll()
-            if not present:
-                break
-            if line is None or line in ('quit', 'stop'):
-                return
-            console.emit('command_rejected', reason='Queued command discarded; no automatic next')
-        publish_ready(console, guard, permit, cancellation)
 
 
 def execute(args, audit):

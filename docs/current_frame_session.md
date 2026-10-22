@@ -123,3 +123,35 @@ These are local software checks. The independently coordinated isolated ROS
 fixture and real-robot supervision/clearance tests have separate evidence gates.
 This candidate does not establish a verified physical return to P01 or Task6
 avoidance acceptance.
+## Bounded pairing wait while released
+
+Only the idle command loop can temporarily withhold READY when a typed
+`WallFitError` reports `side=time_pairing` and the exact bounded-bracket error
+`Odom bracket too wide for scan: ... s`. This is a pre-motion wait, not recovery
+from a latched fault. No publisher is created. Dual publisher identity, frames,
+source/receipt freshness, fixed stopped pose, scan chronology and fresh geometry
+must all pass first. The original 0.5-second scan source/receipt checks remain
+strict. Unknown TF, `No nearby odom`, other fit errors and every ACTIVE pairing
+error still terminate the session.
+
+The first such error emits `session_waiting`, revokes the old READY token and
+starts one absolute two-second deadline. Fields include the unchanged session
+id/anchor, `next_index`, `reason_code=SCAN_ODOM_BRACKET_TOO_WIDE`,
+`scan_stamp_ns`, `revoked_ready_token`, `waiting_started_mono`, and
+`waiting_deadline_mono`. Another bad bracket clears the recovery count without
+extending either the wait or session deadline. Three distinct successful scan
+pairs after the last bad stamp are required. Reusing one paired frame cannot
+satisfy this condition. Recovered `session_ready` includes exactly these three
+`recovered_scan_stamps`; ordinary READY includes an empty list.
+
+Waiting requests are rejected, never queued for recovery. Before advertising a
+new unpredictable token, the loop discards queued commands and checks current
+feedback again. A quit/stop or EOF still exits without motion. A command flood
+is drained in bounded groups so feedback and deadlines remain checked. No
+`step_started` or automatic movement occurs on pairing recovery.
+
+`test/test_current_frame_session_wait.py` covers typed-error scoping, unchanged
+stale/TF/identity/pose/ACTIVE failures, scan chronology/frame changes, the fixed
+two-second deadline, duplicate scans, reset counts, token revocation, discarded
+requests and recovery without movement. Isolated ROS evidence is recorded
+separately; pure tests do not certify sensor timing or real-robot operation.
