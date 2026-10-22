@@ -149,7 +149,7 @@ TEST(StartAdjustment, FaultBoundsAlwaysReturnZero)
     {{0, 0, 0, 0, 4.01},
      {-.013, 0, 0, 0, 1},
      {0, .0031, 0, 0, 1},
-     {0, 0, .0051, 0, 1},
+     {0, 0, .0088, 0, 1},
      {0, 0, 0, .009, 1},
      {std::numeric_limits<double>::quiet_NaN(), 0, 0, 0, 1}}};
   for (const auto & value : cases) {
@@ -309,7 +309,7 @@ TEST(StartAdjustment, FaultGuardsTakePriorityAfterEarlyBrakeThreshold)
     {{.003, 0, 0, 0, 4.01},
      {.013, 0, 0, 0, 1},
      {.003, .0031, 0, 0, 1},
-     {.003, 0, .0051, 0, 1},
+     {.003, 0, .0088, 0, 1},
      {.003, 0, 0, .009, 1},
      {.003, 0, std::numeric_limits<double>::quiet_NaN(), 0, 1}}};
   for (const auto & value : cases) {
@@ -339,4 +339,29 @@ TEST(StartAdjustment, FieldPoseSampleRequestsZeroAndFreshMeasurementBeforeTarget
   EXPECT_DOUBLE_EQ(result.vx, 0);
   EXPECT_DOUBLE_EQ(result.vy, 0);
   EXPECT_DOUBLE_EQ(result.wz, 0);
+}
+
+TEST(StartAdjustment, StepHeadingUsesFinalHalfDegreeLimitAndRespectsTighterConfiguration)
+{
+  const distance_controller::StartCorrection step{-.131842, .361371, .207671,    -.001031,
+                                                  .004893,  "odom",  "base_link"};
+  const auto field = distance_controller::correction_feedback(
+    step, -.132332, .362033, .202503, .202503 - .208094, .008726646, 2.3, .008);
+  EXPECT_FALSE(field.fault);
+  EXPECT_FALSE(field.arrived);
+  EXPECT_FALSE(field.remeasure);
+  EXPECT_GT(field.wz, 0);
+  EXPECT_LE(std::hypot(field.vx, field.vy), .004000001);
+  for (double drift : {-.0088, .0088}) {
+    const auto outside = distance_controller::correction_feedback(
+      step, step.x, step.y, step.yaw + drift, 0, .008726646, 1, .008);
+    EXPECT_STREQ(outside.fault, "START_CORRECTION_HEADING");
+    EXPECT_DOUBLE_EQ(outside.wz, 0);
+  }
+  const auto tighter = distance_controller::correction_feedback(
+    step, step.x, step.y, step.yaw + .0041, 0, .004, 1, .008);
+  EXPECT_STREQ(tighter.fault, "START_CORRECTION_HEADING");
+  const auto global = distance_controller::correction_feedback(
+    step, step.x, step.y, step.yaw, .009, .008726646, 1, .008);
+  EXPECT_STREQ(global.fault, "START_CORRECTION_HEADING");
 }

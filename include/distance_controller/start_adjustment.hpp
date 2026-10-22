@@ -43,8 +43,8 @@ struct StartCorrectionFeedback
 };
 
 /// Evaluate one fresh-feedback tick without changing clocks, budgets or the frozen step.
-/// Hold the step-entry heading with gentle P feedback; the original 0.005 rad fault remains.
-/// Gain 1.8 gives at most 0.009 rad/s within that accepted range, below the 0.02 hard cap.
+/// Hold the step-entry heading with gentle P feedback and the final heading tolerance.
+/// The step limit cannot exceed 0.5 degrees; tighter configured tolerances remain effective.
 inline StartCorrectionFeedback correction_feedback(
   const StartCorrection & step, double x, double y, double yaw, double heading_error,
   double heading_tolerance, double elapsed, double cap)
@@ -60,8 +60,9 @@ inline StartCorrectionFeedback correction_feedback(
     return {"START_CORRECTION_INVALID_PLAN"};
   if (elapsed < 0 || elapsed > 4.0) return {"START_CORRECTION_TIMEOUT"};
   if (std::hypot(moved_x, moved_y) > .012) return {"START_CORRECTION_TRAVEL_LIMIT"};
+  const double step_heading_limit = std::min(heading_tolerance, .008726646259971648);
   if (
-    std::abs(std::remainder(yaw - step.yaw, 2 * 3.141592653589793)) > .005 ||
+    std::abs(std::remainder(yaw - step.yaw, 2 * 3.141592653589793)) > step_heading_limit ||
     std::abs(heading_error) > heading_tolerance)
     return {"START_CORRECTION_HEADING"};
   if (std::abs(moved_x * step.dy - moved_y * step.dx) / length > .003)

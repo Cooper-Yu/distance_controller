@@ -88,8 +88,10 @@ class Room:
         if self.correction_start is not None and not self.injected:
             if self.mode.startswith('heading_hold_'):
                 self.pose[2] += 0.003 if self.mode.endswith('positive') else -0.003
+            elif self.mode == 'heading_near_tolerance':
+                self.pose[2] += 0.0055
             elif self.mode == 'heading':
-                self.pose[2] += 0.006
+                self.pose[2] += 0.010
             elif self.mode == 'cross_track':
                 self.pose[1] += 0.0035
             elif self.mode == 'travel':
@@ -199,7 +201,14 @@ class Room:
         self.publish_scan(now)
 
 
-def verify(room, code, text):
+def verify_near_heading(room, text):
+    """Confirm the injected boundary case was exercised without exceeding final tolerance."""
+    peak = max(abs(s['pose'][2]) for s in room.samples)
+    assert 0.0052 <= peak <= 0.008726647
+    assert 'START_CORRECTION_HEADING' not in text
+
+
+def verify(room, code, text):  # noqa: PLR0915 - shared success/fault table for one fixture lifetime
     faults = dict(
         freeze='START_CORRECTION_TIMEOUT',
         heading='START_CORRECTION_HEADING',
@@ -254,6 +263,8 @@ def verify(room, code, text):
             assert any(sign * s['command'][2] < -0.002 for s in active)
             assert abs(active[-1]['pose'][2]) < 0.0012, active[-1]
             assert 'START_CORRECTION_HEADING' not in text
+        if room.mode == 'heading_near_tolerance':
+            verify_near_heading(room, text)
         if room.mode == 'early_brake_coast':
             assert 'reason=early_brake_at_half_step_max_2.5mm' in text
             assert room.coast_done >= 0.006999
