@@ -227,6 +227,19 @@ class ContinuityTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             attach(runner, data, Continuity(runner, gid))
 
+    def test_cli_dotted_24_byte_gid_matches_without_truncation(self):
+        dotted = '01.10.4e.29.7f.b9.ca.18.8d.18.50.20.00.00.24.03.00.00.00.00.00.00.00.00'
+        runner, _data, _gid = self.runner()
+        raw = bytes.fromhex(dotted.replace('.', ''))
+        self.assertEqual(len(raw), 24)
+        runner.node.get_publishers_info_by_topic = lambda _: [SimpleNamespace(endpoint_gid=raw)]
+        continuity = Continuity(runner, normalize_gid(dotted))
+        continuity.check()
+        changed = raw[:-1] + b'\x01'
+        runner.node.get_publishers_info_by_topic = lambda _: [SimpleNamespace(endpoint_gid=changed)]
+        with self.assertRaisesRegex(RuntimeError, 'publisher identity/count changed'):
+            continuity.check()
+
     def test_publisher_change_rejected_during_command(self):
         runner, _data, gid = self.runner()
         guard = Continuity(runner, gid)

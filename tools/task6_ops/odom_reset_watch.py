@@ -64,8 +64,17 @@ class Watch:
         if not all(math.isfinite(n) for n in numbers):
             self.emit('nonfinite_odom', topic=topic)
             return
+        if abs(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w - 1) > 0.01:
+            self.emit('invalid_odom', topic=topic, reason='quaternion_norm')
+            return
         yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
         stamp = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        # Calibration is a real-robot wall-clock contract, never simulation time.
+        source_age = time.time() - stamp / 1e9
+        if stamp <= 0 or not -0.1 <= source_age <= 0.5:
+            self.emit(
+                'invalid_odom', topic=topic, reason='source_timestamp', source_age_s=source_age
+            )
         state = dict(
             stamp_ns=stamp,
             frame=msg.header.frame_id,
@@ -94,7 +103,7 @@ class Watch:
             reasons = []
             if dx > 0.2 or abs(dyaw) > 0.25:
                 reasons.append('pose_jump')
-            if dt < 0 or dt > 5:
+            if dt <= 0 or dt > 5:
                 reasons.append('stamp_jump')
             if (state['frame'], state['child']) != (
                 previous['frame'],

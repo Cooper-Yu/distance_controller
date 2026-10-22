@@ -30,8 +30,10 @@ def normalize_gid(value):
 class Continuity:
     """Require the same single odometry publisher before and during every action."""
 
-    def __init__(self, runner, expected, guard=None):
+    def __init__(self, runner, expected, guard=None, calibration=None):
         self.runner, self.expected, self.guard = runner, expected, guard
+        self.calibration = calibration
+        self.motion_started = False
 
     def check(self):
         infos = self.runner.node.get_publishers_info_by_topic('/odometry/filtered')
@@ -40,10 +42,29 @@ class Continuity:
             raise RuntimeError('Odom publisher identity/count changed; return refused')
         if self.runner.frame != 'odom' or self.runner.twist_frame != 'base_link':
             raise RuntimeError('Return requires unchanged odom/base_link frames')
+        if self.calibration is not None and not self.motion_started:
+            from route_return_calibration import validate_report, verify_watch
+
+            report = self.calibration
+            # Stopped-pose acquisition can wait. Check lifetime after that wait and
+            # again after reading watcher evidence, immediately before command release.
+            self.runner.pose()
+            validate_report(report, report['source_binding'])
+            verify_watch(report)
+            expected = validate_report(report, report['source_binding'])
+            if not near(self.runner.moving_pose(), expected, 0.002, math.radians(0.2)):
+                raise RuntimeError('Pose moved from scan calibration capture')
 
     def __call__(self, command):
         self.check()
-        return self.guard(command) if self.guard else command
+        command = self.guard(command) if self.guard else command
+        if not self.motion_started and any(abs(value) > 0 for value in command):
+            # run_one/Console preparation may wait or the guard may block. Until
+            # the first nonzero command is actually released, expiry/watch/pose
+            # checks remain active. A zero command does not consume calibration.
+            self.check()
+            self.motion_started = True
+        return command
 
 
 def attach(runner, source, continuity):
@@ -153,8 +174,30 @@ def execute(args, source, claim_path, audit):
         sig: signal.signal(sig, cancellation.request) for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
-        continuity = Continuity(runner, normalize_gid(args.odom_publisher_gid))
+        report = None
+        evidence = None
+        if args.calibration is not None:
+            from route_return_calibration import load_calibration
+
+            source, report, evidence = load_calibration(args.calibration, args.source, source)
+            if normalize_gid(args.odom_publisher_gid) != report['epoch']['gid']:
+                raise RuntimeError('Calibration publisher does not match requested new GID')
+        continuity = Continuity(runner, normalize_gid(args.odom_publisher_gid), calibration=report)
         attach(runner, source, continuity)
+        if report is not None:
+            hold_until = time.monotonic() + 2
+            while time.monotonic() < hold_until:
+                runner.pump()
+                cancellation.check()
+                runner.exclusive()
+                continuity.check()
+            evidence['validated_unix'] = time.time()
+            calibration_path = args.output.with_suffix('.calibration.json')
+            with calibration_path.open('x') as stream:
+                json.dump(evidence, stream, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            emit(audit, 'return_epoch_calibrated', evidence_file=str(calibration_path), **evidence)
         book = TeachingBook(args.output, source.origin, 'odom')
         inputs = CheckedInput(ConsoleInput(), cancellation)
         console = Console(runner, book, inputs, audit, args.turn_speed, continuity)
@@ -190,7 +233,12 @@ def execute(args, source, claim_path, audit):
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, required=True)
-    parser.add_argument('--confirm-same-odom', required=True, metavar='SOURCE_SESSION_UUID')
+    confirmation = parser.add_mutually_exclusive_group(required=True)
+    confirmation.add_argument('--confirm-same-odom', metavar='SOURCE_SESSION_UUID')
+    confirmation.add_argument('--confirm-source-session', metavar='SOURCE_SESSION_UUID')
+    parser.add_argument(
+        '--calibration', type=Path, help='Fresh schema2 scan report plus live watcher evidence'
+    )
     parser.add_argument('--odom-publisher-gid', required=True)
     parser.add_argument('--output', type=Path, required=True)
     policy = parser.add_mutually_exclusive_group(required=True)
@@ -203,6 +251,10 @@ def arguments(argv=None):
         parser.error('Return speed must be .01-.03 m/s')
     if not math.isfinite(args.turn_speed) or not 0.02 <= args.turn_speed <= 0.10:
         parser.error('Return turn speed must be .02-.10 rad/s')
+    if args.calibration is not None and args.confirm_source_session is None:
+        parser.error('Calibration requires --confirm-source-session, not --confirm-same-odom')
+    if args.calibration is None and args.confirm_same_odom is None:
+        parser.error('Uncalibrated return requires --confirm-same-odom')
     return args
 
 
@@ -210,14 +262,18 @@ def main(argv=None):
     args = arguments(argv)
     try:
         source = load_source(args.source)
-        if args.confirm_same_odom != source.session_id:
+        if (args.confirm_same_odom or args.confirm_source_session) != source.session_id:
             raise ValueError('Confirm the exact original session; do not adopt a different run')
         normalize_gid(args.odom_publisher_gid)
         claim = args.source.with_suffix('.return_claim.json')
         if claim.exists():
             raise ValueError('This source already has a return attempt; restart/resume forbidden')
         args.output = args.output.resolve()
-        if args.output.suffix != '.json' or args.output.exists():
+        if (
+            args.output.suffix != '.json'
+            or args.output.exists()
+            or args.output.with_suffix('.calibration.json').exists()
+        ):
             raise ValueError('Use a new .json output')
         with open('/tmp/distance_controller_survey_return.lock', 'a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

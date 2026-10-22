@@ -98,7 +98,7 @@ install(FILES tools/motion_console.py tools/task6_route_model.py tools/route_ses
 install(PROGRAMS tools/task6_route_runner.py DESTINATION lib/${PROJECT_NAME} RENAME task6_route_runner)
 install(FILES tools/route_laser_guard.py tools/route_laser_runtime.py DESTINATION lib/${PROJECT_NAME})
 
-install(FILES tools/route_return_plan.py tools/task6_route_runner.py DESTINATION lib/${PROJECT_NAME})
+install(FILES tools/route_return_plan.py tools/route_return_calibration.py tools/task6_route_runner.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS tools/route_return_runner.py DESTINATION lib/${PROJECT_NAME} RENAME route_return_runner)
 if(BUILD_TESTING)
   add_test(NAME test_route_return
