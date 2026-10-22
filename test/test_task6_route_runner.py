@@ -171,6 +171,7 @@ class ExecutionTest(unittest.TestCase):
             patch.object(route, 'TeachingBook'),
             patch.object(route, 'Console'),
             patch.object(route, 'run_actions'),
+            patch('route_feedback_pause.RouteFeedbackPause'),
         ):
             route.prepare_and_run(runner, Path('unused'), io.StringIO(), (), 0.1, Mock())
         runner.prepare_start.assert_called_once()

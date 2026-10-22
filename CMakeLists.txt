@@ -117,4 +117,11 @@ install(FILES tools/current_frame_step_runtime.py DESTINATION lib/${PROJECT_NAME
 install(PROGRAMS tools/current_frame_step.py DESTINATION lib/${PROJECT_NAME} RENAME current_frame_step)
 
 install(FILES tools/current_frame_session_runtime.py DESTINATION lib/${PROJECT_NAME})
+install(FILES tools/route_feedback_pause.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS tools/current_frame_session.py DESTINATION lib/${PROJECT_NAME} RENAME current_frame_session)
+
+if(BUILD_TESTING)
+  add_test(NAME test_route_feedback_pause
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_route_feedback_pause.py)
+  set_tests_properties(test_route_feedback_pause PROPERTIES TIMEOUT 45)
+endif()

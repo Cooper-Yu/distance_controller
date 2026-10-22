@@ -359,6 +359,12 @@ private:
   void begin_scan_recovery(const std::chrono::steady_clock::time_point & receipt);
   bool handle_scan_recovery(const std::chrono::steady_clock::time_point & receipt);
   bool scan_recovering_{false};
+  std::string accepted_scan_frame_;
+  bool scan_recovery_anchor_valid_{false};
+  unsigned scan_recovery_odom_count_{0};
+  int64_t scan_recovery_odom_stamp_{0};
+  std::chrono::steady_clock::time_point scan_recovery_odom_since_{};
+  nav_msgs::msg::Odometry scan_recovery_anchor_{};
   unsigned scan_recovery_count_{0};
   int64_t scan_recovery_stamp_{0};
   int64_t scan_recovery_after_{0};

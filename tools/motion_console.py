@@ -157,7 +157,11 @@ class Console:
 
     def measure(self):
         """Reuse labelled laser ranges and provisional body model; no motion guard calls."""
-        self.runner.observe('console_log_only')
+        pause = getattr(self.runner, 'feedback_pause', None)
+        if pause is None:
+            self.runner.observe('console_log_only')
+        else:
+            self.runner.observations.append(pause.observation('console_log_only'))
         observation = self.runner.observations[-1]
         self.emit('measure', observation=observation)
         return observation
@@ -302,6 +306,9 @@ class Console:
                     next_due = time.monotonic() + 0.05
                 remaining = max(0.0, min(next_due, deadline) - time.monotonic())
                 r.ros.spin_once(r.node, timeout_sec=remaining)
+                pause = getattr(r, 'feedback_pause', None)
+                if pause is not None:
+                    pause.check()
         finally:
             r.node.destroy_publisher(r.velocity_pub)
             r.velocity_pub = None
@@ -314,9 +321,22 @@ class Console:
         turn_speed = min(self.turn_speed, 0.10) if settling else self.turn_speed
         tracker = PathTracker(start, motion.points, motion.angle) if motion.kind == 'path' else None
         heading_pid = HeadingPid()
+        pause = getattr(r, 'feedback_pause', None)
+        generation = pause.generation if pause is not None else None
         while time.monotonic() < deadline:
             r.pump()
             self.cancel_input()
+            if pause is not None and pause.generation != generation:
+                # Original start, path points, turn center, and deadline remain fixed.
+                generation = pause.generation
+                heading_pid.reset()
+                command, held, previous = (0.0, 0.0, 0.0), None, time.monotonic()
+                tracker = (
+                    PathTracker(start, motion.points, motion.angle)
+                    if motion.kind == 'path' else None
+                )
+            if time.monotonic() >= deadline:
+                break
             actual = r.moving_pose()
             if r.twist_frame != 'base_link':
                 raise RuntimeError('Odom child frame changed')

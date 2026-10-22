@@ -109,6 +109,12 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
 {
   if (fault_latched_) return;
   const auto receipt = std::chrono::steady_clock::now();
+  if (
+    precise_start_ && !centering_complete_ && accepted_scan_ &&
+    msg->header.frame_id != accepted_scan_frame_) {
+    fail_preparation("FEEDBACK_SCAN_FRAME_CHANGED", receipt);
+    return;
+  }
   const rclcpp::Time incoming(msg->header.stamp, get_clock()->get_clock_type());
   const double incoming_age = (now() - incoming).seconds();
   if (precise_start_ && !centering_complete_ && accepted_scan_) {
@@ -156,6 +162,7 @@ void DistanceController::on_scan(sensor_msgs::msg::LaserScan::ConstSharedPtr msg
     return;
   observation_stamp_ns_ = stamp.nanoseconds();
   measure_wall_windows(*msg, mounting);
+  if (scan_valid_) accepted_scan_frame_ = msg->header.frame_id;
 }
 
 bool DistanceController::handle_initial_positioning(const rclcpp::Time & current_time)

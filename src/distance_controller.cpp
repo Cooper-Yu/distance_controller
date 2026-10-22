@@ -224,6 +224,13 @@ void DistanceController::on_odom(nav_msgs::msg::Odometry::SharedPtr msg)
 bool DistanceController::handle_odom_wait_or_timeout(
   const std::chrono::steady_clock::time_point & now, bool should_log)
 {
+  if (precise_start_ && !centering_complete_) {
+    const double gap = std::chrono::duration<double>(now - last_odom_time_).count();
+    const rclcpp::Time stamp(last_odom_.header.stamp, get_clock()->get_clock_type());
+    const double age = (this->now() - stamp).seconds();
+    if (!received_odom_ || gap > 0.35 || age > 0.35) begin_scan_recovery(now);
+    if (scan_recovering_) return handle_scan_recovery(now);
+  }
   if (!received_odom_) {
     if (should_log) {
       RCLCPP_INFO(get_logger(), "Waiting for odom...");

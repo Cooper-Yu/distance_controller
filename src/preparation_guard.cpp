@@ -90,6 +90,7 @@ bool DistanceController::handle_centering_guard(
     last_odom_.pose.pose.position.y - preparation_y_);
   const double age = std::chrono::duration<double>(now - last_scan_time_).count();
   const char * reason = nullptr;
+  if (precise_start_ && !scan_valid_) begin_scan_recovery(now);
   if (accepted_scan_ && !scan_valid_ && !scan_recovering_)
     reason = "SCAN_INVALID";
   else if (accepted_scan_ && age > scan_timeout_ && !precise_start_)
@@ -198,7 +199,9 @@ bool DistanceController::validate_odom_recovery(
 {
   if (fault_latched_) return false;
   const double gap = std::chrono::duration<double>(receipt - last_odom_time_).count();
-  if (received_odom_ && gap > 0.5) begin_odom_recovery(receipt);
+  const bool initializing = precise_start_ && !centering_complete_;
+  if (initializing && received_odom_ && gap > 0.35) begin_scan_recovery(receipt);
+  if (!initializing && received_odom_ && gap > 0.5) begin_odom_recovery(receipt);
   if (odom_recovering_ && std::chrono::duration<double>(receipt - recovery_start_).count() >= 2.0) {
     fail_odom_recovery("ODOM_RECOVERY_TIMEOUT");
     return false;
@@ -207,11 +210,35 @@ bool DistanceController::validate_odom_recovery(
   const rclcpp::Time previous(last_odom_.header.stamp, get_clock()->get_clock_type());
   const double age = (now() - stamp).seconds();
   if (
+    initializing &&
+    (stamp.nanoseconds() <= 0 || age < -0.1 || (received_odom_ && stamp < previous))) {
+    fail_preparation("FEEDBACK_ODOM_STAMP_RESET", receipt);
+    return false;
+  }
+  if (
     stamp.nanoseconds() <= 0 || age < -0.1 || age > (odom_recovering_ ? 0.15 : 0.5) ||
     (received_odom_ && stamp <= previous)) {
-    if (precision_correction_) fail_preparation("START_CORRECTION_ODOM_STAMP", receipt);
+    if (initializing)
+      begin_scan_recovery(receipt);
+    else if (precision_correction_)
+      fail_preparation("START_CORRECTION_ODOM_STAMP", receipt);
     odom_recovery_stable_ = false;
     return false;
+  }
+  if (initializing && received_odom_) {
+    const auto & anchor =
+      scan_recovering_ && scan_recovery_anchor_valid_ ? scan_recovery_anchor_ : last_odom_;
+    const auto & a = anchor.pose.pose;
+    const auto & b = msg.pose.pose;
+    const double yaw_delta = quaternion_to_yaw(b.orientation) - quaternion_to_yaw(a.orientation);
+    if (
+      msg.header.frame_id != anchor.header.frame_id ||
+      msg.child_frame_id != anchor.child_frame_id ||
+      std::hypot(b.position.x - a.position.x, b.position.y - a.position.y) > 0.25 ||
+      std::abs(std::atan2(std::sin(yaw_delta), std::cos(yaw_delta))) > 0.35) {
+      fail_preparation("FEEDBACK_POSE_OR_FRAME_JUMP", receipt);
+      return false;
+    }
   }
   if (!odom_recovering_) return true;
   const auto & a = recovery_anchor_.pose.pose;

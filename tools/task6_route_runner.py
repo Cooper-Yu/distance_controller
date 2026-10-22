@@ -45,6 +45,9 @@ def run_actions(console, actions, cancellation):
     after_turn = False
     for index, action in enumerate(actions):
         cancellation.check()
+        pause = getattr(console.runner, 'feedback_pause', None)
+        if pause is not None:
+            pause.check()
         console.emit('route_action_started', index=index, name=action.name)
         if action.kind == 'turn':
             motion = turn_motion(action, console.book.origin, console.runner.pose())
@@ -99,6 +102,10 @@ def prepare_and_run(runner, path, audit, actions, turn_speed, cancellation, supe
     )
     book = TeachingBook(path, origin, runner.frame)
     console = Console(runner, book, cancellation, audit, turn_speed)
+    if not supervised:
+        from route_feedback_pause import RouteFeedbackPause
+
+        runner.feedback_pause = RouteFeedbackPause(runner, console.emit, cancellation.check)
     console.record('P01')
     if supervised:
         from route_laser_runtime import RouteLaserGuard

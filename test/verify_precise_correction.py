@@ -217,8 +217,8 @@ def verify(room, code, text):  # noqa: PLR0915 - shared success/fault table for 
         unstable='START_VERIFY_TIMEOUT',
         stop_velocity='START_VERIFY_TIMEOUT',
         oversized='START_CORRECTION_RANGE',
-        odom_frame='START_CORRECTION_ODOM_FRAME',
-        odom_stamp='START_CORRECTION_ODOM_STAMP',
+        odom_frame='FEEDBACK_POSE_OR_FRAME_JUMP',
+        odom_stamp='FEEDBACK_ODOM_STAMP_RESET',
         attempt_limit='START_REFINEMENT_LIMIT',
         stage_deadline='POSITIONING_TIMEOUT',
         total_deadline='PREPARATION_TOTAL_TIMEOUT',
@@ -247,7 +247,7 @@ def verify(room, code, text):  # noqa: PLR0915 - shared success/fault table for 
             assert math.hypot(float(x), float(y)) <= 0.010001
             assert float(x) > 0 if room.mode == 'reverse' else float(x) < 0
         if room.mode in ('scan_gap', 'odom_gap'):
-            token = 'scan_recovery' if room.mode == 'scan_gap' else 'odom_recovery'
+            token = 'scan_recovery'
             assert f'START_CORRECTION_CANCELLED: reason={token}' in text
             suffix = text.split(f'START_CORRECTION_CANCELLED: reason={token}', 1)[1]
             assert suffix.index('START_VERIFY: stopped hold') < suffix.index('START_VERIFIED:')
