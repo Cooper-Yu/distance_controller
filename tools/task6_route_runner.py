@@ -66,6 +66,11 @@ def run_actions(console, actions, cancellation):
     console.runner.pose()
 
 
+def configure_route_scan_policy(runner, supervised):
+    """Relax only observation geometry after strict preparation has completed."""
+    runner.observation_scan_timeout = 0.5 if supervised else 1.0
+
+
 def prepare_and_run(runner, path, audit, actions, turn_speed, cancellation, supervised=False):
     runner.prepare_options += [
         '-p',
@@ -84,6 +89,14 @@ def prepare_and_run(runner, path, audit, actions, turn_speed, cancellation, supe
     if runner.frame != 'odom' or runner.twist_frame != 'base_link':
         raise RuntimeError('Requires odom frame and base_link child frame')
     emit(audit, 'preparation_handoff', origin=asdict(origin))
+    configure_route_scan_policy(runner, supervised)
+    emit(
+        audit,
+        'route_scan_policy',
+        source_receipt_limit_s=runner.observation_scan_timeout,
+        odometry_limit_s=0.5,
+        initialization_limit_s=0.5,
+    )
     book = TeachingBook(path, origin, runner.frame)
     console = Console(runner, book, cancellation, audit, turn_speed)
     console.record('P01')

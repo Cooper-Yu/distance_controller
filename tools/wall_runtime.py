@@ -122,7 +122,10 @@ class WallRunner(PlannedRunner):
             raise RuntimeError('Required laser scan unavailable')
         stamp = scan.header.stamp.sec * 1_000_000_000 + scan.header.stamp.nanosec
         age = (self.node.get_clock().now().nanoseconds - stamp) / 1e9
-        if not -0.1 <= age <= 0.5 or time.monotonic() - self.observer.received > 0.5:
+        limit = getattr(self, 'observation_scan_timeout', 0.5)
+        if not math.isfinite(limit) or not 0.5 <= limit <= 1.0:
+            raise RuntimeError('Invalid observation scan timeout')
+        if not -0.1 <= age <= limit or time.monotonic() - self.observer.received > limit:
             raise RuntimeError('Required laser scan stale')
         if stamp != self.cached_stamp:
             try:

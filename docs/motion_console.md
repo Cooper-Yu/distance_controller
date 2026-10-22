@@ -460,3 +460,13 @@ y coordinates and headings stay unchanged. P08-P09, P09-P10 and P10-P11
 reinterpolate from the revised endpoints; P09-P10 now advances with about
 1.65 mm rightward displacement. Test from initialized P01 using path P10;
 physical clearance and the revised P10 turning location remain unverified.
+
+### Task6 observation-only route scan grace (2026-10-22)
+
+After strict precise preparation, the non-supervised route runner uses a maximum
+1.0-second scan source/receipt age for observation geometry, including terminal
+turn checks. Default WallRunner/standalone tools and supervised mode remain at
+0.5 seconds. Odometry checks, unknown TF, frame/epoch checks, final pose tolerance
+and 4cm turn center drift are unchanged. Geometry timeout cannot exceed 1 second;
+prolonged loss still stops. This user-selected observation policy provides no
+laser obstacle avoidance and does not alter preparation's fresh-scan acceptance.
