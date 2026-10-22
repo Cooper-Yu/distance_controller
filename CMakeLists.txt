@@ -111,3 +111,6 @@ install(FILES tools/route_prefix_return_plan.py tools/route_prefix_return_runtim
   tools/route_return_runner.py DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS tools/route_prefix_return_runner.py DESTINATION lib/${PROJECT_NAME}
   RENAME route_prefix_return_runner)
+
+install(FILES tools/current_frame_step_runtime.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS tools/current_frame_step.py DESTINATION lib/${PROJECT_NAME} RENAME current_frame_step)
