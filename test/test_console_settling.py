@@ -19,6 +19,7 @@ class SettlingTests(unittest.TestCase):
         runner = SimpleNamespace(
             max_speed=0.12,
             exclusive=Mock(),
+            assert_exclusive=Mock(),
             pose=Mock(side_effect=poses),
             node=SimpleNamespace(create_publisher=Mock()),
             twist=object(),

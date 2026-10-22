@@ -75,3 +75,31 @@ static sensor transform, then launches the installed runner with closed stdin.
 It checks preparation plus a supplied bent route, stale-odom failure, excessive
 turn drift, route cancellation and preparation cancellation. Logs remain under
 `/tmp/task6_route_test/`; this fixture is not a hardware test.
+
+### Per-action ownership checks (2026-10-22)
+
+Console retains its entry two-second discovery wait, then captures fresh stopped
+odometry and validates the original path/reference. Attempt zero reuses this
+completed entry wait; it no longer spends another two seconds after freezing the
+start. Immediately before publisher creation it checks command endpoints and the
+step service again without waiting. Direct `finish_motion` calls default to the
+full wait, and correction attempts one/two retain their original full wait.
+The discovery wait historically spins for two seconds and checks the graph at
+its end; it is not a continuous two-second proof of exclusive ownership.
+
+The `started` event records the validated action intent. A separate
+`publisher_created` event identifies successful publisher acquisition for each
+attempt; its log write is inside the stop/finally scope. Neither event claims a
+nonzero command was sent. First-command feedback/guard checks, four-centimeter
+turn drift protection, gains, tolerances and cancellation remain unchanged.
+This removes a redundant delay, not the actual filtered scan gaps; no automatic
+stopped-boundary recovery or relaxed scan freshness is introduced.
+
+Local validation: 68 relevant Python tests passed, including normal move using
+one entry wait, direct-call and retry waits, late competitors, cancellation and
+audit-write failure cleanup. `test/verify_console_exclusive.py` ran real ROS in
+localhost domain194: a command publisher or step service introduced after the
+entry gate was rejected before our publisher existed, with zero commands.
+Evidence `/tmp/console_exclusive/1792673486019961926/report.json`; entry waits
+2.003/2.003 seconds, total rejection times 2.014/2.014 seconds. Synthetic graph
+checks do not certify robot motion or real-world collision clearance.

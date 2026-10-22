@@ -308,6 +308,7 @@ class ConsoleInjectionTests(unittest.TestCase):
         runner = SimpleNamespace(
             max_speed=0.04,
             exclusive=Mock(),
+            assert_exclusive=Mock(),
             node=SimpleNamespace(create_publisher=Mock()),
             twist=object(),
             velocity_pub=None,

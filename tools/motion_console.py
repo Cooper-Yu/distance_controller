@@ -212,7 +212,7 @@ class Console:
             length = sum(math.dist(a, b) for a, b in zip(motion.points, motion.points[1:]))
         budget = 30 + 3 * (length / r.max_speed + abs(motion.angle) / self.turn_speed)
         try:
-            actual = self.finish_motion(start, motion, budget)
+            actual = self.finish_motion(start, motion, budget, initial_exclusive_done=True)
         finally:
             self.stop_motion()
         self.emit('completed', actual=asdict(actual), displacement=local_delta(start, actual))
@@ -252,18 +252,22 @@ class Console:
         small = position_error <= 0.01 and abs(yaw_error) <= math.radians(1)
         return ready, small
 
-    def finish_motion(self, start, motion, budget):
+    def finish_motion(self, start, motion, budget, *, initial_exclusive_done=False):
         """At most two small post-stop corrections, sharing the original action deadline."""
         r = self.runner
         deadline = time.monotonic() + budget
         for attempt in range(3):
             self.cancel_input()
-            r.exclusive()
+            if attempt or not initial_exclusive_done:
+                r.exclusive()
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise RuntimeError('Motion timeout before final correction')
+            self.cancel_input()
+            r.assert_exclusive()
             r.velocity_pub = r.node.create_publisher(r.twist, '/cmd_vel', 10)
             try:
+                self.emit('publisher_created', attempt=attempt)
                 self.follow(
                     start,
                     motion,

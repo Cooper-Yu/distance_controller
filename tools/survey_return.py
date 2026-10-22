@@ -119,6 +119,10 @@ class Runner:
         end = time.monotonic() + 2.0
         while time.monotonic() < end:
             self.ros.spin_once(self.node, timeout_sec=0.1)
+        self.assert_exclusive()
+
+    def assert_exclusive(self):
+        """Recheck discovered control owners immediately, without a discovery wait."""
         if self.node.get_publishers_info_by_topic('/cmd_vel') or self.client.service_is_ready():
             raise RuntimeError('Existing /cmd_vel publisher or step service: stop it first.')
 
