@@ -43,7 +43,7 @@ struct StartCorrectionFeedback
 };
 
 /// Evaluate one fresh-feedback tick without changing clocks, budgets or the frozen step.
-/// Hold the step-entry heading with gentle P feedback and the final heading tolerance.
+/// Hold the initialization heading with gentle P feedback and the final heading tolerance.
 /// The step limit cannot exceed 0.5 degrees; tighter configured tolerances remain effective.
 inline StartCorrectionFeedback correction_feedback(
   const StartCorrection & step, double x, double y, double yaw, double heading_error,
@@ -77,6 +77,6 @@ inline StartCorrectionFeedback correction_feedback(
   return {
     nullptr, false, scale * (std::cos(yaw) * ex + std::sin(yaw) * ey),
     scale * (-std::sin(yaw) * ex + std::cos(yaw) * ey),
-    std::clamp(1.8 * std::remainder(step.yaw - yaw, 2 * 3.141592653589793), -.02, .02)};
+    std::clamp(-1.8 * heading_error, -.02, .02)};
 }
 }  // namespace distance_controller

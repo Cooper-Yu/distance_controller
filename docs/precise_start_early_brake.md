@@ -31,3 +31,26 @@ bound now matches that final tolerance, capped at 0.5deg, with the original
 heading-reference error also checked. This changes an intermediate guard, not
 P01 final acceptance; a fresh stopped laser batch is still required. The actual
 field pose is a regression case, plus over-limit and tighter-configuration checks.
+## Shared heading reference during microsteps
+
+The real `feedback_pause_20261022_165150` run reached a stable joint 12/15
+batch, then entered a rear-distance correction with yaw -0.019397 rad while
+its initialization heading reference was -0.0135141 rad. Holding that biased
+entry yaw left only about 0.163 degrees of global margin. The observed next
+0.237-degree drift crossed the unchanged global 0.5-degree guard; the local
+step-entry drift itself was still below its limit.
+
+Microstep angular feedback now uses the same signed initialization heading
+error as the global guard (`wz = clamp(-1.8 * heading_error, -0.02, 0.02)`).
+The translation anchor and target remain frozen in odom coordinates. Both the
+global heading bound and step-entry deviation bound still run before any command,
+including arrival and early braking. This does not recapture the heading reference,
+raise tolerances, or accept P01 without a fresh stopped wall batch. Logs show both
+entry yaw and the held heading reference.
+
+A deterministic field-value test keeps the observed over-limit pose rejected,
+while checking corrective command direction before that limit. An isolated ROS
+fixture injects a -0.005883 rad bias while stopped before the correction batch,
+requires the biased step entry to be exercised, and verifies positive corrective
+angular commands, reduced error, stopped remeasurement and final START_VERIFIED.
+These tests verify controller behavior; hardware repeatability remains pending.

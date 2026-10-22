@@ -85,6 +85,14 @@ class Room:
             delta = min(max(0.0, 0.007 - done), 0.0175 * dt)
             self.pose[0] -= delta
             self.coast_done = done + delta
+        if (
+            self.mode == 'heading_entry_bias'
+            and self.verify_start is not None
+            and not getattr(self, 'entry_injected', False)
+        ):
+            # Shift while stopped before the stable batch freezes the microstep.
+            self.pose[2] -= 0.005883
+            self.entry_injected = True
         if self.correction_start is not None and not self.injected:
             if self.mode.startswith('heading_hold_'):
                 self.pose[2] += 0.003 if self.mode.endswith('positive') else -0.003
@@ -263,6 +271,14 @@ def verify(room, code, text):  # noqa: PLR0915 - shared success/fault table for 
             assert any(sign * s['command'][2] < -0.002 for s in active)
             assert abs(active[-1]['pose'][2]) < 0.0012, active[-1]
             assert 'START_CORRECTION_HEADING' not in text
+        if room.mode == 'heading_entry_bias':
+            match = re.search(r'START_CORRECTION:.*yaw=([-\d.]+) heading_reference=([-\d.]+)', text)
+            assert match, text
+            entry, reference = map(float, match.groups())
+            assert -0.007 < entry - reference < -0.004
+            active = [s for s in room.samples if room.correction_start <= s['t'] < room.stop_start]
+            assert any(s['command'][2] > 0.007 for s in active), active[:10]
+            assert abs(active[-1]['pose'][2] - reference) < abs(entry - reference) / 2
         if room.mode == 'heading_near_tolerance':
             verify_near_heading(room, text)
         if room.mode == 'early_brake_coast':

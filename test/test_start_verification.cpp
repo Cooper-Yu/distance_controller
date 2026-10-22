@@ -178,14 +178,14 @@ TEST(StartAdjustment, SmallOvershootStopsForRemeasurementInsteadOfReversing)
   EXPECT_DOUBLE_EQ(step.dx, -.009);
 }
 
-TEST(StartAdjustment, HeadingHoldUsesFrozenAnchorAndShortestSignedRotation)
+TEST(StartAdjustment, HeadingHoldUsesInitializationReferenceAndShortestSignedRotation)
 {
   const double pi = 3.141592653589793;
   for (const double anchor : {0.0, pi - .001, -pi + .001}) {
     const distance_controller::StartCorrection step{1, 2, anchor, .009, 0, "odom", "base_link"};
     for (const double drift : {-.004, 0.0, .004}) {
       const auto result = distance_controller::correction_feedback(
-        step, 1, 2, std::remainder(anchor + drift, 2 * pi), 0, .008726646, 1, .02);
+        step, 1, 2, std::remainder(anchor + drift, 2 * pi), drift, .008726646, 1, .02);
       ASSERT_FALSE(result.fault);
       EXPECT_NEAR(result.wz, -1.8 * drift, 1e-12);
       EXPECT_LE(std::abs(result.wz), .02);
@@ -469,4 +469,29 @@ TEST(StartVerification, NonfiniteAndModerateOutliersShareTheSameEvidenceBudget)
   EXPECT_TRUE(summarize_start(samples).stable);
   samples[3][1] += .012;
   EXPECT_FALSE(summarize_start(samples).stable);
+}
+
+TEST(StartAdjustment, BiasedStepEntryRestoresGlobalHeadingWithoutRelaxingEitherGuard)
+{
+  const double reference = -.0135141;
+  const distance_controller::StartCorrection step{-.003051, -.000023, -.019397,   -.004999,
+                                                  .000097,  "odom",   "base_link"};
+  const auto initial = distance_controller::correction_feedback(
+    step, step.x, step.y, step.yaw, step.yaw - reference, .008726646, 0, .004);
+  ASSERT_FALSE(initial.fault);
+  EXPECT_NEAR(initial.wz, .01058922, 1e-10);
+  EXPECT_LE(std::hypot(initial.vx, initial.vy), .004000001);
+  // Current yaw remains below the global limit: steer toward its reference even
+  // when that direction is opposite to restoring the step-entry orientation.
+  const double yaw = -.018;
+  const auto inward = distance_controller::correction_feedback(
+    step, step.x, step.y, yaw, yaw - reference, .008726646, .5, .004);
+  ASSERT_FALSE(inward.fault);
+  EXPECT_GT(inward.wz, 0);
+  const auto field_fault = distance_controller::correction_feedback(
+    step, -.00423244, .000291882, -.0235421, -.0235421 - reference, .008726646, .75, .004);
+  ASSERT_STREQ(field_fault.fault, "START_CORRECTION_HEADING");
+  EXPECT_DOUBLE_EQ(field_fault.wz, 0);
+  EXPECT_DOUBLE_EQ(field_fault.vx, 0);
+  EXPECT_DOUBLE_EQ(field_fault.vy, 0);
 }
