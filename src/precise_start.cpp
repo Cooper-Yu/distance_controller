@@ -97,6 +97,13 @@ void DistanceController::finish_precise_batch(const distance_controller::StartSu
     RCLCPP_INFO(
       get_logger(), "START_VERIFIED: median distances within %.4f m; wall angle within %.6f rad",
       centering_tolerance_, heading_tolerance_);
+    // The final fresh wall batch validates this stopped pose, not the earlier odom heading.
+    const double previous_reference = heading_reference_;
+    heading_reference_ = quaternion_to_yaw(last_odom_.pose.pose.orientation);
+    RCLCPP_INFO(
+      get_logger(),
+      "START_ORIGIN_HEADING_CAPTURE: old_reference=%.6f new_reference=%.6f wall_angle=%.6f",
+      previous_reference, heading_reference_, summary.median[2]);
     record_route_origin();
     return;
   }

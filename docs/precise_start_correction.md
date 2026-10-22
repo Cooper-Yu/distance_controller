@@ -158,3 +158,32 @@ flake8/uncrustify/xmllint results are not claimed as a clean lint pass.
 Runtime evidence: the training-note `code_lab/runtime_logs/` directory
 `task6_precise_heading_20261022_1205/summary.json` and seven captured fixture folders.
 These are synthetic local tests, not real-robot acceptance.
+### Final verified P01 heading and handoff
+
+Only the final stable, distance-accepted and wall-angle-accepted precise-start batch
+captures the current stopped odom yaw as `heading_reference_`, immediately before
+recording the P01 route origin. That same accepted yaw therefore defines route axes,
+WAITING continuation, and the preparation handoff. The earlier alignment reference
+is not a second acceptance criterion after fresh physical wall verification.
+`START_ORIGIN_HEADING_CAPTURE` logs its old reference, new reference and accepted
+median wall angle. All fresh/stationary/15-frame/physical wall criteria stay unchanged.
+This capture is not performed for ordinary WAITING requests or non-precise starts;
+the existing manual `finish` alignment guard is unchanged.
+
+An actual-node localhost ROS regression first reproduced the old installed behavior:
+fresh wall verification completed at odom yaw 0.012 rad, but the earlier reference
+remained zero, and the real `/distance_controller/step` service rejected `finish`.
+With this correction, the same room and odom offset produce reference 0.012 rad,
+`finish` is accepted, and the process exits normally with code zero. Requests before
+verification remain rejected. A subsequent 0.02 rad change during ordinary precise
+WAITING is still rejected; non-precise WAITING retains its old reference and rejects
+the same changed yaw. All cases end with zero output and no velocity publisher.
+
+The new `test/verify_precise_handoff.py` launches the real installed C++ executable,
+publishes a synthetic fresh laser/odom room, and calls the actual step service; it
+does not mock the controller or its acceptance decision. Use mode `verified`,
+`waiting_drift`, or `nonprecise`; `verified --expect-old-failure` records the prior
+binary regression. This is local synthetic evidence, not real-robot acceptance.
+Fresh build, five relevant CTest targets, Ruff/clang-format/diff checks pass. Tidy23
+retains the existing verification-function size, generated-code size and diagnostics
+constant-name warnings; this is not a whole-repository lint pass.
