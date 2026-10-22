@@ -106,3 +106,8 @@ if(BUILD_TESTING)
       -s ${CMAKE_CURRENT_SOURCE_DIR}/test -p test_route_return.py)
   set_tests_properties(test_route_return PROPERTIES TIMEOUT 30)
 endif()
+
+install(FILES tools/route_prefix_return_plan.py tools/route_prefix_return_runtime.py
+  tools/route_return_runner.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS tools/route_prefix_return_runner.py DESTINATION lib/${PROJECT_NAME}
+  RENAME route_prefix_return_runner)
