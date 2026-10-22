@@ -123,14 +123,22 @@ P15 coordinates remain fixed. The final action is recorded separately and only
 successful completion and cleanup produce `route_completed` with destination P15
 and final_action P15_after_turn. Shorter waypoint prefixes are unchanged.
 
-Before this terminal action, fresh transformed laser points must leave at least
-20 mm beyond the circumscribed radius of the centrally symmetric planar footprint.
-This conservatively checks the observed full half-turn sweep before a publisher is
-created. The existing RouteLaserGuard then checks each nonzero command, including
-coverage/feedback failures. The check does not certify unobserved space or unseen
-heights. Missing input or insufficient observed clearance terminates the route;
-there is no automatic translation, point adjustment or mid-route resume.
+The terminal action retains fresh odometry, laser and stamped mounting TF checks.
+The user explicitly selected observation-only motion after reviewing the conservative
+swept-radius diagnostic; that diagnostic is no longer an automatic obstacle veto.
+An explicitly configured supervised-session obstacle guard remains enforced.
 
-The preceding development route remains observation-only. Terminal guarding alone
+The preceding development route remains observation-only. Feedback guarding alone
 does not qualify the whole route for Task6 obstacle-avoidance acceptance. The
 existing 4 cm center-drift limit, feedback stops and final yaw acceptance remain.
+### Standalone current-pose half-turn
+
+`ros2 run distance_controller task6_current_turn --output /existing/path/turn.json`
+performs a single left +pi half-turn at up to 0.20 rad/s with a 45 s total action
+budget. It takes a fresh stopped pose, requires a sole control owner, captures both
+odom publisher identities and keeps the existing fresh-feedback/TF and 4 cm center
+checks. It never changes P01 or resumes a saved run. Ctrl+C cancels; all outcomes
+attempt zeroing and publisher release. JSON/JSONL record this standalone scope.
+The standalone check is not full-route acceptance; the next full P15 route includes
+the terminal action and its normal full-run recorder. Scan geometry is observed,
+not used for an obstacle-distance veto in this user-selected mode.

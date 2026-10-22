@@ -1,12 +1,11 @@
-"""Directed terminal turn, fail-before-move clearance, and manifest contracts."""
+"""Directed terminal turn, feedback freshness, and manifest contracts."""
 
 from copy import deepcopy
 import math
 from pathlib import Path
 import sys
-from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from action_plan import Pose
@@ -40,12 +39,6 @@ class TerminalTests(unittest.TestCase):
         console.command_guard = Mock(name='prior_guard')
         return console
 
-    def guard(self, gap):
-        guard = Mock()
-        guard.policy.hard_m = 0.02
-        guard.snapshot.return_value = SimpleNamespace(points=((RADIUS + gap, 0.0),))
-        return guard
-
     def test_terminal_keeps_positive_pi_for_both_sides_of_wrap(self):
         for yaw in (-math.pi - 0.001, -math.pi + 0.001, math.pi - 0.001, math.pi + 0.001):
             with self.subTest(yaw=yaw):
@@ -67,58 +60,81 @@ class TerminalTests(unittest.TestCase):
             with self.subTest(points=points), self.assertRaises(RuntimeError):
                 observed_turn_gap(points)
 
-    def test_static_gap_rejects_before_console_move(self):
+    def test_low_observed_gap_does_not_intercept_motion(self):
+        console = self.console()
+        console.command_guard = None
+        console.runner.geometry.return_value = (((RADIUS + 0.001, 0.0),), {})
+        with terminal_guard(console, self.action()):
+            self.assertEqual(console.command_guard((0.0, 0.0, 0.1)), (0.0, 0.0, 0.1))
+        self.assertIsNone(console.command_guard)
+        self.assertEqual(console.runner.geometry.call_count, 2)
+        self.assertEqual(console.runner.moving_pose.call_count, 2)
+
+    def test_stale_geometry_rejects_before_console_move(self):
         console = self.console()
         previous = console.command_guard
-        guard = self.guard(0.019)
-        with patch('task6_terminal.RouteLaserGuard', return_value=guard):
-            with self.assertRaisesRegex(RuntimeError, '2 cm'):
-                run_actions(console, (self.action(),), Mock())
-        guard.snapshot.assert_called_once_with()
+        console.runner.geometry.side_effect = RuntimeError('Required laser scan stale')
+        with self.assertRaisesRegex(RuntimeError, 'stale'):
+            run_actions(console, (self.action(),), Mock())
         console.move.assert_not_called()
         console.runner.node.create_publisher.assert_not_called()
         console.record.assert_not_called()
         self.assertIs(console.command_guard, previous)
 
-    def test_exact_twenty_mm_boundary_accepts_and_restores_on_cancel(self):
+    def test_freshness_is_rechecked_for_each_command(self):
+        for feedback in ('moving_pose', 'geometry'):
+            console = self.console()
+            console.command_guard = None
+            with terminal_guard(console, self.action()):
+                getattr(console.runner, feedback).side_effect = RuntimeError('feedback stale')
+                with self.assertRaisesRegex(RuntimeError, 'stale'):
+                    console.command_guard((0.0, 0.0, 0.1))
+            self.assertIsNone(console.command_guard)
+
+    def test_existing_guard_preserved_and_restored_on_cancel(self):
         console = self.console()
         previous = console.command_guard
-        guard = self.guard(0.02)
-        # Isolate the exact comparison from float subtraction in point geometry.
-        with (
-            patch('task6_terminal.RouteLaserGuard', return_value=guard),
-            patch('task6_terminal.observed_turn_gap', return_value=0.02),
-        ):
-            with self.assertRaises(KeyboardInterrupt):
-                with terminal_guard(console, self.action()):
-                    self.assertIs(console.command_guard, guard)
-                    console.command_guard((0.0, 0.0, 0.1))
-                    raise KeyboardInterrupt
-        guard.assert_called_once_with((0.0, 0.0, 0.1))
+        previous.enforced = True
+        previous.side_effect = lambda command: command
+        with self.assertRaises(KeyboardInterrupt):
+            with terminal_guard(console, self.action()):
+                self.assertIsNot(console.command_guard, previous)
+                self.assertEqual(console.command_guard((0.0, 0.0, 0.1)), (0.0, 0.0, 0.1))
+                raise KeyboardInterrupt
+        self.assertIs(console.command_guard, previous)
+        self.assertEqual(previous.call_count, 2)
+        self.assertTrue(console.emit.call_args.kwargs['swept_envelope_gate'] is False)
+        self.assertEqual(console.emit.call_args.kwargs['laser_policy'], 'enforced')
+
+    def test_existing_guard_rejection_is_propagated(self):
+        console = self.console()
+        previous = console.command_guard
+        previous.side_effect = [None, RuntimeError('Existing guard blocked')]
+        with terminal_guard(console, self.action()):
+            with self.assertRaisesRegex(RuntimeError, 'Existing guard blocked'):
+                console.command_guard((0.0, 0.0, 0.1))
         self.assertIs(console.command_guard, previous)
 
-    def test_terminal_run_records_only_after_guarded_move(self):
+    def test_terminal_run_records_only_after_checked_move(self):
         console = self.console()
-        previous = console.command_guard
-        guard = self.guard(0.03)
+        console.command_guard = None
 
         def move(motion):
-            self.assertIs(console.command_guard, guard)
+            self.assertEqual(console.command_guard((0.0, 0.0, 0.1)), (0.0, 0.0, 0.1))
             self.assertEqual(motion.angle, math.pi)
 
         console.move.side_effect = move
-        with patch('task6_terminal.RouteLaserGuard', return_value=guard):
-            run_actions(console, (self.action(),), Mock())
+        run_actions(console, (self.action(),), Mock())
         console.record.assert_called_once_with(TERMINAL_NAME)
-        self.assertIs(console.command_guard, previous)
+        self.assertIsNone(console.command_guard)
 
-    def test_nonterminal_does_not_construct_guard(self):
+    def test_nonterminal_does_not_check_terminal_feedback(self):
         console = self.console()
         previous = console.command_guard
-        with patch('task6_terminal.RouteLaserGuard') as factory:
-            with terminal_guard(console, RouteAction('P14_after_turn', 'turn', 0)):
-                self.assertIs(console.command_guard, previous)
-        factory.assert_not_called()
+        with terminal_guard(console, RouteAction('P14_after_turn', 'turn', 0)):
+            self.assertIs(console.command_guard, previous)
+        console.runner.moving_pose.assert_not_called()
+        console.runner.geometry.assert_not_called()
 
     def test_valid_terminal_manifest(self):
         self.assertEqual(validate_manifest(manifest())[-1].name, TERMINAL_NAME)

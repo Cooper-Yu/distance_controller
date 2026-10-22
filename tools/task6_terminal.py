@@ -1,11 +1,10 @@
-"""Explicit directed P15 half-turn and conservative observed swept-radius precheck."""
+"""Directed P15 half-turn; observation-only geometry with strict feedback freshness."""
 
 from contextlib import contextmanager
 import math
 
 from motion_model import Motion
 from route_laser_guard import RADIUS
-from route_laser_runtime import RouteLaserGuard
 from teaching_path import turn_to_heading
 
 TERMINAL_NAME = 'P15_after_turn'
@@ -19,7 +18,7 @@ def turn_motion(action, origin, actual):
 
 
 def observed_turn_gap(points):
-    """The centrally symmetric footprint sweeps its circumscribed disk over pi radians."""
+    """Optional recorded-data diagnostic, never an observation-only motion gate."""
     if not points or any(not math.isfinite(v) for point in points for v in point):
         raise RuntimeError('Terminal turn requires observed laser points')
     return min(math.hypot(x, y) for x, y in points) - RADIUS
@@ -27,25 +26,26 @@ def observed_turn_gap(points):
 
 @contextmanager
 def terminal_guard(console, action):
-    """Check observed full sweep before ownership; guard each later nonzero command."""
+    """Preserve feedback/TF stops without imposing a swept-envelope obstacle veto."""
     if action.name != TERMINAL_NAME:
         yield
         return
     previous = console.command_guard
-    guard = RouteLaserGuard(console.runner, console.emit)
-    snapshot = guard.snapshot()
-    gap = observed_turn_gap(snapshot.points)
+
+    def checked(command):
+        console.runner.moving_pose()
+        console.runner.geometry()
+        return previous(command) if previous is not None else command
+
+    checked((0.0, 0.0, 0.0))
     console.emit(
-        'terminal_turn_preflight',
+        'terminal_turn_policy',
         name=action.name,
         angle_rad=math.pi,
-        observed_sweep_gap_m=gap,
-        required_gap_m=guard.policy.hard_m,
-        scan_stamp_ns=console.runner.cached_stamp,
+        swept_envelope_gate=False,
+        laser_policy='enforced' if getattr(previous, 'enforced', False) else 'observation_only',
     )
-    if gap < guard.policy.hard_m:
-        raise RuntimeError('Terminal half-turn observed sweep lacks 2 cm clearance')
-    console.command_guard = guard
+    console.command_guard = checked
     try:
         yield
     finally:

@@ -109,6 +109,7 @@ def close_runner(runner):
 
 
 def session(args, path, audit, actions):
+    supervised = getattr(args, 'supervised', False)
     emit(
         audit,
         'route_started',
@@ -122,10 +123,11 @@ def session(args, path, audit, actions):
         ),
         actions=[asdict(a) for a in actions],
         terminal_laser_policy=(
-            'enforced' if actions[-1].name == TERMINAL_NAME else 'not_applicable'
+            ('enforced' if supervised else 'feedback_only')
+            if actions[-1].name == TERMINAL_NAME
+            else 'not_applicable'
         ),
     )
-    supervised = getattr(args, 'supervised', False)
     runner = WallRunner(min(args.speed, 0.03) if supervised else args.speed, alignment_wall='right')
     cancellation = Cancellation(runner)
     handlers = {
