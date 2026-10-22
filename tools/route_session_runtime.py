@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 from route_session_state import LiveRouteState
 from task6_route_model import reconnect_route
-from teaching_path import turn_to_heading
+from task6_terminal import terminal_guard, turn_motion
 
 
 class CheckedInput:
@@ -26,9 +26,7 @@ def forward_once(console, state, cancellation):
         raise ValueError('Approved prefix complete; next cannot cross its destination gate')
     action = state.actions[state.cursor]
     motion = (
-        turn_to_heading(state.origin, actual, action.heading_rad)
-        if action.kind == 'turn'
-        else action.path_motion()
+        turn_motion(action, state.origin, actual) if action.kind == 'turn' else action.path_motion()
     )
     if action.kind == 'path' and state.history and state.history[-1].motion.kind == 'turn':
         motion = reconnect_route(motion, state.origin, actual)
@@ -40,7 +38,8 @@ def forward_once(console, state, cancellation):
         actual_start=asdict(actual),
         motion=asdict(motion),
     )
-    console.move(motion, use_path_length=True)
+    with terminal_guard(console, action):
+        console.move(motion, use_path_length=True)
     cancellation.check()
     # Repeating an approved action after a return must not overwrite its first point record.
     visit = (

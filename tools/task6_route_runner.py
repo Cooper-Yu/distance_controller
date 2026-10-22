@@ -12,7 +12,7 @@ import time
 
 from motion_console import Console, ConsoleInput, TeachingBook
 from task6_route_model import reconnect_route, validate_manifest
-from teaching_path import turn_to_heading
+from task6_terminal import TERMINAL_NAME, terminal_guard, turn_motion
 from wall_runtime import WallRunner
 
 
@@ -47,7 +47,7 @@ def run_actions(console, actions, cancellation):
         cancellation.check()
         console.emit('route_action_started', index=index, name=action.name)
         if action.kind == 'turn':
-            motion = turn_to_heading(console.book.origin, console.runner.pose(), action.heading_rad)
+            motion = turn_motion(action, console.book.origin, console.runner.pose())
         else:
             motion = action.path_motion()
             if after_turn:
@@ -56,9 +56,11 @@ def run_actions(console, actions, cancellation):
                     'post_turn_reconnect', original=asdict(motion), adjusted=asdict(adjusted)
                 )
                 motion = adjusted
-        console.move(motion)
+        with terminal_guard(console, action):
+            console.move(motion)
         cancellation.check()
         console.record(action.name)
+        console.emit('route_action_completed', index=index, name=action.name)
         after_turn = action.kind == 'turn'
     cancellation.check()
     console.runner.pose()
@@ -119,6 +121,9 @@ def session(args, path, audit, actions):
             else 'intermediate_no_obstacle_avoidance'
         ),
         actions=[asdict(a) for a in actions],
+        terminal_laser_policy=(
+            'enforced' if actions[-1].name == TERMINAL_NAME else 'not_applicable'
+        ),
     )
     supervised = getattr(args, 'supervised', False)
     runner = WallRunner(min(args.speed, 0.03) if supervised else args.speed, alignment_wall='right')
@@ -146,7 +151,14 @@ def session(args, path, audit, actions):
         if supervised:
             emit(audit, 'supervised_stopped', exit_code=0)
         else:
-            emit(audit, 'route_completed', destination=actions[-1].name, exit_code=0)
+            destination = 'P15' if actions[-1].name == TERMINAL_NAME else actions[-1].name
+            emit(
+                audit,
+                'route_completed',
+                destination=destination,
+                final_action=actions[-1].name,
+                exit_code=0,
+            )
     finally:
         for sig, handler in handlers.items():
             signal.signal(sig, handler)

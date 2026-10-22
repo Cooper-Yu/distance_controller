@@ -113,3 +113,24 @@ same correction margin. Heading-disabled translation is unchanged. The two-corre
 limit, 8 s correction budget, shared action deadline, and 4 cm turn-center protection
 remain in force. This reduces boundary-hugging corrections; it does not guarantee
 physical accuracy or change scan-freshness supervision.
+
+### Explicit P15 terminal half-turn
+
+The complete pid_maze_solver scene-2 manifest now ends with `P15_after_turn`,
+following the P15 path. This is a directed left half-turn of +pi from the actual
+stopped heading; it never selects the opposite direction at the +/-pi boundary.
+P15 coordinates remain fixed. The final action is recorded separately and only
+successful completion and cleanup produce `route_completed` with destination P15
+and final_action P15_after_turn. Shorter waypoint prefixes are unchanged.
+
+Before this terminal action, fresh transformed laser points must leave at least
+20 mm beyond the circumscribed radius of the centrally symmetric planar footprint.
+This conservatively checks the observed full half-turn sweep before a publisher is
+created. The existing RouteLaserGuard then checks each nonzero command, including
+coverage/feedback failures. The check does not certify unobserved space or unseen
+heights. Missing input or insufficient observed clearance terminates the route;
+there is no automatic translation, point adjustment or mid-route resume.
+
+The preceding development route remains observation-only. Terminal guarding alone
+does not qualify the whole route for Task6 obstacle-avoidance acceptance. The
+existing 4 cm center-drift limit, feedback stops and final yaw acceptance remain.

@@ -71,6 +71,23 @@ def validate_manifest(data):
             raise ValueError('The first action must be a path from P01')
         heading = action.heading_rad
         actions.append(action)
+    terminal = [i for i, action in enumerate(actions) if action.name == 'P15_after_turn']
+    if terminal:
+        i = terminal[0]
+        if (
+            i != len(actions) - 1
+            or i == 0
+            or actions[i - 1].name != 'P15'
+            or actions[i - 1].kind != 'path'
+            or actions[i].kind != 'turn'
+            or abs(
+                math.remainder(
+                    actions[i].heading_rad - actions[i - 1].heading_rad - math.pi, 2 * math.pi
+                )
+            )
+            > 1e-9
+        ):
+            raise ValueError('P15_after_turn must be the final half-turn following P15')
     return tuple(actions)
 
 
