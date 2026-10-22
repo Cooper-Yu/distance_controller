@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""Explicit backward steps in one fixed NEW-epoch frame; manual observation only."""
+
+import argparse
+from dataclasses import asdict
+import fcntl
+import json
+import math
+from pathlib import Path
+import signal
+import time
+
+from current_frame_session_runtime import SessionGuard, SessionRunner, StepPermit
+from motion_console import Console, ConsoleInput, TeachingBook
+from motion_model import local_delta
+from route_prefix_return_plan import ODOM
+from route_return_runner import normalize_gid
+from task6_route_runner import Cancellation, close_runner, emit
+from teaching_path import path_ready
+
+
+class SessionCancellation(Cancellation):
+    """The session deadline never resets; each requested step also has ten seconds."""
+
+    def __init__(self, runner, seconds):
+        super().__init__(runner)
+        self.session_deadline = time.monotonic() + seconds
+        self.step_deadline = None
+
+    def check(self):
+        super().check()
+        now = time.monotonic()
+        if now >= self.session_deadline:
+            raise RuntimeError('Local session deadline exceeded')
+        if self.step_deadline is not None and now >= self.step_deadline:
+            raise RuntimeError('Local session step timeout (10 seconds)')
+
+
+class CheckedInput:
+    """Keep feedback and cancellation checks active inside Console's motion loop."""
+
+    def __init__(self, source, cancellation, guard):
+        self.source, self.cancellation, self.guard = source, cancellation, guard
+
+    def poll(self):
+        self.cancellation.check()
+        self.guard.check()
+        return self.source.poll()
+
+
+class SessionBook(TeachingBook):
+    """Use local-session labels, never the legacy teaching book's P01 field names."""
+
+    def record(self, name, pose, stamp, observation):
+        if not name.startswith('LOCAL_') or name in self.data['points']:
+            raise ValueError('Use a new LOCAL_ record label')
+        row = dict(
+            pose=asdict(pose),
+            relative_to_session=local_delta(self.origin, pose),
+            odom_stamp_ns=stamp,
+            recorded=time.time(),
+            laser=observation,
+        )
+        self.data.update(reference='LOCAL_SESSION_START', historical_p01=False, resumable=False)
+        self.data['points'][name] = row
+        temporary = self.path.with_suffix('.json.tmp')
+        temporary.write_text(json.dumps(self.data, indent=2, allow_nan=False) + '\n')
+        temporary.replace(self.path)
+        return row
+
+
+def arguments(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--step-distance', type=float, required=True)
+    parser.add_argument('--speed', type=float, default=0.01)
+    parser.add_argument('--max-seconds', type=float, default=600)
+    parser.add_argument('--odom-publisher-gid', required=True)
+    parser.add_argument('--raw-odom-publisher-gid', required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--supervised-manual', action='store_true', required=True)
+    args = parser.parse_args(argv)
+    for value, low, high, label in (
+        (args.step_distance, 0, 0.05, 'Step distance'),
+        (args.speed, 0.01, 0.03, 'Speed'),
+        (args.max_seconds, 1, 1800, 'Session seconds'),
+    ):
+        if not math.isfinite(value) or not low <= value <= high or value == 0:
+            parser.error(f'{label} must be finite in {low}..{high}, nonzero')
+    return args
+
+
+def record_stop(console, guard, label):
+    before = guard.check()
+    observation = console.measure()
+    after = guard.check()
+    if not near_record(before, after):
+        raise RuntimeError('Pose changed while recording local stop')
+    point = console.book.record(label, after, console.runner.stamp, observation)
+    console.emit('record', name=label, point=point)
+    return after
+
+
+def near_record(before, after):
+    delta = local_delta(before, after)
+    return math.hypot(delta['x_m'], delta['y_m']) <= 0.005 and abs(
+        delta['yaw_deg']
+    ) <= math.degrees(0.01)
+
+
+def publish_ready(console, guard, permit, cancellation):
+    cancellation.check()
+    actual = guard.check()
+    token = permit.ready()
+    console.emit(
+        'session_ready',
+        session_id=console.book.data['session_id'],
+        next_index=permit.index,
+        ready_token=token,
+        anchor=asdict(guard.anchor),
+        actual=asdict(actual),
+        odom_stamp_ns=console.runner.stamp,
+        cmd_publishers=0,
+    )
+    print(f'READY {permit.index}: step {token} | quit', flush=True)
+
+
+def run_step(console, guard, permit, cancellation, distance):
+    cancellation.step_deadline = time.monotonic() + 10
+    cancellation.check()
+    motion, actual = guard.begin_step(distance)
+    data = dict(
+        index=permit.index, session_id=console.book.data['session_id'], anchor=asdict(guard.anchor)
+    )
+    console.emit('step_started', **data, actual_start=asdict(actual), motion=asdict(motion))
+    console.move(motion, reconnect=False, use_path_length=True)
+    cancellation.check()
+    actual = guard.finish_step(cancellation)
+    if not path_ready(guard.anchor, actual, motion.points, 0.0):
+        raise RuntimeError('Local step endpoint failed fixed-reference acceptance')
+    actual = record_stop(console, guard, f'LOCAL_STEP_{permit.index:04d}')
+    cancellation.check()
+    if not path_ready(guard.anchor, actual, motion.points, 0.0):
+        raise RuntimeError('Local step endpoint changed during record')
+    console.emit('step_completed', **data, actual=asdict(actual))
+    permit.finish()
+    cancellation.step_deadline = None
+
+
+def command_loop(console, guard, permit, cancellation, distance):
+    publish_ready(console, guard, permit, cancellation)
+    while True:
+        console.runner.pump()
+        present, line = console.inputs.poll()
+        if not present:
+            continue
+        if line is None or line in ('quit', 'stop'):
+            return
+        if not permit.take(line):
+            console.emit('command_rejected', reason='Expected current one-use READY token')
+            continue
+        run_step(console, guard, permit, cancellation, distance)
+        # Discard queued commands before advertising a new unpredictable permit.
+        while True:
+            present, line = console.inputs.poll()
+            if not present:
+                break
+            if line is None or line in ('quit', 'stop'):
+                return
+            console.emit('command_rejected', reason='Queued command discarded; no automatic next')
+        publish_ready(console, guard, permit, cancellation)
+
+
+def execute(args, audit):
+    runner = SessionRunner(args.speed)
+    cancellation = SessionCancellation(runner, args.max_seconds)
+    handlers = {
+        sig: signal.signal(sig, cancellation.request) for sig in (signal.SIGINT, signal.SIGTERM)
+    }
+    guard, book, failure = None, None, None
+    permit = StepPermit()
+    try:
+        runner.exclusive()
+        gids = {
+            ODOM[0]: normalize_gid(args.odom_publisher_gid),
+            ODOM[1]: normalize_gid(args.raw_odom_publisher_gid),
+        }
+        guard = SessionGuard(
+            runner, gids, args.speed, lambda name, **data: emit(audit, name, **data)
+        )
+        anchor = guard.bind_session(cancellation)
+        book = SessionBook(args.output, anchor, 'odom')
+        inputs = CheckedInput(ConsoleInput(), cancellation, guard)
+        console = Console(runner, book, inputs, audit, 0.10, guard)
+        record_stop(console, guard, 'LOCAL_SESSION_START')
+        emit(
+            audit,
+            'session_started',
+            session_id=book.data['session_id'],
+            anchor=asdict(anchor),
+            gids=gids,
+            step_distance_m=args.step_distance,
+            speed_cap_m_s=args.speed,
+            laser_policy='observation_only',
+            supervised_manual=True,
+            operator_supervision_required=True,
+            historical_p01=False,
+            task6_acceptance=False,
+        )
+        command_loop(console, guard, permit, cancellation, args.step_distance)
+    except (Exception, KeyboardInterrupt) as error:
+        failure = error
+    finally:
+        try:
+            try:
+                if guard is not None:
+                    guard.close()
+            finally:
+                close_runner(runner)
+        except (Exception, KeyboardInterrupt) as error:
+            emit(audit, 'cleanup_failed', reason=str(error) or 'Cancelled')
+            failure = failure or error
+        finally:
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
+    session_id = book.data['session_id'] if book is not None else None
+    if failure is not None:
+        emit(audit, 'session_failed', session_id=session_id, reason=str(failure) or 'Cancelled')
+        raise failure
+    emit(audit, 'session_closed', session_id=session_id, completed_steps=permit.index - 1)
+
+
+def main(argv=None):
+    args = arguments(argv)
+    try:
+        args.output = args.output.resolve()
+        if args.output.suffix != '.json' or args.output.exists():
+            raise ValueError('Use a new .json output; local sessions cannot resume')
+        normalize_gid(args.odom_publisher_gid)
+        normalize_gid(args.raw_odom_publisher_gid)
+        with open('/tmp/distance_controller_survey_return.lock', 'a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with args.output.with_suffix('.jsonl').open('x') as audit:
+                execute(args, audit)
+        return 0
+    except (Exception, KeyboardInterrupt) as error:
+        print('STOPPED:', str(error) or 'Cancelled', flush=True)
+        return 2
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
