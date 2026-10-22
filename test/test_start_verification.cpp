@@ -138,6 +138,7 @@ TEST(StartAdjustment, FrozenOdomTargetTracksRotatedBodyWithNormCapAndZeroArrival
   EXPECT_TRUE(done.arrived);
   EXPECT_DOUBLE_EQ(done.vx, 0);
   EXPECT_DOUBLE_EQ(done.vy, 0);
+  EXPECT_DOUBLE_EQ(done.wz, 0);
 }
 
 TEST(StartAdjustment, FaultBoundsAlwaysReturnZero)
@@ -157,6 +158,7 @@ TEST(StartAdjustment, FaultBoundsAlwaysReturnZero)
     EXPECT_FALSE(result.arrived);
     EXPECT_DOUBLE_EQ(result.vx, 0);
     EXPECT_DOUBLE_EQ(result.vy, 0);
+    EXPECT_DOUBLE_EQ(result.wz, 0);
   }
 }
 
@@ -170,4 +172,55 @@ TEST(StartAdjustment, SmallOvershootReversesWithinTheSameFrozenBoundedTarget)
   EXPECT_NEAR(result.vx, .0014, 1e-12);
   EXPECT_DOUBLE_EQ(result.vy, 0.0);
   EXPECT_DOUBLE_EQ(step.dx, -.009);
+}
+
+TEST(StartAdjustment, HeadingHoldUsesFrozenAnchorAndShortestSignedRotation)
+{
+  const double pi = 3.141592653589793;
+  for (const double anchor : {0.0, pi - .001, -pi + .001}) {
+    const distance_controller::StartCorrection step{1, 2, anchor, .009, 0, "odom", "base_link"};
+    for (const double drift : {-.004, 0.0, .004}) {
+      const auto result = distance_controller::correction_feedback(
+        step, 1, 2, std::remainder(anchor + drift, 2 * pi), 0, .008726646, 1, .02);
+      ASSERT_FALSE(result.fault);
+      EXPECT_NEAR(result.wz, -1.8 * drift, 1e-12);
+      EXPECT_LE(std::abs(result.wz), .02);
+      EXPECT_DOUBLE_EQ(step.yaw, anchor);
+      EXPECT_DOUBLE_EQ(step.dx, .009);
+    }
+  }
+}
+
+TEST(StartAdjustment, HeadingHoldSuppressesSmallConstantYawBiasWithoutMovingTheTarget)
+{
+  const distance_controller::StartCorrection step{0, 0, 0, -.009, 0, "odom", "base_link"};
+  for (const double bias : {-.0015, .0015}) {
+    double x = 0, y = 0, yaw = bias > 0 ? .003 : -.003;
+    bool arrived = false;
+    for (int tick = 0; tick <= 200; ++tick) {
+      const auto result = distance_controller::correction_feedback(
+        step, x, y, yaw, yaw, .008726646, tick * .02, .008);
+      ASSERT_FALSE(result.fault);
+      ASSERT_LE(std::abs(yaw), .005);
+      EXPECT_LE(std::hypot(result.vx, result.vy), .008000001);
+      EXPECT_LE(std::abs(result.wz), .02);
+      if (result.arrived) {
+        EXPECT_DOUBLE_EQ(result.vx, 0);
+        EXPECT_DOUBLE_EQ(result.vy, 0);
+        EXPECT_DOUBLE_EQ(result.wz, 0);
+        arrived = true;
+        break;
+      }
+      x += (std::cos(yaw) * result.vx - std::sin(yaw) * result.vy) * .02;
+      y += (std::sin(yaw) * result.vx + std::cos(yaw) * result.vy) * .02;
+      yaw += (result.wz + bias) * .02;
+    }
+    EXPECT_TRUE(arrived);
+    EXPECT_LT(std::abs(yaw), .0012);
+    EXPECT_NEAR(x, -.009, .0005);
+    EXPECT_NEAR(y, 0, 1e-12);
+    EXPECT_DOUBLE_EQ(step.dx, -.009);
+    EXPECT_DOUBLE_EQ(step.dy, 0);
+    EXPECT_DOUBLE_EQ(step.yaw, 0);
+  }
 }

@@ -50,7 +50,7 @@ class Room:
         self.samples.append(dict(t=time.monotonic(), pose=self.pose[:], command=self.velocity[:]))
         if self.active:
             assert math.hypot(*self.velocity[:2]) <= 0.008000001, self.velocity
-            assert abs(self.velocity[2]) < 1e-9, self.velocity
+            assert abs(self.velocity[2]) <= 0.020000001, self.velocity
 
     def log_state(self, now):
         text = (self.output / 'runtime.log').read_text()
@@ -72,9 +72,14 @@ class Room:
             c, s = math.cos(self.pose[2]), math.sin(self.pose[2])
             self.pose[0] += (c * self.velocity[0] - s * self.velocity[1]) * dt
             self.pose[1] += (s * self.velocity[0] + c * self.velocity[1]) * dt
-            self.pose[2] += self.velocity[2] * dt
+            disturbance = 0.0015 if self.mode == 'heading_hold_positive' else -0.0015
+            if not self.active or not self.mode.startswith('heading_hold_'):
+                disturbance = 0.0
+            self.pose[2] += (self.velocity[2] + disturbance) * dt
         if self.correction_start is not None and not self.injected:
-            if self.mode == 'heading':
+            if self.mode.startswith('heading_hold_'):
+                self.pose[2] += 0.003 if self.mode.endswith('positive') else -0.003
+            elif self.mode == 'heading':
                 self.pose[2] += 0.006
             elif self.mode == 'cross_track':
                 self.pose[1] += 0.0035
@@ -227,6 +232,16 @@ def verify(room, code, text):
             assert suffix.index('START_VERIFY: stopped hold') < suffix.index('START_VERIFIED:')
             assert len(steps) == 2 and [int(a) for a, _, _ in steps] == [1, 2]
             assert abs(room.pose[0] + 0.014) < 0.0006  # New median goal, not old -0.010 target.
+        if room.mode.startswith('heading_hold_'):
+            start = room.correction_start
+            stop = room.stop_start
+            active = [s for s in room.samples if start <= s['t'] < stop]
+            assert active and max(abs(s['pose'][2]) for s in active) <= 0.005
+            assert max(abs(s['command'][2]) for s in active) > 0.002
+            sign = 1 if room.mode.endswith('positive') else -1
+            assert any(sign * s['command'][2] < -0.002 for s in active)
+            assert abs(active[-1]['pose'][2]) < 0.0012, active[-1]
+            assert 'START_CORRECTION_HEADING' not in text
         if room.mode == 'post_stop':
             assert time.monotonic() - room.stop_start > 1.8
     assert room.samples and sum(abs(v) for v in room.velocity) < 1e-9

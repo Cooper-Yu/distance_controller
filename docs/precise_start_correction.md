@@ -34,7 +34,10 @@ in-tolerance frame without performing the required adjustment.
    measurements cannot rewrite or prematurely complete this target.
 5. **Feedback tracking:** P gain 2/s on current odom target error; body velocity norm
    is capped by the minimum of 0.008 m/s, configured centering speed and max speed.
-   Angular command is zero. Fault on more than 4 s, more than 1.2 cm actual odom
+   Hold the frozen step-entry yaw with `wz = clamp(1.8 * wrap(anchor_yaw - yaw),`
+   `-0.02, 0.02)` rad/s. Within the unchanged 0.005 rad yaw-change bound, this
+   produces at most 0.009 rad/s. It does not move the yaw reference or XY target.
+   Fault on more than 4 s, more than 1.2 cm actual odom
    displacement, more than 3 mm cross-track displacement, more than 0.005 rad
    yaw change from the frozen anchor, or violation of the original heading tolerance.
    Nonfinite feedback, invalid plans or missing required wall-heading evidence fault.
@@ -82,7 +85,7 @@ ctest --test-dir build/distance_controller --output-on-failure \
 python3 src/distance_controller/test/verify_precise_correction.py single_frame
 ```
 
-Other fixture modes: `reverse`, `dual`, `post_stop`, `scan_gap`, `odom_gap`,
+Other fixture modes: `heading_hold_positive`, `heading_hold_negative`, `reverse`, `dual`, `post_stop`, `scan_gap`, `odom_gap`,
 `freeze`, `heading`, `cross_track`, `travel`, `unstable`, `stop_velocity`, `oversized`,
 `odom_frame`, `odom_stamp`, `attempt_limit`, `stage_deadline`, `total_deadline`.
 The deadline cases use the real WallRunner preparation adapter with shorter test-only
@@ -125,3 +128,33 @@ lines with at most two nested control levels; this is a tool-version limitation,
 not a claimed clean clang-tidy run. Existing verification remains one stopped
 evidence transition (about 65 lines); its responsibility was reviewed without
 splitting its stop/hold/sample ordering merely to satisfy the size heuristic.
+
+### 2026-10-22 heading-hold correction
+
+The real run first exceeded the unchanged 0.005 rad step-entry yaw-change guard.
+The small translation previously published no angular correction. It now publishes
+bounded negative feedback toward that same frozen yaw, without rewriting either
+translation target or any fault limit. Arrival and every fault still return all
+three velocity components as zero. This does not claim to fix the later adapter
+scan-timeout masking of the first fault.
+
+Fresh Humble build and five targeted CTest targets passed: 13 start-verification,
+10 route and 5 wall GTests, plus route-session and route-return regressions.
+The two new ROS fixtures inject +/-0.003 rad initial yaw and a sustained
++/-0.0015 rad/s disturbance while executing the actual C++ node. Their maximum
+yaw stayed below 0.003077 rad; final yaw magnitudes were below 0.000937 rad.
+Actual nonzero angular commands opposed the injected drift, with maximum magnitude
+below 0.005537 rad/s. Both retained the -8.927 mm / zero-cross-track frozen target,
+passed fresh stopped verification, commanded zero last, and released the publisher.
+Original `heading`, `cross_track`, `travel`, `freeze` faults and `single_frame`
+normal behavior also passed with zero/released output. Unit cases cover zero and
+both signed yaw errors, +/-pi wrapping, unchanged faults, constant disturbance
+rejection and target immutability.
+
+Affected files pass clang-format, Ruff and diff checks. Clang-tidy23 reports no
+new-file diagnostics, but retains generated ROS function-size and existing
+`start_diagnostics.hpp` constant-name warnings. Whole-workspace cached
+flake8/uncrustify/xmllint results are not claimed as a clean lint pass.
+Runtime evidence: the training-note `code_lab/runtime_logs/` directory
+`task6_precise_heading_20261022_1205/summary.json` and seven captured fixture folders.
+These are synthetic local tests, not real-robot acceptance.

@@ -38,10 +38,12 @@ struct StartCorrectionFeedback
 {
   const char * fault{nullptr};
   bool arrived{false};
-  double vx{}, vy{};
+  double vx{}, vy{}, wz{};
 };
 
 /// Evaluate one fresh-feedback tick without changing clocks, budgets or the frozen step.
+/// Hold the step-entry heading with gentle P feedback; the original 0.005 rad fault remains.
+/// Gain 1.8 gives at most 0.009 rad/s within that accepted range, below the 0.02 hard cap.
 inline StartCorrectionFeedback correction_feedback(
   const StartCorrection & step, double x, double y, double yaw, double heading_error,
   double heading_tolerance, double elapsed, double cap)
@@ -68,6 +70,7 @@ inline StartCorrectionFeedback correction_feedback(
   const double scale = std::min(2.0, std::min(cap, .008) / std::hypot(ex, ey));
   return {
     nullptr, false, scale * (std::cos(yaw) * ex + std::sin(yaw) * ey),
-    scale * (-std::sin(yaw) * ex + std::cos(yaw) * ey)};
+    scale * (-std::sin(yaw) * ex + std::cos(yaw) * ey),
+    std::clamp(1.8 * std::remainder(step.yaw - yaw, 2 * 3.141592653589793), -.02, .02)};
 }
 }  // namespace distance_controller
