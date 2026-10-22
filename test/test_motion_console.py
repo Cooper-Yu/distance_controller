@@ -84,11 +84,15 @@ class MotionConsoleTest(unittest.TestCase):
         runner = SimpleNamespace(velocity_pub=object(), cancel_requested=False)
         runner.send = commands.append
         runner.node = SimpleNamespace(destroy_publisher=lambda _publisher: None)
-        runner.ros = SimpleNamespace(
-            spin_once=lambda *_args, **_kwargs: setattr(runner, 'cancel_requested', True)
-        )
+        clock = [0.0]
+
+        def spin(*_args, **_kwargs):
+            runner.cancel_requested = True
+            clock[0] = 2.0
+
+        runner.ros = SimpleNamespace(spin_once=spin)
         console = Console(runner, None, None, None, 0.1)
-        with patch('motion_console.time.monotonic', side_effect=[0, 0, 2]):
+        with patch('motion_console.time.monotonic', side_effect=lambda: clock[0]):
             console.stop_motion()
         self.assertTrue(runner.cancel_requested)
         self.assertIsNone(runner.velocity_pub)

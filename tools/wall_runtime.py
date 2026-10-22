@@ -495,9 +495,14 @@ class WallRunner(PlannedRunner):
             return
         try:
             deadline = time.monotonic() + 1
-            while time.monotonic() < deadline:
-                self.send((0.0, 0.0, 0.0))
-                self.ros.spin_once(self.node, timeout_sec=0.05)
+            next_due = 0.0
+            while (now := time.monotonic()) < deadline:
+                if now >= next_due:
+                    self.send((0.0, 0.0, 0.0))
+                    # Ready callbacks return immediately; spin_once is not a rate limiter.
+                    next_due = time.monotonic() + 0.05
+                remaining = max(0.0, min(next_due, deadline) - time.monotonic())
+                self.ros.spin_once(self.node, timeout_sec=remaining)
         finally:
             self.node.destroy_publisher(self.velocity_pub)
             self.velocity_pub = None

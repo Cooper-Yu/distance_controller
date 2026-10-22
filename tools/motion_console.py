@@ -290,9 +290,14 @@ class Console:
             return
         try:
             deadline = time.monotonic() + 1.0
-            while time.monotonic() < deadline:
-                r.send((0.0, 0.0, 0.0))
-                r.ros.spin_once(r.node, timeout_sec=0.05)
+            next_due = 0.0
+            while (now := time.monotonic()) < deadline:
+                if now >= next_due:
+                    r.send((0.0, 0.0, 0.0))
+                    # Ready callbacks return immediately; spin_once is not a rate limiter.
+                    next_due = time.monotonic() + 0.05
+                remaining = max(0.0, min(next_due, deadline) - time.monotonic())
+                r.ros.spin_once(r.node, timeout_sec=remaining)
         finally:
             r.node.destroy_publisher(r.velocity_pub)
             r.velocity_pub = None
