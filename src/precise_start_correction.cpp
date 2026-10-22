@@ -64,12 +64,15 @@ bool DistanceController::handle_precise_correction()
     std::min(max_speed_, centering_max_speed_));
   if (feedback.fault) {
     fail_preparation(feedback.fault, receipt);
-  } else if (feedback.arrived) {
+  } else if (feedback.arrived || feedback.remeasure) {
     publish_stop();
     precision_correction_.reset();
     precision_samples_.clear();
     precision_stationary_ = precision_collecting_ = false;
-    RCLCPP_INFO(get_logger(), "START_CORRECTION_STOP: odom residual<=0.0005 m; not P01 acceptance");
+    RCLCPP_INFO(
+      get_logger(),
+      "START_CORRECTION_STOP: reason=%s; not P01 acceptance; fresh stopped batch required",
+      feedback.remeasure ? "early_brake_at_half_step_max_2.5mm" : "odom_residual_within_0.5mm");
     // Start the unchanged 5-second stopped-hold/measurement budget after commanding zero.
     verify_precise_start();
   } else {

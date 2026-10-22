@@ -136,6 +136,7 @@ TEST(StartAdjustment, FrozenOdomTargetTracksRotatedBodyWithNormCapAndZeroArrival
   const auto done =
     distance_controller::correction_feedback(step, 1, 1.9912, half_pi, 0, .008726646, 2, .008);
   EXPECT_TRUE(done.arrived);
+  EXPECT_FALSE(done.remeasure);
   EXPECT_DOUBLE_EQ(done.vx, 0);
   EXPECT_DOUBLE_EQ(done.vy, 0);
   EXPECT_DOUBLE_EQ(done.wz, 0);
@@ -156,20 +157,23 @@ TEST(StartAdjustment, FaultBoundsAlwaysReturnZero)
       step, value[0], value[1], value[2], value[3], .008726646, value[4], .008);
     EXPECT_TRUE(result.fault);
     EXPECT_FALSE(result.arrived);
+    EXPECT_FALSE(result.remeasure);
     EXPECT_DOUBLE_EQ(result.vx, 0);
     EXPECT_DOUBLE_EQ(result.vy, 0);
     EXPECT_DOUBLE_EQ(result.wz, 0);
   }
 }
 
-TEST(StartAdjustment, SmallOvershootReversesWithinTheSameFrozenBoundedTarget)
+TEST(StartAdjustment, SmallOvershootStopsForRemeasurementInsteadOfReversing)
 {
   const distance_controller::StartCorrection step{0, 0, 0, -.009, 0, "odom", "base_link"};
   const auto result =
     distance_controller::correction_feedback(step, -.0097, 0, 0, 0, .008726646, 2, .008);
   EXPECT_FALSE(result.fault);
   EXPECT_FALSE(result.arrived);
-  EXPECT_NEAR(result.vx, .0014, 1e-12);
+  EXPECT_TRUE(result.remeasure);
+  EXPECT_DOUBLE_EQ(result.vx, 0.0);
+  EXPECT_DOUBLE_EQ(result.wz, 0.0);
   EXPECT_DOUBLE_EQ(result.vy, 0.0);
   EXPECT_DOUBLE_EQ(step.dx, -.009);
 }
@@ -204,7 +208,7 @@ TEST(StartAdjustment, HeadingHoldSuppressesSmallConstantYawBiasWithoutMovingTheT
       ASSERT_LE(std::abs(yaw), .005);
       EXPECT_LE(std::hypot(result.vx, result.vy), .004000001);
       EXPECT_LE(std::abs(result.wz), .02);
-      if (result.arrived) {
+      if (result.arrived || result.remeasure) {
         EXPECT_DOUBLE_EQ(result.vx, 0);
         EXPECT_DOUBLE_EQ(result.vy, 0);
         EXPECT_DOUBLE_EQ(result.wz, 0);
@@ -216,8 +220,8 @@ TEST(StartAdjustment, HeadingHoldSuppressesSmallConstantYawBiasWithoutMovingTheT
       yaw += (result.wz + bias) * .02;
     }
     EXPECT_TRUE(arrived);
-    EXPECT_LT(std::abs(yaw), .0012);
-    EXPECT_NEAR(x, -.009, .0005);
+    EXPECT_LT(std::abs(yaw), .003);
+    EXPECT_NEAR(x, -.0025, .00008);
     EXPECT_NEAR(y, 0, 1e-12);
     EXPECT_DOUBLE_EQ(step.dx, -.009);
     EXPECT_DOUBLE_EQ(step.dy, 0);
@@ -244,7 +248,7 @@ TEST(StartAdjustment, ThreeRefinementsResolveObservedLateralErrorAtReducedSpeed)
           distance_controller::correction_feedback(step, x, y, 0, 0, .008726646, tick * .02, .008);
         ASSERT_FALSE(feedback.fault);
         EXPECT_LE(std::hypot(feedback.vx, feedback.vy), .004000000001);
-        if (feedback.arrived) {
+        if (feedback.arrived || feedback.remeasure) {
           EXPECT_DOUBLE_EQ(feedback.vx, 0);
           EXPECT_DOUBLE_EQ(feedback.vy, 0);
           EXPECT_DOUBLE_EQ(feedback.wz, 0);
@@ -255,13 +259,84 @@ TEST(StartAdjustment, ThreeRefinementsResolveObservedLateralErrorAtReducedSpeed)
         y += feedback.vy * .02;
       }
       ASSERT_TRUE(arrived);
+      EXPECT_NEAR(std::hypot(x - step.x, y - step.y), .0025, .00008);
       EXPECT_DOUBLE_EQ(step.dx, (*delta)[0]);
       EXPECT_DOUBLE_EQ(step.dy, (*delta)[1]);
       ++attempts;
     }
-    EXPECT_GT(attempts, 0u);
+    EXPECT_EQ(attempts, 2u);
     EXPECT_LE(attempts, 3u);
     EXPECT_LE(std::abs(sign * .009501 + y), .005);
     EXPECT_DOUBLE_EQ(x, 0);
   }
+}
+
+TEST(StartAdjustment, SignedForwardBackwardAndDiagonalBrakeAtProjectedThreshold)
+{
+  const double diagonal = std::sqrt(.5);
+  for (const std::array<double, 2> direction :
+       {std::array<double, 2>{1, 0}, {-1, 0}, {diagonal, diagonal}, {-diagonal, -diagonal}}) {
+    for (const double length : {.005, .002}) {
+      const double threshold = std::min(.0025, length * .5);
+      const distance_controller::StartCorrection step{
+        1, 2, .3, length * direction[0], length * direction[1], "odom", "base_link"};
+      const auto before = distance_controller::correction_feedback(
+        step, 1 + (threshold - .00001) * direction[0], 2 + (threshold - .00001) * direction[1], .3,
+        0, .008726646, .5, .008);
+      ASSERT_FALSE(before.fault);
+      EXPECT_FALSE(before.arrived);
+      EXPECT_FALSE(before.remeasure);
+      EXPECT_GT(std::hypot(before.vx, before.vy), 0);
+      const auto brake = distance_controller::correction_feedback(
+        step, 1 + (threshold + .00001) * direction[0], 2 + (threshold + .00001) * direction[1],
+        .302, 0, .008726646, 1, .008);
+      ASSERT_FALSE(brake.fault);
+      EXPECT_FALSE(brake.arrived);
+      EXPECT_TRUE(brake.remeasure);
+      EXPECT_DOUBLE_EQ(brake.vx, 0);
+      EXPECT_DOUBLE_EQ(brake.vy, 0);
+      EXPECT_DOUBLE_EQ(brake.wz, 0);
+      EXPECT_DOUBLE_EQ(step.dx, length * direction[0]);
+      EXPECT_DOUBLE_EQ(step.dy, length * direction[1]);
+    }
+  }
+}
+
+TEST(StartAdjustment, FaultGuardsTakePriorityAfterEarlyBrakeThreshold)
+{
+  const distance_controller::StartCorrection step{0, 0, 0, .005, 0, "odom", "base_link"};
+  const std::array<std::array<double, 5>, 6> cases{
+    {{.003, 0, 0, 0, 4.01},
+     {.013, 0, 0, 0, 1},
+     {.003, .0031, 0, 0, 1},
+     {.003, 0, .0051, 0, 1},
+     {.003, 0, 0, .009, 1},
+     {.003, 0, std::numeric_limits<double>::quiet_NaN(), 0, 1}}};
+  for (const auto & value : cases) {
+    const auto result = distance_controller::correction_feedback(
+      step, value[0], value[1], value[2], value[3], .008726646, value[4], .008);
+    EXPECT_TRUE(result.fault);
+    EXPECT_FALSE(result.arrived);
+    EXPECT_FALSE(result.remeasure);
+    EXPECT_DOUBLE_EQ(result.vx, 0);
+    EXPECT_DOUBLE_EQ(result.vy, 0);
+    EXPECT_DOUBLE_EQ(result.wz, 0);
+  }
+}
+
+TEST(StartAdjustment, FieldPoseSampleRequestsZeroAndFreshMeasurementBeforeTargetArrival)
+{
+  // Recorded filtered-odom sample; this does not model mechanical coast or filter latency.
+  const distance_controller::StartCorrection step{.390251, 2.026792, -1.557447,  .004999,
+                                                  .000067, "odom",   "base_link"};
+  const double x = .393780, y = 2.028174, yaw = -1.55493;
+  EXPECT_GT(std::hypot(step.x + step.dx - x, step.y + step.dy - y), .0005);
+  const auto result =
+    distance_controller::correction_feedback(step, x, y, yaw, yaw - step.yaw, .008726646, 3, .008);
+  ASSERT_FALSE(result.fault);
+  EXPECT_FALSE(result.arrived);
+  EXPECT_TRUE(result.remeasure);
+  EXPECT_DOUBLE_EQ(result.vx, 0);
+  EXPECT_DOUBLE_EQ(result.vy, 0);
+  EXPECT_DOUBLE_EQ(result.wz, 0);
 }

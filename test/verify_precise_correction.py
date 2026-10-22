@@ -68,7 +68,10 @@ class Room:
     def feedback_pose(self, now):
         dt = min(now - self.last_tick, 0.03)
         self.last_tick = now
-        if self.mode != 'freeze' or self.correction_start is None:
+        if (
+            self.mode not in ('freeze', 'stage_deadline', 'total_deadline')
+            or self.correction_start is None
+        ):
             c, s = math.cos(self.pose[2]), math.sin(self.pose[2])
             self.pose[0] += (c * self.velocity[0] - s * self.velocity[1]) * dt
             self.pose[1] += (s * self.velocity[0] + c * self.velocity[1]) * dt
@@ -76,6 +79,12 @@ class Room:
             if not self.active or not self.mode.startswith('heading_hold_'):
                 disturbance = 0.0
             self.pose[2] += (self.velocity[2] + disturbance) * dt
+        if self.mode == 'early_brake_coast' and self.stop_start is not None:
+            # Deterministic post-zero motion; a fresh stopped batch must observe it.
+            done = getattr(self, 'coast_done', 0.0)
+            delta = min(max(0.0, 0.007 - done), 0.0175 * dt)
+            self.pose[0] -= delta
+            self.coast_done = done + delta
         if self.correction_start is not None and not self.injected:
             if self.mode.startswith('heading_hold_'):
                 self.pose[2] += 0.003 if self.mode.endswith('positive') else -0.003
@@ -111,6 +120,9 @@ class Room:
             message.twist.twist.linear.x = 0.004
         if self.stop_start is not None and self.mode == 'post_stop' and now - self.stop_start < 0.4:
             message.twist.twist.linear.x = 0.004
+        if self.mode == 'early_brake_coast' and self.stop_start is not None:
+            if getattr(self, 'coast_done', 0.0) < 0.007:
+                message.twist.twist.linear.x = -0.0175
         self.odom.publish(message)
 
     def distances(self, now):
@@ -242,6 +254,13 @@ def verify(room, code, text):
             assert any(sign * s['command'][2] < -0.002 for s in active)
             assert abs(active[-1]['pose'][2]) < 0.0012, active[-1]
             assert 'START_CORRECTION_HEADING' not in text
+        if room.mode == 'early_brake_coast':
+            assert 'reason=early_brake_at_half_step_max_2.5mm' in text
+            assert room.coast_done >= 0.006999
+            active = [s for s in room.samples if room.correction_start <= s['t'] < room.stop_start]
+            assert active and abs(active[-1]['pose'][0]) < 0.0035, active[-1]
+            assert time.monotonic() - room.stop_start > 2.0
+            assert abs(0.28892674018 + room.pose[0] - 0.28) <= 0.005
         if room.mode == 'post_stop':
             assert time.monotonic() - room.stop_start > 1.8
     assert room.samples and sum(abs(v) for v in room.velocity) < 1e-9

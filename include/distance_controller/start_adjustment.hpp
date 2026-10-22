@@ -39,6 +39,7 @@ struct StartCorrectionFeedback
   const char * fault{nullptr};
   bool arrived{false};
   double vx{}, vy{}, wz{};
+  bool remeasure{false};
 };
 
 /// Evaluate one fresh-feedback tick without changing clocks, budgets or the frozen step.
@@ -67,6 +68,10 @@ inline StartCorrectionFeedback correction_feedback(
     return {"START_CORRECTION_CROSS_TRACK"};
   const double ex = step.dx - moved_x, ey = step.dy - moved_y;
   if (std::hypot(ex, ey) <= .0005) return {nullptr, true};
+  // A tiny command can produce a delayed wheel-speed burst on the real base.
+  // Release motion early; only a new stopped laser batch may accept P01 or plan another step.
+  const double along = (moved_x * step.dx + moved_y * step.dy) / length;
+  if (along >= std::min(.0025, .5 * length)) return {nullptr, false, 0.0, 0.0, 0.0, true};
   const double scale = std::min(2.0, std::min(cap, .004) / std::hypot(ex, ey));
   return {
     nullptr, false, scale * (std::cos(yaw) * ex + std::sin(yaw) * ey),
