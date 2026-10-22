@@ -134,6 +134,60 @@ class ScanWindow:
         )
 
 
+class PauseDisplacement:
+    """Bound old-anchor displacement without commanding from an extrapolated pose.
+
+    Triangle bound: pre-zero travel <= bounded linear speed * source-time gap;
+    allow at most another 4cm of displacement. Original turn-center checks remain
+    independent. Never grow the pre-zero interval after the zero command.
+    """
+
+    def __init__(self, anchors, zero_ns, max_speed, requested_speed, owned):
+        if not math.isfinite(max_speed) or not 0 < max_speed <= 0.12:
+            raise RuntimeError('Invalid pause linear speed bound')
+        self.anchors, self.zero_ns = anchors, zero_ns
+        self.bounds, self.latest = {}, {}
+        for topic, anchor in anchors.items():
+            if anchor is None:
+                continue
+            age = (zero_ns - anchor['stamp']) / 1e9
+            if not -0.1 <= age <= 0.5:
+                raise RuntimeError(f'{topic}: pause anchor outside active feedback age limit')
+            observed = math.hypot(*anchor['values'][7:9])
+            speed = min(max_speed, max(observed, requested_speed)) if owned else 0.0
+            self.bounds[topic] = dict(
+                stamp_ns=anchor['stamp'],
+                x=anchor['x'],
+                y=anchor['y'],
+                source_age_s=age,
+                pre_zero_speed_bound_mps=speed,
+                post_zero_allowance_m=0.04,
+                maximum_total_bound_m=0.04 + speed * max(0.0, age),
+            )
+
+    def check(self, topic, sample):
+        anchor = self.anchors.get(topic)
+        if anchor is None or sample is None:
+            return
+        if sample['stamp'] < anchor['stamp']:
+            raise RuntimeError(f'{topic}: pause feedback timestamp moved backward')
+        pre_seconds = max(0, min(self.zero_ns, sample['stamp']) - anchor['stamp']) / 1e9
+        allowance = pre_seconds * self.bounds[topic]['pre_zero_speed_bound_mps']
+        distance = math.hypot(sample['x'] - anchor['x'], sample['y'] - anchor['y'])
+        limit = 0.04 + allowance
+        self.latest[topic] = dict(
+            source_stamp_ns=sample['stamp'],
+            displacement_m=distance,
+            pre_zero_allowance_m=allowance,
+            total_bound_m=limit,
+        )
+        if distance > limit:
+            raise RuntimeError(
+                f'{topic}: feedback pause drift exceeded 4 cm after timestamp allowance '
+                f'(displacement={distance:.4f}, pre_zero_allowance={allowance:.4f})'
+            )
+
+
 class RouteFeedbackPause:
     """No epoch rebase, target change, command replay, or motion while feedback is old."""
 
@@ -300,10 +354,15 @@ class RouteFeedbackPause:
             topic: dict(source.sample) if source.sample is not None else None
             for topic, source in self.sources.items()
         }
+        requested_speed = (
+            math.hypot(*r.guarded_command[0][:2]) if r.guarded_command is not None else 0.0
+        )
         if owned:
             r.send((0.0, 0.0, 0.0))
         elif r.guarded_command is None or any(r.guarded_command[0]):
             raise RuntimeError('Feedback pause requires confirmed prior zero command')
+        started_ros_ns = self.ros_ns()
+        drift = PauseDisplacement(anchors, started_ros_ns, r.max_speed, requested_speed, owned)
         self.pause_id += 1
         self.emit(
             'feedback_pause_started',
@@ -311,6 +370,8 @@ class RouteFeedbackPause:
             budget_s=budget,
             owns_publisher=owned,
             reason='required source freshness/TF expired',
+            zero_stamp_ns=started_ros_ns,
+            displacement_anchors=drift.bounds,
         )
         self.active = True
         next_zero = started + 0.05
@@ -323,13 +384,7 @@ class RouteFeedbackPause:
                 self.cancel()
                 self.check_faults()
                 for topic, source in self.sources.items():
-                    anchor, sample = anchors[topic], source.sample
-                    if (
-                        anchor is not None
-                        and sample is not None
-                        and math.hypot(sample['x'] - anchor['x'], sample['y'] - anchor['y']) > 0.04
-                    ):
-                        raise RuntimeError(f'{topic}: feedback pause drift exceeded 4 cm')
+                    drift.check(topic, source.sample)
                 now, ros_ns = time.monotonic(), self.ros_ns()
                 if (
                     self.ready()
@@ -346,6 +401,7 @@ class RouteFeedbackPause:
                         pause_id=self.pause_id,
                         elapsed_s=now - started,
                         cumulative_s=self.used,
+                        displacement_checks=drift.latest,
                     )
                     return True
             raise RuntimeError('Feedback pause timeout; route canceled')

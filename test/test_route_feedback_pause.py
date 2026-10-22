@@ -1,5 +1,6 @@
 """Pure epoch and bounded recovery tests; no ROS installation or hardware needed."""
 
+import math
 from pathlib import Path
 import sys
 from types import SimpleNamespace as Namespace
@@ -7,7 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from route_feedback_pause import OdomEpoch, RouteFeedbackPause, ScanWindow
+from route_feedback_pause import OdomEpoch, RouteFeedbackPause, PauseDisplacement, ScanWindow
 
 
 def odom(stamp, x=0.0, speed=0.0, frame='odom'):
@@ -77,6 +78,76 @@ class EpochTests(unittest.TestCase):
         self.assertFalse(source.recovered(10, 11.2, int(11.2e9)))
 
 
+class PauseDisplacementTests(unittest.TestCase):
+    def field_source(self, stamp, x, y, speed):
+        source = OdomEpoch()
+        msg = odom(stamp, x=x, speed=speed)
+        msg.pose.pose.position.y = y
+        source.receive(msg, 10)
+        return source.sample
+
+    def test_real_raw_and_filtered_delayed_positions_fit_bounded_pre_zero_travel(self):
+        zero_ns = 10_000_000_000
+        anchors = dict(
+            raw=self.field_source(9.728, -1.6769, 0.8112, 0.1200),
+            filtered=self.field_source(9.648, -1.9341, 0.2955, 0.1220),
+        )
+        guard = PauseDisplacement(anchors, zero_ns, 0.12, 0.12, True)
+        raw = self.field_source(10.368, -1.7113, 0.7646, 0.0088)
+        filtered = self.field_source(10.408, -1.8631, 0.2969, 0.0019)
+        self.assertGreater(
+            math.hypot(raw['x'] - anchors['raw']['x'], raw['y'] - anchors['raw']['y']), 0.04
+        )
+        guard.check('raw', raw)
+        guard.check('filtered', filtered)
+        self.assertAlmostEqual(guard.latest['raw']['pre_zero_allowance_m'], 0.03264)
+        self.assertAlmostEqual(guard.latest['filtered']['pre_zero_allowance_m'], 0.04224)
+        frozen = dict(guard.bounds['raw'])
+        raw['stamp'] += 4_000_000_000
+        guard.check('raw', raw)
+        self.assertEqual(guard.bounds['raw'], frozen)
+        self.assertAlmostEqual(guard.latest['raw']['pre_zero_allowance_m'], 0.03264)
+
+    def test_queued_pre_zero_frames_only_get_their_source_interval(self):
+        source = self.field_source(9.7, 0, 0, 0.12)
+        guard = PauseDisplacement({'raw': source}, 10_000_000_000, 0.12, 0.12, True)
+        frame = self.field_source(9.8, 0.05, 0, 0.12)
+        guard.check('raw', frame)
+        self.assertAlmostEqual(guard.latest['raw']['pre_zero_allowance_m'], 0.012)
+        frame['x'] = 0.053
+        with self.assertRaisesRegex(RuntimeError, 'drift exceeded 4 cm'):
+            guard.check('raw', frame)
+
+    def test_post_zero_excess_and_fresh_anchor_still_fail(self):
+        for stamp, x in ((9.7, 0.077), (10.0, 0.041)):
+            source = self.field_source(stamp, 0, 0, 0.12)
+            guard = PauseDisplacement({'raw': source}, 10_000_000_000, 0.12, 0.12, True)
+            with self.assertRaisesRegex(RuntimeError, 'drift exceeded 4 cm'):
+                guard.check('raw', self.field_source(10.4, x, 0, 0))
+
+    def test_known_stationary_or_released_owner_gets_no_extra_allowance(self):
+        for owned, speed in ((True, 0), (False, 0.12)):
+            source = self.field_source(9.7, 0, 0, speed)
+            guard = PauseDisplacement({'raw': source}, 10_000_000_000, 0.12, 0, owned)
+            with self.assertRaisesRegex(RuntimeError, 'drift exceeded 4 cm'):
+                guard.check('raw', self.field_source(10.4, 0.041, 0, 0))
+
+    def test_invalid_anchor_or_config_cannot_expand_bound(self):
+        source = self.field_source(9.49, 0, 0, 0.12)
+        with self.assertRaisesRegex(RuntimeError, 'outside active feedback age'):
+            PauseDisplacement({'raw': source}, 10_000_000_000, 0.12, 0.12, True)
+        for speed in (0.13, -1, float('nan')):
+            with self.assertRaisesRegex(RuntimeError, 'speed bound'):
+                PauseDisplacement({}, 10_000_000_000, speed, 0.12, True)
+
+    def test_original_turn_center_guard_is_unchanged(self):
+        from action_plan import Pose
+        from motion_model import Motion, feedback
+
+        with self.assertRaisesRegex(RuntimeError, 'Turn center drift'):
+            feedback(Pose(0, 0, 0), Pose(0.041, 0, 0), Motion('turn', angle=1.57), 0.12, 0.2)
+
+
 class RecoveryTests(unittest.TestCase):
     def make_pause(self, *, raw_returns=True, owned=True):
         clock = [10.0]
@@ -86,6 +157,7 @@ class RecoveryTests(unittest.TestCase):
         commands, events = [], []
         pause.runner = Namespace(
             velocity_pub=object() if owned else None,
+            max_speed=0.04,
             guarded_command=((0.0, 0.0, 0.0), 0.0),
             send=lambda command: commands.append((clock[0], command)),
         )

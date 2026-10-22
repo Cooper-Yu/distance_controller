@@ -34,7 +34,9 @@ def main():  # noqa: PLR0912, PLR0915 - ordered fixture fault modes and cleanup
     from sensor_msgs.msg import LaserScan
     from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
-    runner = WallRunner(0.04)
+    case = sys.argv[1] if len(sys.argv) > 1 else 'identity'
+    lagged_motion = case in ('lagged_motion', 'drift_excess')
+    runner = WallRunner(0.12 if lagged_motion else 0.04)
     runner.observation_scan_timeout = 1.0  # Same post-preparation route policy.
     producer = Node('feedback_pause_fixture')
     topics = ('/rosbot_xl_base_controller/odom', '/odometry/filtered')
@@ -62,7 +64,7 @@ def main():  # noqa: PLR0912, PLR0915 - ordered fixture fault modes and cleanup
     transform.transform.rotation.w = 1.0
     transform.header.stamp = producer.get_clock().now().to_msg()
     tf.sendTransform(transform)
-    mode = dict(until=0.0, scan_until=0.0, forever=False, replace=False, cancel_at=None)
+    mode = dict(until=0.0, scan_until=0.0, forever=False, replace=False, cancel_at=None, offset=0.0)
 
     def tick():
         now = time.monotonic()
@@ -77,6 +79,7 @@ def main():  # noqa: PLR0912, PLR0915 - ordered fixture fault modes and cleanup
             odom = Odometry()
             odom.header.stamp, odom.header.frame_id = stamp, 'odom'
             odom.child_frame_id, odom.pose.pose.orientation.w = 'base_link', 1.0
+            odom.pose.pose.position.x = mode['offset']
             for pub in pubs:
                 pub.publish(odom)
         scan = LaserScan()
@@ -98,14 +101,43 @@ def main():  # noqa: PLR0912, PLR0915 - ordered fixture fault modes and cleanup
         pause = RouteFeedbackPause(runner, emit, lambda: None)
         runner.feedback_pause = pause
         runner.velocity_pub = runner.node.create_publisher(Twist, '/cmd_vel', 10)
-        runner.send((0.01, 0.0, 0.0))
+        runner.send((0.12 if lagged_motion else 0.01, 0.0, 0.0))
         runner.pump()
         scan_only = len(sys.argv) > 1 and sys.argv[1] == 'scan'
-        mode['scan_until' if scan_only else 'until'] = time.monotonic() + 0.9
+        if lagged_motion:
+            deadline = time.monotonic() + 0.3
+            while runner.guarded_command is None or runner.guarded_command[0][0] != 0.12:
+                assert time.monotonic() < deadline
+                runner.pump()
+            mode.update(
+                until=time.monotonic() + 0.9, offset=0.11 if case == 'drift_excess' else 0.06
+            )
+        else:
+            mode['scan_until' if scan_only else 'until'] = time.monotonic() + 0.9
         deadline = time.monotonic() + 3
-        while pause.generation == 0 and time.monotonic() < deadline:
-            runner.pump()
+        try:
+            while pause.generation == 0 and time.monotonic() < deadline:
+                runner.pump()
+        except RuntimeError as error:
+            if case != 'drift_excess':
+                raise
+            assert 'drift exceeded 4 cm after timestamp allowance' in str(error), error
+            assert not any(name == 'feedback_pause_completed' for _, name, _ in events)
+            print('PASS real ROS excess displacement: zero hold and terminal rejection')
+            return 0
+        assert case != 'drift_excess', 'Excess drift accepted'
         assert pause.generation == 1, events
+        if lagged_motion:
+            proof = next(
+                data['displacement_checks']
+                for _, name, data in events
+                if name == 'feedback_pause_completed'
+            )
+            assert all(
+                row['displacement_m'] > 0.04 and row['total_bound_m'] > 0.07
+                for row in proof.values()
+            ), proof
+            print('PASS real ROS delayed old-anchor 6cm displacement: bounded recovery')
         started = next(t for t, name, _ in events if name == 'feedback_pause_started')
         completed = next(t for t, name, _ in events if name == 'feedback_pause_completed')
         assert completed - started >= 0.3
@@ -127,7 +159,7 @@ def main():  # noqa: PLR0912, PLR0915 - ordered fixture fault modes and cleanup
         )
 
         # Each fault mode gets its own process/epoch and synthetic owner.
-        fault = sys.argv[1] if len(sys.argv) > 1 and not scan_only else 'identity'
+        fault = case if not scan_only and not lagged_motion else 'identity'
         assert fault in ('identity', 'timeout', 'cancel')
         if fault == 'identity':
             mode['replace'] = True
