@@ -61,3 +61,4 @@ all eight modes above passed against the installed ROS executable. Evidence is
 changed C++ files, `ruff check test/verify_initial_feedback_pause.py`, Python
 compilation, and `git diff --check` passed. The coordinator owns full build and
 package CTest evidence; real hardware was not connected.
+精细初始化的15帧联合一致性策略见 [start_joint_consensus.md](start_joint_consensus.md)；最终5mm/0.5deg标准不变。

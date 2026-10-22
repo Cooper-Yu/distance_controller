@@ -69,7 +69,7 @@ TEST(StartDiagnostics, CountsBlockingEpisodesAndDiscardedSamplesNotEveryTimerTic
 TEST(StartDiagnostics, RemembersActualUnstableBatchWithoutChangingSummary)
 {
   std::vector<StartSample> samples(15, {.26, .28, 0});
-  samples.back()[0] += .010408;
+  for (unsigned i = 0; i < 4; ++i) samples[i][0] += .010408;
   const auto summary = summarize_start(samples);
   distance_controller::StartDiagnostics d;
   d.observe_batch(summary);
@@ -364,4 +364,109 @@ TEST(StartAdjustment, StepHeadingUsesFinalHalfDegreeLimitAndRespectsTighterConfi
   const auto global = distance_controller::correction_feedback(
     step, step.x, step.y, step.yaw, .009, .008726646, 1, .008);
   EXPECT_STREQ(global.fault, "START_CORRECTION_HEADING");
+}
+
+TEST(StartVerification, TightJointMajoritySurvivesUpToThreeModerateSpikes)
+{
+  std::vector<StartSample> samples(15, {.26, .28, 0});
+  samples[0] = {.272, .28, 0};
+  samples[1] = {.248, .28, 0};
+  samples[2] = {.26, .293, 0};
+  const auto summary = summarize_start(samples);
+  EXPECT_TRUE(summary.stable);
+  EXPECT_EQ(summary.retained, 15u);
+  EXPECT_EQ(summary.consensus, 12u);
+  EXPECT_GT(summary.spread[0], .01);
+  EXPECT_GT(summary.spread[1], .01);
+  EXPECT_DOUBLE_EQ(summary.consensus_spread[0], 0.0);
+  EXPECT_DOUBLE_EQ(summary.median[0], .26);
+  EXPECT_DOUBLE_EQ(summary.median[1], .28);
+}
+
+TEST(StartVerification, FourConflictingFramesCannotBeDiscarded)
+{
+  std::vector<StartSample> samples(15, {.26, .28, 0});
+  for (unsigned i = 0; i < 4; ++i) samples[i][1] += .012;
+  const auto summary = summarize_start(samples);
+  EXPECT_FALSE(summary.stable);
+  EXPECT_EQ(summary.consensus, 0u);
+  EXPECT_DOUBLE_EQ(summary.consensus_spread[0], 0.0);
+}
+
+TEST(StartVerification, SeparateAxisMajoritiesAreNotJointEvidence)
+{
+  std::vector<StartSample> samples(15, {.26, .28, 0});
+  for (unsigned i = 0; i < 3; ++i) samples[i][0] += .015;
+  for (unsigned i = 3; i < 6; ++i) samples[i][1] += .015;
+  for (unsigned i = 6; i < 9; ++i) samples[i][2] += .034;
+  EXPECT_FALSE(summarize_start(samples).stable);
+}
+
+TEST(StartVerification, ConsensusNeverChangesFullBatchMedianOrTargetTolerance)
+{
+  std::vector<StartSample> samples(15, {.268, .289, .015});
+  samples[0][0] += .012;
+  samples[1][1] += .012;
+  samples[2][0] -= .012;
+  const auto summary = summarize_start(samples);
+  ASSERT_TRUE(summary.stable);
+  EXPECT_DOUBLE_EQ(summary.median[0], .268);
+  EXPECT_DOUBLE_EQ(summary.median[1], .289);
+  EXPECT_DOUBLE_EQ(summary.median[2], .015);
+  EXPECT_GT(std::abs(summary.median[0] - .26), .005);
+  EXPECT_GT(std::abs(summary.median[1] - .28), .005);
+  EXPECT_GT(std::abs(summary.median[2]), .008726646);
+  EXPECT_TRUE(distance_controller::start_adjustment(summary, .26, .28, .005).has_value());
+}
+
+TEST(StartVerification, CoarseDiscardedFramesStillConsumeTheThreeFrameAllowance)
+{
+  std::vector<StartSample> samples(15, {.26, .28, 0});
+  samples[0][0] += .05;
+  samples[1][0] += .05;
+  samples[2][1] += .012;
+  EXPECT_TRUE(summarize_start(samples).stable);
+  samples[3][1] += .012;
+  EXPECT_FALSE(summarize_start(samples).stable);
+}
+
+TEST(StartVerification, JointConsensusAcceptanceIsIndependentOfSampleOrder)
+{
+  std::vector<StartSample> samples(15, {.26, .28, 0});
+  samples[0][0] += .012;
+  samples[1][1] += .013;
+  samples[2][0] -= .012;
+  const auto baseline = summarize_start(samples);
+  ASSERT_TRUE(baseline.stable);
+  for (unsigned i = 0; i < samples.size(); ++i) {
+    std::rotate(samples.begin(), samples.begin() + 1, samples.end());
+    const auto summary = summarize_start(samples);
+    EXPECT_TRUE(summary.stable);
+    EXPECT_EQ(summary.median, baseline.median);
+    EXPECT_EQ(summary.spread, baseline.spread);
+  }
+}
+
+TEST(StartVerification, ConsensusDoesNotRelaxDistanceOrAngleSpreadThresholds)
+{
+  for (unsigned axis = 0; axis < 3; ++axis) {
+    const double limit = axis == 2 ? .034906585 : .01;
+    std::vector<StartSample> samples(15, {0, 0, 0});
+    for (unsigned i = 0; i < 3; ++i) samples[i][axis] = 1.;
+    samples[3][axis] = limit;
+    EXPECT_TRUE(summarize_start(samples).stable);
+    samples[3][axis] += .000001;
+    EXPECT_FALSE(summarize_start(samples).stable);
+  }
+}
+
+TEST(StartVerification, NonfiniteAndModerateOutliersShareTheSameEvidenceBudget)
+{
+  std::vector<StartSample> samples(15, {.26, .28, 0});
+  samples[0][0] = std::numeric_limits<double>::quiet_NaN();
+  samples[1][0] = std::numeric_limits<double>::infinity();
+  samples[2][1] += .012;
+  EXPECT_TRUE(summarize_start(samples).stable);
+  samples[3][1] += .012;
+  EXPECT_FALSE(summarize_start(samples).stable);
 }

@@ -83,9 +83,11 @@ void DistanceController::finish_precise_batch(const distance_controller::StartSu
     RCLCPP_INFO(
       get_logger(),
       "START_VERIFY: retained=%u/15 stable=%s right=%.6f rear=%.6f angle=%.6f "
-      "spread_right=%.6f spread_rear=%.6f spread_angle=%.6f",
+      "spread_right=%.6f spread_rear=%.6f spread_angle=%.6f "
+      "consensus=%u/15 consensus_right=%.6f consensus_rear=%.6f consensus_angle=%.6f",
       summary.retained, summary.stable ? "true" : "false", summary.median[0], summary.median[1],
-      summary.median[2], summary.spread[0], summary.spread[1], summary.spread[2]);
+      summary.median[2], summary.spread[0], summary.spread[1], summary.spread[2], summary.consensus,
+      summary.consensus_spread[0], summary.consensus_spread[1], summary.consensus_spread[2]);
   }
   if (!summary.stable) return;  // Remain stopped; never move based on an unstable batch.
   const bool distances_ok =
@@ -159,7 +161,9 @@ void DistanceController::log_precise_diagnostics(
   RCLCPP_INFO(
     get_logger(),
     "START_DIAGNOSTIC_LAST_BATCH: phase=%s cycle=%u retained=%u/15 stable=%s "
-    "right=%.6f rear=%.6f angle=%.6f spread_right=%.6f spread_rear=%.6f spread_angle=%.6f",
+    "right=%.6f rear=%.6f angle=%.6f spread_right=%.6f spread_rear=%.6f spread_angle=%.6f "
+    "consensus=%u/15 consensus_right=%.6f consensus_rear=%.6f consensus_angle=%.6f",
     phase, precision_diagnostic_cycle_, b.retained, b.stable ? "true" : "false", b.median[0],
-    b.median[1], b.median[2], b.spread[0], b.spread[1], b.spread[2]);
+    b.median[1], b.median[2], b.spread[0], b.spread[1], b.spread[2], b.consensus,
+    b.consensus_spread[0], b.consensus_spread[1], b.consensus_spread[2]);
 }
