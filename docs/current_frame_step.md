@@ -26,7 +26,7 @@ plus 1 cm, accumulated travel may not exceed distance plus 2 cm, and heading dri
 may not exceed 0.035 rad while the explicitly supervised manual step is running.
 Strict dry-run retains 0.01 rad; first-command stopped-pose checks and final Console
 heading acceptance are unchanged. These are additional local bounds, not an
-absolute positioning accuracy claim. The motion budget is 10 monotonic seconds;
+absolute positioning accuracy claim. The motion budget is 15 monotonic seconds;
 existing final stopped-pose checks and cancellation remain active.
 
 Both current odometry GIDs are explicit inputs. Both streams must use `odom` /
@@ -95,3 +95,11 @@ allowed and +/-0.036 rejected, plus strict/pre-first 0.011 refusal. Real install
 ROS tests `/tmp/current_step_heading035_20261022/` verified injected +0.036 rad
 fails with final zero, pub0 and lock release; strict dry-run still publishes no
 commands. No real-robot qualification of this revised bound is claimed.
+
+The per-step deadline uses shared "MANUAL_STEP_BUDGET_S = 15.0". It starts
+just before single-step Console execution (or session begin_step), after initial
+attachment and LOCAL_START capture. It includes Console ownership/discovery
+checks, movement, any bounded final correction, stopped holds and final records.
+Neither a correction nor the session READY wait resets it. Emergency zero and
+publisher cleanup still complete even if the deadline has elapsed. The session
+total deadline and all distance, yaw, speed, scan/odom/TF limits are unchanged.

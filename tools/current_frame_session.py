@@ -17,6 +17,7 @@ from current_frame_session_runtime import (
     SessionRunner,
     StepPermit,
 )
+from current_frame_step_runtime import MANUAL_STEP_BUDGET_S
 from motion_console import Console, ConsoleInput, TeachingBook
 from motion_model import local_delta
 from route_prefix_return_plan import ODOM
@@ -26,7 +27,7 @@ from teaching_path import path_ready
 
 
 class SessionCancellation(Cancellation):
-    """The session deadline never resets; each requested step also has ten seconds."""
+    """The session deadline never resets; each requested step has one shared bounded budget."""
 
     def __init__(self, runner, seconds):
         super().__init__(runner)
@@ -39,7 +40,7 @@ class SessionCancellation(Cancellation):
         if now >= self.session_deadline:
             raise RuntimeError('Local session deadline exceeded')
         if self.step_deadline is not None and now >= self.step_deadline:
-            raise RuntimeError('Local session step timeout (10 seconds)')
+            raise RuntimeError(f'Local session step timeout ({MANUAL_STEP_BUDGET_S:g} seconds)')
 
 
 class CheckedInput:
@@ -137,7 +138,7 @@ def publish_ready(console, guard, permit, cancellation, actual=None, recovered=(
 
 
 def run_step(console, guard, permit, cancellation, distance):
-    cancellation.step_deadline = time.monotonic() + 10
+    cancellation.step_deadline = time.monotonic() + MANUAL_STEP_BUDGET_S
     cancellation.check()
     motion, actual = guard.begin_step(distance)
     data = dict(

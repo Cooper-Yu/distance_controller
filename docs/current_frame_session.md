@@ -61,7 +61,7 @@ step budget.
 
 Limits are deliberately not enlarged for a longer return:
 
-- Speed .01–.03 m/s, angular command cap .10 rad/s, ten monotonic seconds per
+- Speed .01–.03 m/s, angular command cap .10 rad/s, 15 monotonic seconds per
   requested step including stopped verification/recording.
 - Entry lateral error <=1 cm and heading error <=1 degree relative to the fixed
   session axes; final endpoint uses the existing **2-D distance <5 mm**, and
@@ -155,3 +155,11 @@ stale/TF/identity/pose/ACTIVE failures, scan chronology/frame changes, the fixed
 two-second deadline, duplicate scans, reset counts, token revocation, discarded
 requests and recovery without movement. Isolated ROS evidence is recorded
 separately; pure tests do not certify sensor timing or real-robot operation.
+
+The per-step deadline uses shared "MANUAL_STEP_BUDGET_S = 15.0". It starts
+just before single-step Console execution (or session begin_step), after initial
+attachment and LOCAL_START capture. It includes Console ownership/discovery
+checks, movement, any bounded final correction, stopped holds and final records.
+Neither a correction nor the session READY wait resets it. Emergency zero and
+publisher cleanup still complete even if the deadline has elapsed. The session
+total deadline and all distance, yaw, speed, scan/odom/TF limits are unchanged.

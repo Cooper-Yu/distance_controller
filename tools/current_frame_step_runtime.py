@@ -9,6 +9,10 @@ from route_prefix_return_plan import ODOM, odom_record, stopped
 from route_session_state import near
 
 
+# Total per-step wall time, including ownership checks, settling and final records.
+MANUAL_STEP_BUDGET_S = 15.0
+
+
 class CurrentEpochGuard:
     """Bind current publishers; explicit manual mode observes laser without certifying free space."""
 

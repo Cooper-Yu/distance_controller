@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from action_plan import Pose
 from current_frame_step import arguments, StepCancellation, move_once
-from current_frame_step_runtime import CurrentEpochGuard
+from current_frame_step_runtime import MANUAL_STEP_BUDGET_S, CurrentEpochGuard
 from route_laser_guard import GuardDecision
 
 
@@ -76,8 +76,11 @@ class StepTest(unittest.TestCase):
 
     def test_timeout_latches_without_waiting_input(self):
         cancellation = StepCancellation(Mock())
-        cancellation.deadline = 10
-        with patch('current_frame_step.time.monotonic', return_value=10):
+        self.assertEqual(MANUAL_STEP_BUDGET_S, 15.0)
+        cancellation.deadline = 100 + MANUAL_STEP_BUDGET_S
+        with patch('current_frame_step.time.monotonic', return_value=114.999):
+            cancellation.check()
+        with patch('current_frame_step.time.monotonic', return_value=115):
             with self.assertRaisesRegex(RuntimeError, 'timeout'):
                 cancellation.poll()
 
@@ -116,6 +119,34 @@ class StepTest(unittest.TestCase):
         runner.moving_pose.return_value = Pose(0.001, 0, 0)
         with self.assertRaises(RuntimeError):
             guard.check_filtered()
+
+    def test_total_budget_is_armed_before_console_ownership_and_not_at_first_velocity(self):
+        args = SimpleNamespace(
+            output=Path('/tmp/not_created.json'),
+            distance=0.05,
+            speed=0.03,
+            strict_dry_run=False,
+            supervised_manual=True,
+        )
+        runner, guard = Mock(), Mock()
+        guard.gids = {}
+        guard.bind_stopped.return_value = Pose(0, 0, 0)
+        guard.laser.assess.return_value = (GuardDecision((0, 0, 0), 'unknown', 'missing'), None)
+        cancel = StepCancellation(runner)
+
+        def entering_console(_motion):
+            self.assertEqual(cancel.deadline, 115)
+            raise RuntimeError('fixture ends before motion')
+
+        with (
+            patch('current_frame_step.TeachingBook'),
+            patch('current_frame_step.Console') as console,
+        ):
+            console.return_value.move.side_effect = entering_console
+            with patch('current_frame_step.time.monotonic', return_value=100):
+                with self.assertRaisesRegex(RuntimeError, 'fixture ends'):
+                    move_once(args, runner, guard, cancel, io.StringIO())
+        self.assertEqual(cancel.deadline, 115)
 
     def test_strict_dryrun_unknown_never_calls_move_or_names_p01(self):
         args = SimpleNamespace(

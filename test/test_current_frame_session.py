@@ -27,6 +27,7 @@ from current_frame_session_runtime import (
     backward_path,
     continuous,
 )
+from current_frame_step_runtime import MANUAL_STEP_BUDGET_S
 from route_prefix_return_plan import ODOM
 from teaching_path import PathTracker, path_ready
 
@@ -223,8 +224,10 @@ class ProtocolTest(unittest.TestCase):
     def test_total_deadline_not_reset_when_step_deadline_cleared(self):
         with patch('current_frame_session.time.monotonic', return_value=100):
             cancel = SessionCancellation(Mock(), 20)
-            cancel.step_deadline = 110
-        with patch('current_frame_session.time.monotonic', return_value=110):
+            cancel.step_deadline = 100 + MANUAL_STEP_BUDGET_S
+        with patch('current_frame_session.time.monotonic', return_value=114.999):
+            cancel.check()
+        with patch('current_frame_session.time.monotonic', return_value=115):
             with self.assertRaisesRegex(RuntimeError, 'step timeout'):
                 cancel.check()
             cancel.step_deadline = None
@@ -273,11 +276,12 @@ class ProtocolTest(unittest.TestCase):
         console, guard, cancel, permit = Mock(), Mock(), Mock(), StepPermit()
         permit.take('step ' + permit.ready())
         guard.begin_step.side_effect = RuntimeError('epoch')
-        with self.assertRaisesRegex(RuntimeError, 'epoch'):
-            run_step(console, guard, permit, cancel, 0.03)
+        with patch('current_frame_session.time.monotonic', return_value=100):
+            with self.assertRaisesRegex(RuntimeError, 'epoch'):
+                run_step(console, guard, permit, cancel, 0.03)
         self.assertTrue(permit.active)
         self.assertEqual(permit.index, 1)
-        self.assertIsNotNone(cancel.step_deadline)
+        self.assertEqual(cancel.step_deadline, 115)
         console.move.assert_not_called()
 
     def test_book_never_names_or_reloads_p01(self):

@@ -9,7 +9,7 @@ from pathlib import Path
 import signal
 import time
 
-from current_frame_step_runtime import CurrentEpochGuard
+from current_frame_step_runtime import MANUAL_STEP_BUDGET_S, CurrentEpochGuard
 from motion_console import Console, TeachingBook
 from motion_model import Motion
 from route_prefix_return_plan import ODOM
@@ -28,7 +28,7 @@ class StepCancellation(Cancellation):
     def check(self):
         super().check()
         if self.deadline is not None and time.monotonic() >= self.deadline:
-            raise RuntimeError('Current-frame step timeout (10 seconds)')
+            raise RuntimeError(f'Current-frame step timeout ({MANUAL_STEP_BUDGET_S:g} seconds)')
 
 
 def arguments(argv=None):
@@ -88,7 +88,7 @@ def move_once(args, runner, guard, cancellation, audit):
         historical_p01=False,
         task6_acceptance=False,
     )
-    cancellation.deadline = time.monotonic() + 10
+    cancellation.deadline = time.monotonic() + MANUAL_STEP_BUDGET_S
     console.move(Motion('move', x=-args.distance))
     cancellation.check()
     guard.check()
