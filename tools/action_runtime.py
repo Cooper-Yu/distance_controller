@@ -3,7 +3,6 @@
 import math
 import os
 import signal
-import subprocess
 import time
 
 from action_plan import Pose, errors
@@ -28,6 +27,12 @@ class PlannedRunner(Runner):
         self.odom_sub = self.node.create_subscription(
             Odometry, '/odometry/filtered', self.receive_pose, qos_profile_sensor_data
         )
+
+    def start(self, args):
+        """Bind fault evidence to this child lifetime, never a prior controller."""
+        self.owned_fault_observed = False
+        self.owned_fault_child = None
+        super().start(args)
 
     def receive_pose(self, msg):
         """Read odom into a continuous-yaw pose; latch discontinuities, never rebase the route."""
@@ -109,6 +114,8 @@ class PlannedRunner(Runner):
                 continue
             message = self.call('status')
             if parse_status(message).get('state') == 'FAULT':
+                self.owned_fault_observed = True
+                self.owned_fault_child = self.child
                 raise RuntimeError(message)
             fields = parse_status(message)
             prepared = (
@@ -211,24 +218,114 @@ class PlannedRunner(Runner):
         )
         self.wait_exit(65)
 
+    def request_owned_zero(self):
+        """Ask the existing owner to latch zero; never introduce a competing publisher."""
+        if (
+            getattr(self, 'owned_fault_observed', False)
+            and getattr(self, 'owned_fault_child', None) is self.child
+        ):
+            return True  # C++ FAULT paths publish zero before reporting FAULT.
+        try:
+            if self.child.poll() is not None or not self.client.service_is_ready():
+                return False
+            request = self.service.Request()
+            request.action = 'cancel'
+            future = self.client.call_async(request)
+            deadline = time.monotonic() + 0.10
+            while not future.done() and time.monotonic() < deadline:
+                self.ros.spin_once(
+                    self.node, timeout_sec=max(0.0, min(0.01, deadline - time.monotonic()))
+                )
+            return future.done() and future.result() is not None and future.result().accepted
+        except (Exception, KeyboardInterrupt) as error:
+            print('Owned zero request unconfirmed:', error, flush=True)
+            return False
+
+    @staticmethod
+    def owned_group_alive(child):
+        """The Popen child was started in its own session; include surviving descendants."""
+        try:
+            os.killpg(child.pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    def terminate_owned(self, child):
+        """Short bounded escalation; process exit is not proof of physical braking."""
+        for sig, duration in (
+            (signal.SIGINT, 0.15),
+            (signal.SIGTERM, 0.10),
+            (signal.SIGKILL, 0.25),
+        ):
+            if child.poll() is not None and not self.owned_group_alive(child):
+                return
+            try:
+                os.killpg(child.pid, sig)
+            except ProcessLookupError:
+                pass
+            deadline = time.monotonic() + duration
+            while time.monotonic() < deadline:
+                if child.poll() is not None and not self.owned_group_alive(child):
+                    return
+                # Do not call pump(): a latched cancellation must not abort cleanup.
+                self.ros.spin_once(
+                    self.node, timeout_sec=max(0.0, min(0.01, deadline - time.monotonic()))
+                )
+        if child.poll() is None or self.owned_group_alive(child):
+            raise RuntimeError(
+                'Owned controller did not exit after bounded escalation; stop unverified'
+            )
+
+    def wait_command_release(self):
+        """Require a continuous empty graph before creating our stop publisher."""
+        deadline, empty_since = time.monotonic() + 2.0, None
+        while time.monotonic() < deadline:
+            self.ros.spin_once(self.node, timeout_sec=0.01)
+            now = time.monotonic()
+            if self.node.get_publishers_info_by_topic('/cmd_vel'):
+                empty_since = None
+            elif empty_since is None:
+                empty_since = now
+            elif now - empty_since >= 0.10:
+                return
+        raise RuntimeError('Command publisher did not release; no competing zero publisher created')
+
     def stop_owned(self):
-        """On failure/interrupt stop owned children and publish zeros; retain this ROS observer."""
+        """Reap the owned controller, then hand zero output to exactly one parent publisher.
+
+        Unresponsive children are killed within the bounded escalation; this does not
+        certify physical stopping without the base watchdog and fresh feedback checks.
+        """
         if self.child is None:
             return
-        if self.child.poll() is None:
-            os.killpg(self.child.pid, signal.SIGINT)
+        self.owned_zero_acknowledged = self.request_owned_zero()
+        self.terminate_owned(self.child)
+        self.child = None
+        self.wait_command_release()
         self.stop_pub = self.node.create_publisher(self.twist, '/cmd_vel', 10)
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            self.stop_pub.publish(self.twist())
-            self.ros.spin_once(self.node, timeout_sec=0.05)
         try:
-            self.child.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(self.child.pid, signal.SIGKILL)
-            self.child.wait(timeout=5)
-        self.node.destroy_publisher(self.stop_pub)
-        self.stop_pub = None
+            deadline, next_due = time.monotonic() + 1.0, 0.0
+            while (now := time.monotonic()) < deadline:
+                if now >= next_due:
+                    self.stop_pub.publish(self.twist())
+                    next_due = time.monotonic() + 0.05
+                self.ros.spin_once(
+                    self.node, timeout_sec=max(0.0, min(next_due, deadline) - time.monotonic())
+                )
+        finally:
+            self.node.destroy_publisher(self.stop_pub)
+            self.stop_pub = None
+
+    def cleanup_preserving_error(self, original):
+        """A secondary cleanup failure must not erase the first controller fault."""
+        print(
+            'Controller operation failed before cleanup:', str(original) or 'Cancelled', flush=True
+        )
+        try:
+            self.stop_owned()
+        except (Exception, KeyboardInterrupt) as error:
+            original.cleanup_error = str(error) or type(error).__name__
+            print('Secondary owned cleanup failure:', original.cleanup_error, flush=True)
 
     def prepare_start(self):
         """Run existing A-wall preparation once, finish it, then let Session capture its origin."""
@@ -236,6 +333,7 @@ class PlannedRunner(Runner):
             'Preparing start only; the action-session route will be shown after handoff.',
             flush=True,
         )
+        self.owned_fault_observed = False
         try:
             self.start(
                 [
@@ -255,16 +353,15 @@ class PlannedRunner(Runner):
             print(self.wait_idle(90, preparation=True), flush=True)
             self.call('finish')
             self.wait_exit(10)
-        except (Exception, KeyboardInterrupt):
-            self.stop_owned()
-            raise
-        finally:
             self.child = None
-            self.cancel_requested = False
+        except (Exception, KeyboardInterrupt) as error:
+            self.cleanup_preserving_error(error)
+            raise
 
     def execute(self, step, target):
         """Exclusive one-action lifetime; observations and exceptions propagate to Session history."""
         self.child = None
+        self.owned_fault_observed = False
         try:
             self.exclusive()
             self.pose()
@@ -275,9 +372,7 @@ class PlannedRunner(Runner):
                 self.translate_target(target)
             self.pose()
             self.observe('after')
-        except (Exception, KeyboardInterrupt):
-            self.stop_owned()
-            raise
-        finally:
             self.child = None
-            self.cancel_requested = False
+        except (Exception, KeyboardInterrupt) as error:
+            self.cleanup_preserving_error(error)
+            raise
