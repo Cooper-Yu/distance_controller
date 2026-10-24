@@ -125,3 +125,13 @@ if(BUILD_TESTING)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_route_feedback_pause.py)
   set_tests_properties(test_route_feedback_pause PROPERTIES TIMEOUT 45)
 endif()
+
+install(FILES tools/task6_corner_geometry.py tools/task6_corner_runtime.py
+  DESTINATION lib/${PROJECT_NAME})
+if(BUILD_TESTING)
+  add_test(NAME test_task6_corner_geometry
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_task6_corner_geometry.py)
+  add_test(NAME test_task6_corner_runtime
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_task6_corner_runtime.py)
+  set_tests_properties(test_task6_corner_geometry test_task6_corner_runtime PROPERTIES TIMEOUT 30)
+endif()

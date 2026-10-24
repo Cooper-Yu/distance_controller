@@ -2,7 +2,7 @@
 """Scene-2 backend: default log-only route or explicit guarded supervised session."""
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import fcntl
 import json
 import math
@@ -11,6 +11,7 @@ import signal
 import time
 
 from motion_console import Console, ConsoleInput, TeachingBook
+from motion_model import target_pose
 from task6_route_model import reconnect_route, validate_manifest
 from task6_terminal import TERMINAL_NAME, terminal_guard, turn_motion
 from wall_runtime import WallRunner
@@ -40,8 +41,30 @@ def emit(audit, event, **data):
     audit.flush()
 
 
-def run_actions(console, actions, cancellation):
+def make_corner_placement(console, mode):
+    """Activate only the explicitly selected local placement policy."""
+    if mode == 'off':
+        return None
+    if mode not in ('front', 'lidar'):
+        raise ValueError('corner-placement must be off, front or lidar')
+    from task6_corner_geometry import CornerPolicy
+    from task6_corner_runtime import CornerPlacement
+
+    policy = CornerPolicy(0.09, 0.005, 0.02, 0.08, 0.02, 0.20, 0.005, 3, 0.3)
+    console.emit('corner_placement_policy', mode=mode, policy=asdict(policy))
+    return CornerPlacement(
+        console,
+        policy,
+        enabled=True,
+        max_revision_m=0.20,
+        front_sweep_required=(mode == 'lidar'),
+    )
+
+
+def run_actions(console, actions, cancellation, corner_placement='off'):
     """Execute exactly the supplied actions; a failed action aborts the entire route."""
+    placement = make_corner_placement(console, corner_placement)
+    accepted = {}
     after_turn = False
     for index, action in enumerate(actions):
         cancellation.check()
@@ -53,14 +76,35 @@ def run_actions(console, actions, cancellation):
             motion = turn_motion(action, console.book.origin, console.runner.pose())
         else:
             motion = action.path_motion()
-            if after_turn:
+            if after_turn and not (placement and action.name == 'P11' and 'P10' in accepted):
                 adjusted = reconnect_route(motion, console.book.origin, console.runner.pose())
                 console.emit(
                     'post_turn_reconnect', original=asdict(motion), adjusted=asdict(adjusted)
                 )
                 motion = adjusted
         with terminal_guard(console, action):
-            console.move(motion)
+            if placement and (
+                action.name == 'P10' or (corner_placement == 'lidar' and action.name == 'P09')
+            ):
+                if action.name == 'P09':
+                    console.move(motion)
+                nominal = target_pose(console.book.origin, motion)
+                accepted[action.name] = placement.place(action.name, nominal)
+            elif placement and action.name == 'P11' and 'P10' in accepted:
+                from task6_corner_runtime import connector
+
+                direct = replace(motion, points=(motion.points[0], motion.points[-1]))
+                motion = connector(
+                    direct,
+                    console.book.origin,
+                    accepted['P10'],
+                    console.runner.pose(),
+                    max_revision_m=0.20,
+                )
+                console.emit('corner_connector_plan', motion=asdict(motion))
+                console.move(motion)
+            else:
+                console.move(motion)
         cancellation.check()
         console.record(action.name)
         console.emit('route_action_completed', index=index, name=action.name)
@@ -91,9 +135,14 @@ def prepare_and_run(
     cancellation,
     supervised=False,
     start_position_tolerance=0.005,
+    corner_placement='off',
 ):
     # Validate direct callers as well as the CLI; no movement precedes this check.
     tolerance = validated_start_position_tolerance(start_position_tolerance)
+    if corner_placement not in ('off', 'front', 'lidar') or (
+        supervised and corner_placement != 'off'
+    ):
+        raise ValueError('Corner placement requires the non-supervised scene-2 session')
     runner.prepare_options += [
         '-p',
         'positioning_wall:=right',
@@ -141,7 +190,7 @@ def prepare_and_run(
 
         console.command_guard = RouteLaserGuard(runner, console.emit)
         return run_supervised(console, actions, cancellation, ConsoleInput())
-    run_actions(console, actions, cancellation)
+    run_actions(console, actions, cancellation, corner_placement)
 
 
 def close_runner(runner):
@@ -158,12 +207,16 @@ def close_runner(runner):
 
 def session(args, path, audit, actions):
     supervised = getattr(args, 'supervised', False)
+    corner = getattr(args, 'corner_placement', 'off')
+    if corner not in ('off', 'front', 'lidar') or (supervised and corner != 'off'):
+        raise ValueError('Invalid corner placement combination')
     tolerance = validated_start_position_tolerance(getattr(args, 'start_position_tolerance', 0.005))
     emit(
         audit,
         'route_started',
         scene=2,
         frame='P01',
+        corner_placement=corner,
         laser_policy='enforced' if getattr(args, 'supervised', False) else 'observation_only',
         implementation=(
             'supervised_experimental'
@@ -204,6 +257,7 @@ def session(args, path, audit, actions):
                     args.turn_speed,
                     cancellation,
                     start_position_tolerance=tolerance,
+                    corner_placement=corner,
                 )
         finally:
             close_runner(runner)
@@ -243,12 +297,15 @@ def arguments(argv=None):
         default=0.005,
         help='Precise-start position gate in metres, .005 through .010 inclusive',
     )
+    parser.add_argument('--corner-placement', choices=('off', 'front', 'lidar'), default='off')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args(argv)
     if not math.isfinite(args.speed) or not 0.01 <= args.speed <= 0.12:
         parser.error('speed must be .01-.12 m/s')
     if not math.isfinite(args.turn_speed) or not 0.02 <= args.turn_speed <= 0.60:
         parser.error('turn-speed must be .02-.60 rad/s')
+    if args.supervised and args.corner_placement != 'off':
+        parser.error('corner-placement lidar cannot be combined with supervised mode')
     return args
 
 
