@@ -234,6 +234,38 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(r.sent[:3], [(0.0, 0.0, 0.0)] * 3)
         self.assertIsNone(r.velocity_pub)
 
+    def test_low_front_sample_waits_zero_then_requires_original_stopped_band(self):
+        r = FakeRunner(front=0.26)
+        original = r.motion_walls
+        count = [0]
+
+        def walls(*args):
+            count[0] += 1
+            if count[0] <= 3:
+                return {'front': SimpleNamespace(gap=0.084)}
+            return original(*args)
+
+        r.motion_walls = walls
+        endpoint = self.run_corner(r, 'P10', Pose(0.08, 0, 0))
+        self.assertEqual(r.sent[:3], [(0.0, 0.0, 0.0)] * 3)
+        self.assertTrue(all(v == (0.0, 0.0, 0.0) for v in r.sent))
+        self.assertGreaterEqual(len(endpoint.scans), 3)
+        self.assertIsNone(r.velocity_pub)
+
+    def test_persistent_below_target_does_not_accept_or_reverse(self):
+        r = FakeRunner(front=0.254)
+        with self.assertRaisesRegex(RuntimeError, 'deadline exhausted'):
+            self.run_corner(r, 'P10', Pose(0.08, 0, 0), budget=2)
+        self.assertTrue(all(v == (0.0, 0.0, 0.0) for v in r.sent))
+        self.assertIsNone(r.velocity_pub)
+
+    def test_front_below_hard_clearance_still_aborts(self):
+        r = FakeRunner(front=0.18)
+        with self.assertRaisesRegex(RuntimeError, 'Front below accepted target'):
+            self.run_corner(r, 'P10', Pose(0.08, 0, 0))
+        self.assertIsNone(r.velocity_pub)
+        self.assertEqual(r.sent[-1], (0.0, 0.0, 0.0))
+
     def test_opt_in_and_connector_keep_fixed_suffix_and_old_turn_gate(self):
         with self.assertRaises(ValueError):
             runtime.CornerPlacement(console(FakeRunner()), policy())

@@ -334,7 +334,21 @@ class CornerPlacement:
             gap = self.runner.motion_walls(['front'], nominal.yaw)['front'].gap
             result = front_command(gap, delta['y_m'], yaw_error, policy=self.policy)
             if result['state'] in ('BLOCKED', 'UNKNOWN'):
-                raise RuntimeError('Corner front geometry ' + result['state'])
+                self.console.emit(
+                    'corner_front_rejected',
+                    geometry=result,
+                    front_gap_m=gap,
+                    cross_error_m=delta['y_m'],
+                    heading_error_rad=yaw_error,
+                )
+                if (
+                    result['reason'] == 'Front below accepted target; no automatic backing'
+                    and gap >= self.policy.clearance_m
+                ):
+                    raise CornerUnknownError('Front below target band; hold zero and remeasure')
+                raise RuntimeError(
+                    'Corner front geometry ' + result['state'] + ': ' + result['reason']
+                )
             vx, vy, wz = result['command']
             c, s = math.cos(yaw_error), math.sin(yaw_error)
             requested = (c * vx - s * vy, s * vx + c * vy, wz)
