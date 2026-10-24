@@ -48,8 +48,16 @@ void DistanceController::configure_centering()
   centering_gain_ = positive("centering_gain", centering_gain_);
   centering_max_speed_ = positive("centering_max_speed", centering_max_speed_);
   centering_tolerance_ = positive("centering_tolerance", centering_tolerance_);
+  const double precise_start_position_tolerance =
+    declare_parameter<double>("precise_start_position_tolerance", 0.005);
+  if (
+    !std::isfinite(precise_start_position_tolerance) || precise_start_position_tolerance < 0.005 ||
+    precise_start_position_tolerance > 0.010) {
+    throw std::invalid_argument(
+      "precise_start_position_tolerance must be finite in [0.005, 0.010]");
+  }
   if (precise_start_) {
-    centering_tolerance_ = std::min(centering_tolerance_, 0.005);
+    centering_tolerance_ = std::min(centering_tolerance_, precise_start_position_tolerance);
     heading_tolerance_ = std::min(heading_tolerance_, 0.008726646);
     centering_max_speed_ = std::min(centering_max_speed_, 0.02);
   }

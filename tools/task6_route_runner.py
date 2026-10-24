@@ -74,7 +74,26 @@ def configure_route_scan_policy(runner, supervised):
     runner.observation_scan_timeout = 0.5 if supervised else 1.0
 
 
-def prepare_and_run(runner, path, audit, actions, turn_speed, cancellation, supervised=False):
+def validated_start_position_tolerance(value):
+    """Validate the bounded precise-start position gate before any runner operation."""
+    value = float(value)
+    if not math.isfinite(value) or not 0.005 <= value <= 0.010:
+        raise ValueError('start-position-tolerance must be finite in [.005, .010] m')
+    return value
+
+
+def prepare_and_run(
+    runner,
+    path,
+    audit,
+    actions,
+    turn_speed,
+    cancellation,
+    supervised=False,
+    start_position_tolerance=0.005,
+):
+    # Validate direct callers as well as the CLI; no movement precedes this check.
+    tolerance = validated_start_position_tolerance(start_position_tolerance)
     runner.prepare_options += [
         '-p',
         'positioning_wall:=right',
@@ -82,10 +101,19 @@ def prepare_and_run(runner, path, audit, actions, turn_speed, cancellation, supe
         'right_target_distance:=0.26',
         '-p',
         'precise_start:=true',
+        '-p',
+        f'precise_start_position_tolerance:={tolerance}',
     ]
     runner.exclusive()
     cancellation.check()
-    emit(audit, 'preparation_started', precise=True, alignment_wall='right', right_target_m=0.26)
+    emit(
+        audit,
+        'preparation_started',
+        precise=True,
+        alignment_wall='right',
+        right_target_m=0.26,
+        precise_start_position_tolerance=tolerance,
+    )
     runner.prepare_start()
     cancellation.check()
     origin = runner.pose()
@@ -130,6 +158,7 @@ def close_runner(runner):
 
 def session(args, path, audit, actions):
     supervised = getattr(args, 'supervised', False)
+    tolerance = validated_start_position_tolerance(getattr(args, 'start_position_tolerance', 0.005))
     emit(
         audit,
         'route_started',
@@ -164,9 +193,18 @@ def session(args, path, audit, actions):
                     min(args.turn_speed, 0.10),
                     cancellation,
                     supervised=True,
+                    start_position_tolerance=tolerance,
                 )
             else:
-                prepare_and_run(runner, path, audit, actions, args.turn_speed, cancellation)
+                prepare_and_run(
+                    runner,
+                    path,
+                    audit,
+                    actions,
+                    args.turn_speed,
+                    cancellation,
+                    start_position_tolerance=tolerance,
+                )
         finally:
             close_runner(runner)
         cancellation.check()
@@ -199,6 +237,12 @@ def arguments(argv=None):
     )
     parser.add_argument('--speed', type=float, default=0.04)
     parser.add_argument('--turn-speed', type=float, default=0.10)
+    parser.add_argument(
+        '--start-position-tolerance',
+        type=validated_start_position_tolerance,
+        default=0.005,
+        help='Precise-start position gate in metres, .005 through .010 inclusive',
+    )
     parser.add_argument('--output', type=Path)
     args = parser.parse_args(argv)
     if not math.isfinite(args.speed) or not 0.01 <= args.speed <= 0.12:
